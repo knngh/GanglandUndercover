@@ -20,5 +20,11 @@ namespace GanglandUndercover.Editor
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(scenePath, true) };
             Selection.activeGameObject = bootstrap;
         }
+
+        [MenuItem("Gangland/Create Prototype Scene", true)]
+        private static bool CanCreatePrototypeScene()
+        {
+            return !EditorApplication.isPlayingOrWillChangePlaymode;
+        }
     }
 }

@@ -12,6 +12,12 @@ namespace GanglandUndercover.Gameplay
                 return true;
             }
 
+            if (state.Cover <= 0)
+            {
+                result = "Gang wins: the undercover cover story collapsed.";
+                return true;
+            }
+
             if (state.GangControlledDistricts >= 4)
             {
                 result = "Gang wins: four districts are under gang control.";

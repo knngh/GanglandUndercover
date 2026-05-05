@@ -29,6 +29,16 @@ namespace GanglandUndercover.Gameplay
                 .OrderByDescending(district => district.PolicePresence - district.GangInfluence)
                 .First();
 
+            if (target.IsLockedDown)
+            {
+                target.SetLockdown(false);
+                target.AddGangInfluence(1);
+                target.AddPolicePresence(-1);
+                state.AddPoliceHeat(1);
+                state.AddLog("AI Gang bribed through a checkpoint in " + target.DisplayName + ".");
+                return;
+            }
+
             if (state.ShipmentProgress < 3 && state.Day % 2 == 0)
             {
                 state.AddShipmentProgress(1);
@@ -48,6 +58,16 @@ namespace GanglandUndercover.Gameplay
             DistrictState target = state.Districts
                 .OrderByDescending(district => district.GangInfluence)
                 .First();
+
+            if (!target.IsLockedDown && state.PoliceHeat >= 5)
+            {
+                target.SetLockdown(true);
+                target.AddGangInfluence(-1);
+                target.AddPolicePresence(1);
+                state.AddPublicTrust(-1);
+                state.AddLog("AI Police locked down " + target.DisplayName + ".");
+                return;
+            }
 
             if (target.HasWitness || state.Day % 2 == 1)
             {

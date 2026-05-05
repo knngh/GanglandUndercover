@@ -1,0 +1,7 @@
+Stage1 vertical slice bake
+Time: 2026-05-04 19:44:20
+Scene: Assets/_Project/Scenes/Stage1VerticalSlice.unity
+Prefab: Assets/_Project/Prefabs/Stage1VerticalSliceWorld.prefab
+World objects: 5872
+Editable anchors: 22
+Removed missing scripts: 6

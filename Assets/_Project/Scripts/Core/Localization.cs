@@ -45,18 +45,24 @@ namespace GanglandUndercover.Core
             { "action.gang_ship.desc", "推进大货运，但会引来警方注意。" },
             { "action.gang_silence.label", "威压证人" },
             { "action.gang_silence.desc", "移除证人并损害民众信任。" },
+            { "action.gang_bribe.label", "买通卡点" },
+            { "action.gang_bribe.desc", "解除封锁并削弱警力。" },
             { "action.police_investigate.label", "调查取证" },
             { "action.police_investigate.desc", "从所选区域收集证据。" },
             { "action.police_raid.label", "突击搜查" },
             { "action.police_raid.desc", "削弱黑帮影响，但会损害民众信任。" },
             { "action.police_protect.label", "保护证人" },
             { "action.police_protect.desc", "保护证人并提高民众信任。" },
+            { "action.police_lockdown.label", "设置卡点" },
+            { "action.police_lockdown.desc", "封锁区域，干扰黑帮转运。" },
             { "action.undercover_cover.label", "维持掩护" },
             { "action.undercover_cover.desc", "表现忠诚，降低怀疑并维持身份。" },
             { "action.undercover_intel.label", "传递情报" },
             { "action.undercover_intel.desc", "获得证据，但提高暴露风险。" },
             { "action.undercover_sabotage.label", "破坏货运" },
-            { "action.undercover_sabotage.desc", "拖慢黑帮货运，但风险很高。" }
+            { "action.undercover_sabotage.desc", "拖慢黑帮货运，但风险很高。" },
+            { "action.undercover_dead_drop.label", "秘密投递" },
+            { "action.undercover_dead_drop.desc", "暗中传递证据，不直接升高警力热度。" }
         };
 
         private static readonly Dictionary<string, string> English = new Dictionary<string, string>
@@ -100,18 +106,24 @@ namespace GanglandUndercover.Core
             { "action.gang_ship.desc", "Advance the major shipment, but increase police attention." },
             { "action.gang_silence.label", "Pressure Witness" },
             { "action.gang_silence.desc", "Remove a witness and damage public trust." },
+            { "action.gang_bribe.label", "Bribe Checkpoint" },
+            { "action.gang_bribe.desc", "Clear lockdown and weaken police presence." },
             { "action.police_investigate.label", "Investigate" },
             { "action.police_investigate.desc", "Collect evidence from the selected district." },
             { "action.police_raid.label", "Raid" },
             { "action.police_raid.desc", "Reduce gang influence, but risk public trust." },
             { "action.police_protect.label", "Protect Witness" },
             { "action.police_protect.desc", "Secure a witness and improve public trust." },
+            { "action.police_lockdown.label", "Set Checkpoint" },
+            { "action.police_lockdown.desc", "Lock down a district to disrupt gang movement." },
             { "action.undercover_cover.label", "Maintain Cover" },
             { "action.undercover_cover.desc", "Act loyal to reduce suspicion and preserve cover." },
             { "action.undercover_intel.label", "Pass Intel" },
             { "action.undercover_intel.desc", "Gain evidence while risking suspicion." },
             { "action.undercover_sabotage.label", "Sabotage Shipment" },
-            { "action.undercover_sabotage.desc", "Slow the gang and risk exposure." }
+            { "action.undercover_sabotage.desc", "Slow the gang and risk exposure." },
+            { "action.undercover_dead_drop.label", "Dead Drop" },
+            { "action.undercover_dead_drop.desc", "Build evidence without open police heat." }
         };
 
         public static string Text(GameLanguage language, string key)

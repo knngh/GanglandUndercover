@@ -16,3 +16,7 @@
 *.pdb
 *.mdb
 *.log
+mono_crash*.json
+
+# Local asset download/cache workspace. Import or mirror needed assets into Assets/.
+[Tt]emp[Aa]ssets/

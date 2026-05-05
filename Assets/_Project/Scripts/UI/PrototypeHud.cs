@@ -74,13 +74,13 @@ namespace GanglandUndercover.UI
             gamePanel.GetComponent<Image>().color = new Color(0.11f, 0.11f, 0.1f, 0f);
 
             districtList = CreateColumn("Districts", gamePanel.transform, new Vector2(0f, 0.1f), new Vector2(0.28f, 1f));
-            actionList = CreateColumn("Actions", gamePanel.transform, new Vector2(0.72f, 0.52f), new Vector2(1f, 1f));
+            actionList = CreateColumn("Actions", gamePanel.transform, new Vector2(0.72f, 0.42f), new Vector2(1f, 1f));
 
             statsText = CreateText("Stats", gamePanel.transform, 16, TextAnchor.UpperLeft);
-            Stretch(statsText.GetComponent<RectTransform>(), new Vector2(0.72f, 0.17f), new Vector2(1f, 0.5f), new Vector2(8f, 8f), new Vector2(-8f, -8f));
+            Stretch(statsText.GetComponent<RectTransform>(), new Vector2(0.72f, 0.12f), new Vector2(1f, 0.4f), new Vector2(8f, 8f), new Vector2(-8f, -8f));
 
             logText = CreateText("Log", gamePanel.transform, 15, TextAnchor.UpperLeft);
-            Stretch(logText.GetComponent<RectTransform>(), new Vector2(0.3f, 0f), new Vector2(1f, 0.16f), new Vector2(8f, 8f), new Vector2(-8f, -8f));
+            Stretch(logText.GetComponent<RectTransform>(), new Vector2(0.3f, 0f), new Vector2(1f, 0.11f), new Vector2(8f, 8f), new Vector2(-8f, -8f));
 
             Button languageButton = CreateButton("Language", gamePanel.transform, 46f);
             languageButton.onClick.AddListener(() => controller.ToggleLanguage());
@@ -158,7 +158,7 @@ namespace GanglandUndercover.UI
             {
                 foreach (PlayerAction action in controller.Actions.GetActionsFor(state.PlayerFaction))
                 {
-                    Button actionButton = CreateButton(LocalizeActionLabel(action), actionList, 92f);
+                    Button actionButton = CreateButton(LocalizeActionLabel(action), actionList, 78f);
                     actionButton.GetComponentInChildren<Text>().text = LocalizeActionLabel(action) + "\n" + LocalizeActionDescription(action);
 
                     PlayerAction captured = action;

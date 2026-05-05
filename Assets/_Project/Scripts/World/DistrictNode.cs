@@ -13,6 +13,7 @@ namespace GanglandUndercover.World
 
         private GameController controller;
         private DistrictState district;
+        private DistrictType districtType;
         private MeshRenderer meshRenderer;
         private TextMesh label;
         private Material material;
@@ -21,6 +22,7 @@ namespace GanglandUndercover.World
         {
             controller = gameController;
             district = districtState;
+            districtType = districtState.Type;
             label = nodeLabel;
             meshRenderer = GetComponent<MeshRenderer>();
             material = CreateMaterial();
@@ -30,11 +32,12 @@ namespace GanglandUndercover.World
 
         public void Refresh()
         {
-            if (district == null || material == null)
+            if (controller == null || material == null)
             {
                 return;
             }
 
+            district = controller.State.GetDistrict(districtType);
             Color controllerColor = GetControllerColor(district.Controller);
             bool isSelected = controller != null && controller.SelectedDistrict == district.Type;
             material.color = isSelected ? Color.Lerp(controllerColor, SelectedColor, 0.45f) : controllerColor;
@@ -49,9 +52,9 @@ namespace GanglandUndercover.World
 
         private void OnMouseDown()
         {
-            if (controller != null && district != null)
+            if (controller != null)
             {
-                controller.SelectDistrict(district.Type);
+                controller.SelectDistrict(districtType);
             }
         }
 

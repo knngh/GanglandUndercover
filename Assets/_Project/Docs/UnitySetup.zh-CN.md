@@ -2,33 +2,22 @@
 
 ## 现在的状态
 
-本机已检测到 Unity Hub：
+本机已检测到 Unity Hub 和 Unity Editor。当前可用 Editor：
 
-`C:\Program Files\Unity Hub\Unity Hub.exe`
+`/Applications/Unity/Hub/Editor/6000.4.5f1/Unity.app`
 
-但还没有检测到 Unity Editor：
-
-`C:\Program Files\Unity\Hub\Editor\<版本号>\Editor\Unity.exe`
-
-Unity Hub 是管理器，不是编辑器。需要在 Hub 里再安装一个 Editor 版本，项目才能编译和运行。
-
-## 安装 Editor
-
-1. 打开 Unity Hub。
-2. 进入 `Installs` / `安装`。
-3. 点击 `Install Editor` / `安装编辑器`。
-4. 推荐安装 `Unity 2022.3 LTS`。如果 Hub 只推荐更新的 LTS 版本，也可以先安装。
-5. 模块先选 `Windows Build Support`。如果以后要做安卓，再加 `Android Build Support`。
+项目已按本机 Unity `6000.4.5f1` 打开和升级。继续开发时使用同一版本，避免反复升级/降级项目设置。
 
 ## 打开项目
 
-1. 在 Unity Hub 里点击 `Projects`。
-2. 点击 `Add` / `添加`。
-3. 选择项目目录：
+1. 打开 Unity Hub。
+2. 进入 `Projects` / `项目`。
+3. 点击 `Add` / `添加`。
+4. 选择项目目录：
 
-`C:\Users\Admin\GanglandUndercover`
+`/Users/zhugehao/projects/GanglandUndercover`
 
-4. 打开项目，等待 Unity 编译脚本。
+5. 用 Unity `6000.4.5f1` 打开项目，等待 Unity 导入和编译脚本。
 
 ## 生成原型场景
 
@@ -40,7 +29,32 @@ Unity Hub 是管理器，不是编辑器。需要在 Hub 里再安装一个 Edit
 
 `Assets/_Project/Scenes/Prototype.unity`
 
-然后点击 `Play`。
+然后点击 `Play`。当前启动的是可玩的港区社交推理 Demo：`港区潜线 / Harbor Undercover`。
+
+默认会直接以卧底身份开局。也可以在左侧 HUD 按钮切换为警察或黑帮重开。
+
+## 当前操作
+
+- `WASD`：移动。
+- `E`：取证任务 / 黑帮破坏 / 紧急会议按钮。
+- `R`：报告附近尸体。
+- `Q`：黑帮身份击倒附近目标。
+
+专案组胜利条件：完成所有证据任务，或在会议中投出黑帮。黑帮胜利条件：击倒足够多专案组成员、拖到倒计时结束，或让警方阵营失去人数优势。
+
+## 验证烟测
+
+Unity 授权激活正常后，可以在 Unity 菜单执行：
+
+`Gangland > Run Smoke Tests`
+
+也可以用命令行跑批处理烟测：
+
+```bash
+'/Applications/Unity/Hub/Editor/6000.4.5f1/Unity.app/Contents/MacOS/Unity' -batchmode -quit -projectPath /Users/zhugehao/projects/GanglandUndercover -executeMethod GanglandUndercover.Editor.PrototypeSmokeTests.Run -logFile /Users/zhugehao/projects/GanglandUndercover/unity-smoke.log
+```
+
+如果批处理卡在 `Licensing initialization failed`，先在 Unity Hub 里登录并完成 Unity 个人版或专业版授权，再重新运行。
 
 ## 如果菜单没有出现
 
