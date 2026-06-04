@@ -50,14 +50,13 @@ namespace GanglandUndercover.Editor
 
         private static void BuildRigCatalog()
         {
-            StageTwoCharacterRigCatalog catalog = AssetDatabase.LoadAssetAtPath<StageTwoCharacterRigCatalog>(StageTwoCharacterRig.RigCatalogAssetPath);
-
-            if (catalog == null)
+            if (File.Exists(StageTwoCharacterRig.RigCatalogAssetPath))
             {
-                catalog = ScriptableObject.CreateInstance<StageTwoCharacterRigCatalog>();
-                AssetDatabase.CreateAsset(catalog, StageTwoCharacterRig.RigCatalogAssetPath);
+                AssetDatabase.DeleteAsset(StageTwoCharacterRig.RigCatalogAssetPath);
             }
 
+            StageTwoCharacterRigCatalog catalog = ScriptableObject.CreateInstance<StageTwoCharacterRigCatalog>();
+            AssetDatabase.CreateAsset(catalog, StageTwoCharacterRig.RigCatalogAssetPath);
             catalog.Poses = new[]
             {
                 StageTwoCharacterPose.DefaultFor(StageTwoCharacterVisualState.Idle),

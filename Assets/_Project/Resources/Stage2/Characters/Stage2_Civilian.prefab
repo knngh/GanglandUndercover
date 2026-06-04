@@ -611,7 +611,6 @@ Transform:
   - {fileID: 4959116351735031101}
   - {fileID: 1327245011691596915}
   - {fileID: 7897660415443485199}
-  - {fileID: 8000000000000008}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &2899829601714559437
@@ -627,7 +626,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GanglandUndercover.Online.StageTwoCharacterRig
   rigKey: civilian
-  sourcePrefabPath: AssetStore/DenysAlmaral/CityPeople/Prefabs/city/casual_Female_G
+  sourcePrefabPath: AssetStore/Synty/PolygonStarter/Prefabs/Characters/SM_Chr_Female_01
   currentState: 0
   BodyRoot: {fileID: 3040882706488447887}
   HeadRoot: {fileID: 9077717389025063994}
@@ -906,19 +905,3 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
-
---- !u!1001 &8000000000000007
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    m_TransformParent: {fileID: 5583387786252006151}
-    m_Modifications: []
-    m_RemovedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: bae26acf817c6dc4e82f95d9ef4ab46a, type: 3}
-  m_RootGameObject: {fileID: 6584613354768528393}
---- !u!4 &8000000000000008 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 6584613354768528393, guid: bae26acf817c6dc4e82f95d9ef4ab46a, type: 3}
-  m_PrefabInstance: {fileID: 8000000000000007}
-  m_PrefabAsset: {fileID: 0}

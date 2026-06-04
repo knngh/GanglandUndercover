@@ -11,6 +11,15 @@ namespace GanglandUndercover.Online
     /// </summary>
     public struct GameStateSnapshot
     {
+        /// <summary>
+        /// 快照格式版本号。每次序列化格式变更时递增。
+        /// 当前版本覆盖：玩家位置/角色/任务/破坏timer/会议/票数/鬼魂状态。
+        /// </summary>
+        public const int SNAPSHOT_VERSION = 1;
+
+        // ── 版本 ──
+        public int Version;
+
         // ── 全局状态 ──
         public bool MatchStarted;
         public OnlineMatchPhase Phase;
@@ -156,6 +165,9 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void ToBytes(FastBufferWriter writer)
         {
+            // ── 版本号（用于反序列化时的兼容性检查） ──
+            writer.WriteValueSafe(SNAPSHOT_VERSION);
+
             // ── 全局状态 ──
             writer.WriteValueSafe(MatchStarted);
             writer.WriteValueSafe((int)Phase);
@@ -273,6 +285,17 @@ namespace GanglandUndercover.Online
         public static GameStateSnapshot FromBytes(FastBufferReader reader)
         {
             var snap = new GameStateSnapshot();
+
+            // ── 版本号（先读取，版本不匹配时记录警告但不崩溃） ──
+            reader.ReadValueSafe(out int snapshotVersion);
+            snap.Version = snapshotVersion;
+
+            if (snapshotVersion != SNAPSHOT_VERSION)
+            {
+                Debug.LogWarning(
+                    $"[GameStateSnapshot] 快照版本不匹配: 收到 v{snapshotVersion}, 当前 v{SNAPSHOT_VERSION}。" +
+                    "将尝试尽力反序列化，但部分字段可能错位。");
+            }
 
             // ── 全局状态 ──
             reader.ReadValueSafe(out bool matchStarted);
@@ -467,6 +490,125 @@ namespace GanglandUndercover.Online
                 list.Add(new SnapshotCooldownEntry { ClientId = clientId, Value = value });
             }
             return list;
+        }
+
+        /// <summary>
+        /// 客户端初始快照完整性检查。
+        /// 验证快照包含恢复所需的最少关键数据，避免在新客户端加入时因残缺快照导致逻辑错误。
+        /// </summary>
+        /// <returns>true 表示快照数据完整可用</returns>
+        public bool IsValid()
+        {
+            // 关键字段非空检查
+            if (Players == null)
+            {
+                Debug.LogError("[GameStateSnapshot] IsValid 失败: Players 为 null");
+                return false;
+            }
+
+            if (Tasks == null)
+            {
+                Debug.LogError("[GameStateSnapshot] IsValid 失败: Tasks 为 null");
+                return false;
+            }
+
+            // 对局已开始但无玩家视为异常
+            if (MatchStarted && Players.Count == 0)
+            {
+                Debug.LogError("[GameStateSnapshot] IsValid 失败: 对局已开始但玩家数为 0");
+                return false;
+            }
+
+            // 对局已开始但无任务视为异常
+            if (MatchStarted && Tasks.Count == 0)
+            {
+                Debug.LogError("[GameStateSnapshot] IsValid 失败: 对局已开始但任务数为 0");
+                return false;
+            }
+
+            // Version 必须 >= 1
+            if (Version < 1)
+            {
+                Debug.LogWarning("[GameStateSnapshot] IsValid: Version 为 0（可能来自旧格式），将尝试兼容处理。");
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 快照恢复等价性验证。
+        /// 对比两个快照的关键字段，返回不匹配项列表。空列表表示完全一致。
+        /// 用于主机迁移恢复后验证状态完整性。
+        /// </summary>
+        /// <param name="other">用于对比的另一个快照</param>
+        /// <returns>不匹配项描述列表，空列表表示完全等价</returns>
+        public List<string> ValidateEquivalence(GameStateSnapshot other)
+        {
+            var mismatches = new List<string>();
+
+            if (MatchStarted != other.MatchStarted)
+                mismatches.Add($"MatchStarted: {MatchStarted} vs {other.MatchStarted}");
+            if (Phase != other.Phase)
+                mismatches.Add($"Phase: {Phase} vs {other.Phase}");
+            if (EvidenceScore != other.EvidenceScore)
+                mismatches.Add($"EvidenceScore: {EvidenceScore} vs {other.EvidenceScore}");
+            if (EvidenceTarget != other.EvidenceTarget)
+                mismatches.Add($"EvidenceTarget: {EvidenceTarget} vs {other.EvidenceTarget}");
+            if (EmergencyMeetingsLeft != other.EmergencyMeetingsLeft)
+                mismatches.Add($"EmergencyMeetingsLeft: {EmergencyMeetingsLeft} vs {other.EmergencyMeetingsLeft}");
+            if (EvidenceMilestoneIndex != other.EvidenceMilestoneIndex)
+                mismatches.Add($"EvidenceMilestoneIndex: {EvidenceMilestoneIndex} vs {other.EvidenceMilestoneIndex}");
+
+            // 玩家数量与关键状态
+            if (Players?.Count != other.Players?.Count)
+                mismatches.Add($"PlayerCount: {Players?.Count ?? 0} vs {other.Players?.Count ?? 0}");
+            else if (Players != null && other.Players != null)
+            {
+                for (int i = 0; i < Players.Count; i++)
+                {
+                    var a = Players[i];
+                    var b = other.Players[i];
+                    if (a.ClientId != b.ClientId)
+                        mismatches.Add($"Player[{i}].ClientId: {a.ClientId} vs {b.ClientId}");
+                    if (a.Alive != b.Alive)
+                        mismatches.Add($"Player[{i}]({a.ClientId}).Alive: {a.Alive} vs {b.Alive}");
+                    if (a.PublicRole != b.PublicRole)
+                        mismatches.Add($"Player[{i}]({a.ClientId}).PublicRole: {a.PublicRole} vs {b.PublicRole}");
+                    if (a.Profession != b.Profession)
+                        mismatches.Add($"Player[{i}]({a.ClientId}).Profession: {a.Profession} vs {b.Profession}");
+                    // 位置差异小于 0.01 视为浮点误差，不报
+                    if (Vector3.Distance(a.Position, b.Position) > 0.01f)
+                        mismatches.Add($"Player[{i}]({a.ClientId}).Position delta: {Vector3.Distance(a.Position, b.Position):F3}");
+                }
+            }
+
+            // 任务状态
+            if (Tasks?.Count != other.Tasks?.Count)
+                mismatches.Add($"TaskCount: {Tasks?.Count ?? 0} vs {other.Tasks?.Count ?? 0}");
+            else if (Tasks != null && other.Tasks != null)
+            {
+                for (int i = 0; i < Tasks.Count; i++)
+                {
+                    if (Tasks[i].Completed != other.Tasks[i].Completed)
+                        mismatches.Add($"Task[{i}]({Tasks[i].Id}).Completed: {Tasks[i].Completed} vs {other.Tasks[i].Completed}");
+                    if (Tasks[i].Sabotaged != other.Tasks[i].Sabotaged)
+                        mismatches.Add($"Task[{i}]({Tasks[i].Id}).Sabotaged: {Tasks[i].Sabotaged} vs {other.Tasks[i].Sabotaged}");
+                }
+            }
+
+            // 尸体状态
+            if (Bodies?.Count != other.Bodies?.Count)
+                mismatches.Add($"BodyCount: {Bodies?.Count ?? 0} vs {other.Bodies?.Count ?? 0}");
+
+            // 投票
+            if (Votes?.Count != other.Votes?.Count)
+                mismatches.Add($"VoteCount: {Votes?.Count ?? 0} vs {other.Votes?.Count ?? 0}");
+
+            // 案卷数量
+            if (CaseLog?.Count != other.CaseLog?.Count)
+                mismatches.Add($"CaseLogCount: {CaseLog?.Count ?? 0} vs {other.CaseLog?.Count ?? 0}");
+
+            return mismatches;
         }
     }
 }

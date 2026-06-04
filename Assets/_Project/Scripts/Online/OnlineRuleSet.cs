@@ -53,6 +53,7 @@ namespace GanglandUndercover.Online
         [Tooltip("出局时是否公开角色身份。")]
         public bool RevealRoleOnEject = true;
         [Tooltip("行动阶段是否启用近距离语音。")]
+        [Tooltip("M1 收尾：Vivox 已移除，方案 B（文本聊天）替代。此处保留序列化占位，对游戏逻辑无影响。")]
         public bool ProximityVoiceEnabled = true;
 
         [Header("破坏技能时长")]

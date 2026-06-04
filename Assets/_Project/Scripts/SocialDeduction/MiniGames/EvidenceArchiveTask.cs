@@ -352,7 +352,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
                 // 检查是否全部完成
                 if (totalMatched >= evidenceItems.Length)
                 {
-                    Invoke(nameof(OnComplete), SuccessDelay);
+                    Invoke(nameof(CompleteArchive), SuccessDelay);
                 }
             }
             else
@@ -385,11 +385,11 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
 
             if (correct >= evidenceItems.Length)
             {
-                OnComplete();
+                CompleteArchive();
             }
         }
 
-        private void OnComplete()
+        private void CompleteArchive()
         {
             Complete();
             Invoke(nameof(Hide), 0.5f);

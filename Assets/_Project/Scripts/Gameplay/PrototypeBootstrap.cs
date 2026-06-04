@@ -24,7 +24,6 @@ namespace GanglandUndercover.Gameplay
         private static readonly Vector3 DemoCameraPosition = new Vector3(0f, -13.5f, -13.5f);
         private static readonly Vector3 DemoCameraTarget = new Vector3(0f, 0f, -0.15f);
 
-        [SerializeField] private GameMode _mode = GameMode.Online;
         [SerializeField] private SocialRole _offlinePlayerRole = SocialRole.Undercover;
         [SerializeField] private MapType _offlineMapType = MapType.GanglandDistrict;
 

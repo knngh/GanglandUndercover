@@ -69,7 +69,6 @@ Transform:
   - {fileID: 8174379779842368990}
   - {fileID: 31498353866128503}
   - {fileID: 1417326406827813610}
-  - {fileID: 8000000000000002}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &9072824354187069133
@@ -906,19 +905,3 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
-
---- !u!1001 &8000000000000001
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    m_TransformParent: {fileID: 6751780809340037597}
-    m_Modifications: []
-    m_RemovedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: f71041fd118fbb34aa9d2dd6a1d96fce, type: 3}
-  m_RootGameObject: {fileID: 1616406060653692748}
---- !u!4 &8000000000000002 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 1616406060653692748, guid: f71041fd118fbb34aa9d2dd6a1d96fce, type: 3}
-  m_PrefabInstance: {fileID: 8000000000000001}
-  m_PrefabAsset: {fileID: 0}

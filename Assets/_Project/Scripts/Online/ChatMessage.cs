@@ -3,7 +3,7 @@ using GanglandUndercover.Core;
 namespace GanglandUndercover.Online
 {
     /// <summary>
-    /// 联机/离线通用聊天消息数据结构。
+    /// 联机/离线通用聊天消息数据结构（方案B：支持三通道 + 鬼魂频道）。
     /// </summary>
     public struct ChatMessage
     {
@@ -14,7 +14,10 @@ namespace GanglandUndercover.Online
         public bool IsDead;
         public Faction Faction;
 
-        public ChatMessage(string senderId, string senderName, string content, float timestamp, bool isDead, Faction faction)
+        /// <summary>消息所属聊天通道。</summary>
+        public ChatChannel Channel;
+
+        public ChatMessage(string senderId, string senderName, string content, float timestamp, bool isDead, Faction faction, ChatChannel channel = ChatChannel.Meeting)
         {
             SenderId = senderId;
             SenderName = senderName;
@@ -22,6 +25,7 @@ namespace GanglandUndercover.Online
             Timestamp = timestamp;
             IsDead = isDead;
             Faction = faction;
+            Channel = channel;
         }
     }
 }

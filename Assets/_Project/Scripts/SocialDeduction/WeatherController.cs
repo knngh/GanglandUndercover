@@ -78,7 +78,9 @@ namespace GanglandUndercover.SocialDeduction
                 Shader fogShader = Shader.Find("Unlit/Transparent");
                 if (fogShader == null) fogShader = Shader.Find("Standard");
                 Material mat = new Material(fogShader);
-                mat.color = groundFogColor;
+                Color fogColorWithDensity = groundFogColor;
+                fogColorWithDensity.a = Mathf.Clamp01(groundFogColor.a * Mathf.Max(0f, groundFogDensity * 125f));
+                mat.color = fogColorWithDensity;
                 mat.SetFloat("_Mode", 3); // Transparent
                 renderer.material = mat;
                 groundFogMaterial = mat;

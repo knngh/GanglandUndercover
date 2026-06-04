@@ -251,7 +251,7 @@ namespace GanglandUndercover.Online
             // 紧急破坏：触发 CriticalTaskSystem
             if (type == SabotageType.CriticalO2)
             {
-                SocialPrototypeController spc = FindObjectOfType<SocialPrototypeController>();
+                SocialPrototypeController spc = FindAnyObjectByType<SocialPrototypeController>();
                 if (spc != null)
                 {
                     spc.TriggerCriticalTask(CriticalTaskType.O2);
@@ -261,7 +261,7 @@ namespace GanglandUndercover.Online
 
             if (type == SabotageType.CriticalReactor)
             {
-                SocialPrototypeController spc = FindObjectOfType<SocialPrototypeController>();
+                SocialPrototypeController spc = FindAnyObjectByType<SocialPrototypeController>();
                 if (spc != null)
                 {
                     spc.TriggerCriticalTask(CriticalTaskType.Reactor);

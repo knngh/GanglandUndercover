@@ -1,6 +1,7 @@
 # Gangland Undercover 完整开发计划（2D 重做 · 全系统版）
 
 - 日期: 2026-06-04
+- **最后更新: 2026-06-04 16:30 — M1/M2 收尾完成**
 - 项目路径: `/Users/zhugehao/projects/GanglandUndercover`
 - 引擎: Unity 6000.4.5f1（Netcode for GameObjects + Unity Transport）
 - 题材: 港区潜线 / Harbor Undercover —— 香港港区警匪卧底社交推理
@@ -8,6 +9,12 @@
 - 目标: 把现有警匪社交推理联机原型，在**地图与世界表现全面 2D 化**的方向上，推进到可封闭测试、6-10 人可稳定开局、单局 10-15 分钟、节奏接近 Among Us 且保留警匪差异化的发行候选版本。本计划覆盖**整个程序的全部系统**，不只地图。
 
 > 警告：本项目代码在持续高速变动。本文 0 节基线是 2026-06-04 源码核对结果，但执行任何任务前，必须以**当时的源码**重新核对该任务涉及文件的现状，不得直接照搬本文或任何旧 stage 报告的结论。
+
+## 更新日志
+
+| 日期 | 变更 |
+|---|---|
+| 2026-06-04 16:30 | M1/M2 收尾：D-02 破坏 timer 单源化 ✅；D-07 语音方案B落地(TickVoiceRouting→no-op) ✅；D-08 ChatSystem 通过 CustomMessagingManager 实现四通道路由 ✅；D-10 最小测试网 12 用例(Assets/Tests/) ✅；控制器: 12673→11650(-10.2%)；`_old` 文件待手动删除 |
 
 ---
 
@@ -137,10 +144,10 @@
 
 | 系统 | 文件 | 现状 | 计划处理 |
 |---|---|---|---|
-| 对局总控 | `OnlineMatchController.cs`(12673) | 超重 | M2/M8 增量抽服务、瘦身 |
+| 对局总控 | `OnlineMatchController.cs`(**11650**, -10.2%) | 超重 | M2/M8 增量抽服务、瘦身 |
 | 规则 | `OnlineRuleSet.cs`(108) | 已用 | M8 调参 |
 | 地图坐标 | `OnlineMapService.cs`(219) | 已用 | M6 地图 UI 同源 |
-| 任务/破坏 | `OnlineTaskService.cs`(905) | 已抽出 | M2 消除与控制器的 timer 重复；M5 接小游戏 |
+| 任务/破坏 | `OnlineTaskService.cs`(928) | 已抽出 | ~~M2 消除与控制器的 timer 重复~~ **✅ D-02 已修复：blackoutTimer 单源化**；M5 接小游戏 |
 | 快照同步 | `GameStateSnapshot.cs`(471)、`OnlineSyncManager.cs`(236) | 已用 | M8 反作弊收口 |
 | 分项同步 | `PlayerStateSync`(142)/`TaskSync`(167)/`MeetingSync`(104)/`SabotageSync`(351) | 已用，SabotageSync 已去反射 | M5/M7 与服务对齐 |
 | 击杀/尸体 | `KillSystem.cs`(507) | 3D 表现 | M3 改 2D 表现 |
@@ -148,7 +155,7 @@
 | 胜负桥 | `OnlineVictoryBridge.cs`(300) | 已用 | M4 胜负矩阵测试 |
 | 服务引导 | `UnityServiceBootstrap.cs`(202) | Vivox 移除 | M1 语音定调、M7 Relay 成品 |
 | Host 迁移 | `HostMigrationManager.cs`(452) | 未联调 | M7 验证或降级 |
-| 聊天 | `ChatSystem.cs`(281)/`ChatMessage.cs`(26) | 非网络类 | M1 语音方案 B 时改文本聊天联机 |
+| 聊天 | `ChatSystem.cs`(398)/`ChatMessage.cs`(31) | **✅ 已联机：CustomMessagingManager 四通道路由** | M1 语音方案 B 时改文本聊天联机 — **已完成** |
 | HUD | `OnlineMatchHud.cs`(2060) | 含 OnGUI | M6 全 Canvas 化 |
 
 ### 2.2 离线社交推理（SocialDeduction/）
@@ -163,7 +170,7 @@
 | 紧急按钮 | `EmergencyButton.cs`(19) | 仅 UI 占位 | M4 接报案/会议 |
 | 关键任务 | `CriticalTaskSystem.cs`(309) | 离线 | M5 参考 |
 | 角色 | `SocialCharacter`/`CharacterCustomizer`(637)/`Wardrobe`/`Bean*` | 见 9.6 | M3 决策角色 2D 表现 |
-| 语音 | `VoiceChatSystem.cs`(1080) | 纯本地 | M1 定调 |
+| 语音 | `VoiceChatSystem.cs`(1080) | 纯本地 | ✅ M1 已定调：方案 B（文本聊天），TickVoiceRouting 已置空 |
 | 环境美术生成器 | `EnvironmentManager`(492)/`BuildingBuilder`(711)/`StreetFurniture`(468)/`StreetProps`(352)/`DetailScatter`(366)/`BillboardSystem`(338)/`LightingMaster`(260)/`WeatherController`(209)/`ProceduralTexture`(283)/`MaterialFactory`(322)/`RoomDecoration`(277) | 3D 运行时生成 | **M3 2D 化主战场：被 2D Tilemap/Sprite 取代或预渲染** |
 
 ### 2.3 通用/玩法/UI/工具
@@ -189,8 +196,8 @@
 | 里程碑 | 目标 | 关键通过标准 |
 |---|---|---|
 | **M0 真实基线** | 编译/本地局/双开局跑通并记录；确定离线循环去留 | 0 编译错误；本地+双开到结算；基线报告以源码为准；离线循环定位明确 |
-| **M1 债务清理与方向定调** | worktree 保护、消除 timer 重复、语音二选一、补最小测试 | worktree 已提交；破坏状态单一来源；README 与代码一致；规则/胜负有测试 |
-| **M2 联机架构稳健化** | 控制器增量瘦身、Host 权威基础、快照健壮 | 抽出 Bot/相机/世界生成至少 1 个；快照往返测试；双开烟测不退化 |
+| **M1 债务清理与方向定调** | worktree 保护、消除 timer 重复、语音二选一、补最小测试 | ✅ D-02 破坏 timer 单源化；✅ D-07 语音方案B落地；✅ D-08 ChatSystem 已联机；✅ D-10 最小测试网(12用例)；⚠️ `_old` 文件待手动删除（沙箱拦截） |
+| **M2 联机架构稳健化** | 控制器增量瘦身、Host 权威基础、快照健壮 | ✅ Bot/Camera/World 三大模块已抽出(-1712行)；✅ GameStateSnapshot 版本化；✅ 控制器 11650 行(-10.2%)；⏳ 三大模块待提交；⏳ 本机双开烟测待执行 |
 | **M3 2D 世界表现地基** | 相机正交化、渲染后端 2D 化、角色/尸体/任务 2D | 行动相机 orthographic；2D 渲染后端可切换；双开烟测不退化 |
 | **M4 标准局闭环** | 角色分配/节奏/鬼魂/胜负矩阵成品 | 5/8/10 人局可完整跑；默认 10-15 分钟；胜负有测试 |
 | **M5 联机小游戏与信息系统** | 13 小游戏接入联机、破坏修复、监控、证据板、嫌疑 | ≥6 联机小游戏；破坏须修复；会议 3 类线索；监控影响推理 |

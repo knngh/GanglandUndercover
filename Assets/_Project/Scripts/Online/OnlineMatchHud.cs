@@ -1317,12 +1317,12 @@ namespace GanglandUndercover.Online
             Stretch(label.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
         }
 
-        private static Vector3 ScaleDesignPoint(Vector3 designPoint)
+        private Vector3 ScaleDesignPoint(Vector3 designPoint)
         {
             return controller.MapService.ScaleMapPosition(designPoint);
         }
 
-        private static Vector3 ScaleDesignSize(Vector3 designSize)
+        private Vector3 ScaleDesignSize(Vector3 designSize)
         {
             return controller.MapService.ScaleMapSize(designSize);
         }

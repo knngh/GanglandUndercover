@@ -1,5 +1,5 @@
 Stage2 character rig asset bake
-Time: 2026-06-01 17:16:50
+Time: 2026-06-04 15:49:13
 Catalog: Assets/_Project/Resources/Stage2/Characters/Stage2CharacterRigCatalog.asset
 Prefabs: 4
 States: Idle, Walk, Interact, Downed, Report, Meeting, Vote

@@ -56,7 +56,7 @@ namespace GanglandUndercover.Online
 
         private void Start()
         {
-            networkManager = FindObjectOfType<NetworkManager>();
+            networkManager = FindAnyObjectByType<NetworkManager>();
             if (networkManager == null)
             {
                 Debug.LogWarning("[HostMigrationManager] 未找到 NetworkManager。");

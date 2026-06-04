@@ -304,20 +304,15 @@ namespace GanglandUndercover.Gameplay
                     .First();
             }
 
-            // 调查卧底出没区域，收集线人情报
-            int intelGain = 1;
-
             if (HighRiskDistricts.Contains(target.Type) && target.PolicePresence >= 4)
             {
                 // 高风险区 + 警方活跃 → 发现卧底痕迹
-                intelGain = 2;
                 state.AddMoleIntel(2);
                 target.AddGangInfluence(1);
                 state.AddLog($"线人在 {DistrictDisplay(target.Type)} 发现卧底活动迹象，情报 +2。");
             }
             else if (IntelDistricts.Contains(target.Type) && target.HasWitness)
             {
-                intelGain = 2;
                 state.AddMoleIntel(2);
                 target.AddGangInfluence(1);
                 target.AddCivilianTrust(-1);
@@ -325,7 +320,6 @@ namespace GanglandUndercover.Gameplay
             }
             else if (target.IsLockedDown)
             {
-                intelGain = 2;
                 state.AddMoleIntel(2);
                 target.AddPolicePresence(-1);
                 state.AddLog($"线人在封锁的 {DistrictDisplay(target.Type)} 秘密调查，情报 +2。");

@@ -41,7 +41,6 @@ namespace GanglandUndercover.SocialDeduction
         private SocialCharacter socialChar;
         private readonly Dictionary<WardrobePart, string> currentSelection = new Dictionary<WardrobePart, string>();
         private readonly List<GameObject> spawnedAttachments = new List<GameObject>();
-        private bool initialized;
 
         // ── 公开属性 ──
 
@@ -99,9 +98,10 @@ namespace GanglandUndercover.SocialDeduction
             base.OnNetworkDespawn();
         }
 
-        private void OnDestroy()
+        public override void OnDestroy()
         {
             ClearAttachments();
+            base.OnDestroy();
         }
 
         // ── 初始化 ──
@@ -128,7 +128,6 @@ namespace GanglandUndercover.SocialDeduction
                 }
             }
 
-            initialized = true;
         }
 
         // ── 选择与生效 ──

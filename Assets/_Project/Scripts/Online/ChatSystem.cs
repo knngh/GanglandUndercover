@@ -5,12 +5,34 @@ using UnityEngine;
 namespace GanglandUndercover.Online
 {
     /// <summary>
-    /// 跨模式聊天系统：管理消息列表、输入、渲染，支持联机/离线两种场景。
+    /// 联机文本聊天通道类型（方案B：三通道 + 鬼魂频道）。
+    /// </summary>
+    public enum ChatChannel
+    {
+        /// <summary>会议/投票阶段 — 所有存活玩家可见。</summary>
+        Meeting,
+
+        /// <summary>行动阶段全局喊话 — 所有存活玩家可见。</summary>
+        Global,
+
+        /// <summary>行动阶段近距离 — 附近存活玩家可见（不分阵营）。</summary>
+        Proximity,
+
+        /// <summary>鬼魂频道 — 仅死亡玩家之间可见，活人不可见。</summary>
+        Ghost
+    }
+
+    /// <summary>
+    /// 跨模式聊天系统：管理消息列表、输入、渲染，支持联机四通道。
+    ///
+    /// M1 收尾状态：联机通信已通过 CustomMessagingManager（OnlineMatchController.SendChatMessage
+    /// → ReceiveChatSend → 按通道路由 → ReceiveChatBroadcast）实现，无需改为 NetworkBehaviour。
     ///
     /// 联机模式（OnlineMatchController）：
-    ///   - 会议/投票阶段：所有存活玩家可发言，消息广播给所有客户端
-    ///   - 自由行动阶段：仅同阵营玩家可私聊
-    ///   - 死亡玩家：仅可观看会议聊天，不能发言
+    ///   - 会议/投票阶段（Meeting）：所有存活玩家可发言，广播全体存活客户端
+    ///   - 行动阶段近距离（Proximity）：附近 12f 内存活玩家可见，服务器端距离判定
+    ///   - 行动阶段全局（Global）：所有存活玩家可见
+    ///   - 鬼魂频道（Ghost）：仅死亡玩家之间可见
     ///
     /// 离线模式（SocialPrototypeController）：
     ///   - 会议阶段：玩家可输入，AI 自动发送预设消息
@@ -19,12 +41,18 @@ namespace GanglandUndercover.Online
     public class ChatSystem
     {
         private const int MaxMessages = 50;
+        private const float SendCooldown = 1.0f;
+        private const int MaxMessageLength = 500;
+
+        /// <summary>近距离聊天半径（世界单位，x/y 平面距离）。</summary>
+        public const float ProximityRadius = 15f;
 
         private readonly List<ChatMessage> messages = new List<ChatMessage>();
         private readonly System.Action<string> sendCallback;
         private string inputBuffer = string.Empty;
         private bool isInputActive;
         private Vector2 scrollPosition;
+        private float lastSendTime;
 
         /// <summary>当前是否允许发送消息。</summary>
         public bool CanSend { get; set; }
@@ -38,21 +66,85 @@ namespace GanglandUndercover.Online
         /// <summary>玩家是否存活。</summary>
         public bool IsAlive { get; set; } = true;
 
+        /// <summary>当前聊天通道（根据阶段和存活状态自动判定）。</summary>
+        public ChatChannel CurrentChannel => DetermineChannel(CurrentPhase, IsAlive);
+
+        /// <summary>根据阶段和存活状态判定聊天通道。</summary>
+        public static ChatChannel DetermineChannel(OnlineMatchPhase phase, bool isAlive)
+        {
+            if (!isAlive)
+                return ChatChannel.Ghost;
+
+            if (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
+                return ChatChannel.Meeting;
+
+            // 行动阶段默认近距离
+            return ChatChannel.Proximity;
+        }
+
+        /// <summary>获取当前通道的简体中文名称。</summary>
+        public static string ChannelDisplayName(ChatChannel channel)
+        {
+            switch (channel)
+            {
+                case ChatChannel.Meeting:
+                    return "会议聊天";
+                case ChatChannel.Global:
+                    return "全局喊话";
+                case ChatChannel.Proximity:
+                    return "近距离聊天";
+                case ChatChannel.Ghost:
+                    return "鬼魂频道";
+                default:
+                    return "聊天";
+            }
+        }
+
         public ChatSystem(System.Action<string> sendCallback)
         {
             this.sendCallback = sendCallback;
         }
 
+        // ─── 限流与安全 ─────────────────────────────
+
+        /// <summary>检查是否已达发送冷却。每秒最多 1 条。</summary>
+        public bool CanSendNow()
+        {
+            return Time.time - lastSendTime >= SendCooldown;
+        }
+
+        /// <summary>标记已发送，更新冷却时间。</summary>
+        public void MarkSent()
+        {
+            lastSendTime = Time.time;
+        }
+
+        /// <summary>清理输入内容：去除 HTML 标签、截断超长。</summary>
+        public static string Sanitize(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            // 去除 < > 标签（防 XSS）
+            string sanitized = System.Text.RegularExpressions.Regex.Replace(
+                input, @"<[^>]*>", string.Empty);
+
+            if (sanitized.Length > MaxMessageLength)
+                sanitized = sanitized.Substring(0, MaxMessageLength);
+
+            return sanitized;
+        }
+
         // ─── 消息管理 ─────────────────────────────
 
-        public void ReceiveMessage(string senderId, string senderName, string content, bool isDead, Faction faction)
+        public void ReceiveMessage(string senderId, string senderName, string content, bool isDead, Faction faction, ChatChannel channel = ChatChannel.Meeting)
         {
             if (string.IsNullOrWhiteSpace(content))
             {
                 return;
             }
 
-            messages.Add(new ChatMessage(senderId, senderName, content, Time.time, isDead, faction));
+            messages.Add(new ChatMessage(senderId, senderName, Sanitize(content), Time.time, isDead, faction, channel));
 
             while (messages.Count > MaxMessages)
             {
@@ -69,8 +161,12 @@ namespace GanglandUndercover.Online
 
         public int MessageCount => messages.Count;
 
-        // ─── 输入处理（每帧由控制器 OnGUI / Update 调用）─────────────
+        /// <summary>获取消息列表（供 Canvas UI 读取）。</summary>
+        public IReadOnlyList<ChatMessage> Messages => messages;
 
+        // ─── 输入处理 ─────────────────────────────
+
+        /// <summary>处理键盘输入（每帧 OnGUI 调用，未来迁移到 Canvas 后由 Update 接管）。</summary>
         public void ProcessInputKeys()
         {
             if (Event.current == null)
@@ -84,7 +180,7 @@ namespace GanglandUndercover.Online
                 {
                     if (!isInputActive)
                     {
-                        if (CanSend)
+                        if (CanSend && CanSendNow())
                         {
                             isInputActive = true;
                             inputBuffer = string.Empty;
@@ -99,7 +195,11 @@ namespace GanglandUndercover.Online
                         string trimmed = inputBuffer.Trim();
                         if (!string.IsNullOrEmpty(trimmed))
                         {
-                            sendCallback?.Invoke(trimmed);
+                            if (CanSendNow())
+                            {
+                                sendCallback?.Invoke(Sanitize(trimmed));
+                                MarkSent();
+                            }
                         }
 
                         inputBuffer = string.Empty;
@@ -116,7 +216,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        // ─── GUI 渲染 ─────────────────────────────
+        // ─── GUI 渲染（OnGUI，计划 M7 全 Canvas 化后移除） ────
 
         /// <summary>在指定区域绘制完整聊天面板（消息列表 + 输入栏）。</summary>
         public void DrawChatPanel(Rect area, GUISkin skin)
@@ -126,10 +226,8 @@ namespace GanglandUndercover.Online
 
             GUILayout.BeginArea(area, boxStyle);
 
-            // 标题栏
-            string title = (CurrentPhase == OnlineMatchPhase.Meeting || CurrentPhase == OnlineMatchPhase.Voting)
-                ? "  会议聊天"
-                : "  阵营私聊";
+            // 标题栏（含通道名）
+            string title = "  " + ChannelDisplayName(CurrentChannel);
             DrawHeader(title, skin);
 
             // 消息列表（可滚动）
@@ -162,6 +260,20 @@ namespace GanglandUndercover.Online
         {
             GUILayout.BeginHorizontal();
 
+            // 通道标签
+            string channelTag = msg.Channel == ChatChannel.Ghost ? "[鬼]"
+                : msg.Channel == ChatChannel.Proximity ? "[近]"
+                : msg.Channel == ChatChannel.Global ? "[全]"
+                : "";
+
+            if (!string.IsNullOrEmpty(channelTag))
+            {
+                Color oldTagColor = GUI.contentColor;
+                GUI.contentColor = MutedColor;
+                GUILayout.Label(channelTag, skin?.label, GUILayout.ExpandWidth(false));
+                GUI.contentColor = oldTagColor;
+            }
+
             // 玩家名（阵营色）
             Color oldColor = GUI.contentColor;
             GUI.contentColor = GetFactionColor(msg.Faction);
@@ -170,6 +282,8 @@ namespace GanglandUndercover.Online
             GUILayout.Label(namePart, skin?.label, GUILayout.ExpandWidth(false));
 
             GUI.contentColor = oldColor;
+
+            // 消息内容
             GUILayout.Label("：" + msg.Content, skin?.label, GUILayout.ExpandWidth(true));
 
             GUILayout.EndHorizontal();
@@ -193,7 +307,11 @@ namespace GanglandUndercover.Online
                         string trimmed = inputBuffer.Trim();
                         if (!string.IsNullOrEmpty(trimmed))
                         {
-                            sendCallback?.Invoke(trimmed);
+                            if (CanSendNow())
+                            {
+                                sendCallback?.Invoke(Sanitize(trimmed));
+                                MarkSent();
+                            }
                         }
 
                         inputBuffer = string.Empty;
@@ -210,9 +328,10 @@ namespace GanglandUndercover.Online
                 }
                 else
                 {
-                    string hint = (CurrentPhase == OnlineMatchPhase.Meeting || CurrentPhase == OnlineMatchPhase.Voting)
-                        ? "按 Enter 发言..."
-                        : "按 Enter 私聊阵营...";
+                    string hint = CanSendNow()
+                        ? (CurrentChannel == ChatChannel.Ghost ? "按 Enter 对鬼魂发言..." : "按 Enter 发言...")
+                        : "发言冷却中...";
+
                     GUIStyle hintStyle = new GUIStyle(skin?.label ?? GUI.skin.label);
                     hintStyle.normal.textColor = new Color(0.5f, 0.5f, 0.5f, 1f);
                     GUILayout.Label(hint, hintStyle, GUILayout.ExpandWidth(true));
@@ -231,24 +350,25 @@ namespace GanglandUndercover.Online
 
         // ─── 工具方法 ─────────────────────────────
 
+        private static readonly Color MutedColor = new Color(0.5f, 0.5f, 0.5f, 1f);
+
         public static Color GetFactionColor(Faction faction)
         {
             switch (faction)
             {
                 case Faction.Police:
-                    return new Color(0.35f, 0.68f, 1f);     // 蓝
+                    return new Color(0.35f, 0.68f, 1f);
                 case Faction.Undercover:
-                    return new Color(0.28f, 0.88f, 0.52f);   // 绿
+                    return new Color(0.28f, 0.88f, 0.52f);
                 case Faction.Gang:
-                    return new Color(0.92f, 0.28f, 0.22f);   // 红
+                    return new Color(0.92f, 0.28f, 0.22f);
                 case Faction.Mole:
-                    return new Color(0.95f, 0.55f, 0.12f);   // 橙
+                    return new Color(0.95f, 0.55f, 0.12f);
                 default:
-                    return new Color(0.6f, 0.6f, 0.6f);      // 灰
+                    return new Color(0.6f, 0.6f, 0.6f);
             }
         }
 
-        /// <summary>将 OnlineRole 转换为 Faction（用于联机模式阵营判定）。</summary>
         public static Faction RoleToFaction(OnlineRole role)
         {
             switch (role)
@@ -266,7 +386,6 @@ namespace GanglandUndercover.Online
             }
         }
 
-        /// <summary>判断两个 Faction 是否属于同一阵营（Police+Undercover / Gang+Mole）。</summary>
         public static bool IsSameFaction(Faction a, Faction b)
         {
             if (a == Faction.None || b == Faction.None)

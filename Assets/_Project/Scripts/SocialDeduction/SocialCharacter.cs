@@ -96,7 +96,7 @@ namespace GanglandUndercover.SocialDeduction
                 materials = new Material[renderers.Length];
                 for (int i = 0; i < renderers.Length; i++)
                 {
-                    materials[i] = renderers[i].material;
+                    materials[i] = CreateWritableMaterial(renderers[i]);
                 }
             }
 
@@ -238,6 +238,24 @@ namespace GanglandUndercover.SocialDeduction
                 ?? Shader.Find("Standard")
                 ?? Shader.Find("Unlit/Color")
                 ?? Shader.Find("Sprites/Default");
+        }
+
+        private static Material CreateWritableMaterial(Renderer renderer)
+        {
+            if (renderer == null)
+            {
+                return null;
+            }
+
+            if (Application.isPlaying)
+            {
+                return renderer.material;
+            }
+
+            Material source = renderer.sharedMaterial;
+            Material material = source != null ? new Material(source) : new Material(FindColorShader());
+            renderer.sharedMaterial = material;
+            return material;
         }
 
         private void OnDestroy()

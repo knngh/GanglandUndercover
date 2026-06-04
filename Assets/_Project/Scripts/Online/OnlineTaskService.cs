@@ -62,8 +62,17 @@ namespace GanglandUndercover.Online
 
         // ====== 属性 ======
         public IReadOnlyList<OnlineTaskState> Tasks => tasks;
-        public int EvidenceScore => evidenceScore;
-        public int EvidenceTarget => evidenceTarget;
+        public int EvidenceScore
+        {
+            get => evidenceScore;
+            set => evidenceScore = Mathf.Max(0, value);
+        }
+
+        public int EvidenceTarget
+        {
+            get => evidenceTarget;
+            set => SetEvidenceTarget(value);
+        }
         public int EvidenceMilestoneIndex => evidenceMilestoneIndex;
         public string LastEvidenceEvent => lastEvidenceEvent;
         public string LastSabotageEvent => lastSabotageEvent;
@@ -529,6 +538,20 @@ namespace GanglandUndercover.Online
             evidenceLeakTimer = 0f;
             evidenceLeakAccumulator = 0f;
             patrolAlertTimer = 0f;
+        }
+
+        /// <summary>
+        /// 从快照/反序列化恢复所有破坏计时器（Host迁移/快照恢复路径）。
+        /// </summary>
+        public void LoadSabotageTimersFromSnapshot(float blackout, float lockdown, float commJam,
+            float evidenceLeak, float evidenceLeakAccum, float patrolAlert)
+        {
+            blackoutTimer = blackout;
+            lockdownTimer = lockdown;
+            communicationJamTimer = commJam;
+            evidenceLeakTimer = evidenceLeak;
+            evidenceLeakAccumulator = evidenceLeakAccum;
+            patrolAlertTimer = patrolAlert;
         }
 
         public void ApplySabotageEffect(SabotageType sabotageType, string taskName)

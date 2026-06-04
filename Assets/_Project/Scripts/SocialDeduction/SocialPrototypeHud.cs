@@ -435,11 +435,23 @@ namespace GanglandUndercover.SocialDeduction
             {
                 if (button != null)
                 {
-                    Destroy(button.gameObject);
+                    DestroyDynamicObject(button.gameObject);
                 }
             }
 
             dynamicButtons.Clear();
+        }
+
+        private static void DestroyDynamicObject(GameObject target)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(target);
+            }
+            else
+            {
+                DestroyImmediate(target);
+            }
         }
 
         private static GameObject CreatePanel(string name, Transform parent, Color color)

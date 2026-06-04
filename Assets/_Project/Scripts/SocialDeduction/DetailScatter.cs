@@ -44,7 +44,8 @@ namespace GanglandUndercover.SocialDeduction
         [SerializeField] private LayerMask placementLayer = ~0;
         [SerializeField] private float maxSlope = 30f;
 
-        private List<GameObject> scatteredObjects = new List<GameObject>();
+        private readonly List<GameObject> scatteredObjects = new List<GameObject>();
+        private readonly List<Material> scatteredMaterials = new List<Material>();
         private System.Random rng;
 
         public enum DetailType
@@ -68,6 +69,7 @@ namespace GanglandUndercover.SocialDeduction
         /// </summary>
         public void ScatterAllDetails()
         {
+            EnsureRandom();
             ClearAllDetails();
 
             ScatterPosters();
@@ -85,9 +87,15 @@ namespace GanglandUndercover.SocialDeduction
         {
             foreach (var obj in scatteredObjects)
             {
-                if (obj != null) DestroyImmediate(obj);
+                if (obj != null) DestroyGenerated(obj);
             }
             scatteredObjects.Clear();
+
+            foreach (Material material in scatteredMaterials)
+            {
+                if (material != null) DestroyGenerated(material);
+            }
+            scatteredMaterials.Clear();
         }
 
         /// <summary>
@@ -113,7 +121,7 @@ namespace GanglandUndercover.SocialDeduction
                 poster.transform.localScale = new Vector3(size, size * 1.4f, 1f);
 
                 MeshRenderer mr = poster.GetComponent<MeshRenderer>();
-                mr.material = CreatePosterMaterial(RandomElement(posterNames) + "_" + i);
+                AssignGeneratedMaterial(mr, CreatePosterMaterial(RandomElement(posterNames) + "_" + i));
 
                 scatteredObjects.Add(poster);
             }
@@ -138,7 +146,7 @@ namespace GanglandUndercover.SocialDeduction
                 graffiti.transform.localScale = new Vector3(size, size * RandomRange(0.6f, 1.5f), 1f);
 
                 MeshRenderer mr = graffiti.GetComponent<MeshRenderer>();
-                mr.material = CreateGraffitiMaterial(RandomElement(graffitiTags) + "_" + i);
+                AssignGeneratedMaterial(mr, CreateGraffitiMaterial(RandomElement(graffitiTags) + "_" + i));
                 mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
                 scatteredObjects.Add(graffiti);
@@ -167,8 +175,9 @@ namespace GanglandUndercover.SocialDeduction
                 lr.SetPosition(1, end);
                 lr.startWidth = powerLineThickness;
                 lr.endWidth = powerLineThickness;
-                lr.material = new Material(Shader.Find("Unlit/Color"));
-                lr.material.color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
+                Material material = CreateGeneratedMaterial("Unlit/Color");
+                material.color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
+                AssignGeneratedMaterial(lr, material);
                 lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
                 line.transform.SetParent(transform);
@@ -194,9 +203,10 @@ namespace GanglandUndercover.SocialDeduction
                 acUnit.transform.rotation = Quaternion.Euler(0f, RandomRange(0f, 360f), 0f);
 
                 MeshRenderer mr = acUnit.GetComponent<MeshRenderer>();
-                mr.material = new Material(Shader.Find("Standard"));
-                mr.material.color = new Color(0.8f, 0.8f, 0.75f);
-                mr.material.SetFloat("_Metallic", 0.7f);
+                Material material = CreateGeneratedMaterial("Standard");
+                material.color = new Color(0.8f, 0.8f, 0.75f);
+                material.SetFloat("_Metallic", 0.7f);
+                AssignGeneratedMaterial(mr, material);
 
                 acUnit.transform.SetParent(transform);
                 scatteredObjects.Add(acUnit);
@@ -220,8 +230,9 @@ namespace GanglandUndercover.SocialDeduction
                 puddle.transform.localScale = new Vector3(size, size * RandomRange(0.5f, 1f), 1f);
 
                 MeshRenderer mr = puddle.GetComponent<MeshRenderer>();
-                mr.material = new Material(Shader.Find("Unlit/Transparent"));
-                mr.material.color = puddleColor;
+                Material material = CreateGeneratedMaterial("Unlit/Transparent");
+                material.color = puddleColor;
+                AssignGeneratedMaterial(mr, material);
                 mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
                 scatteredObjects.Add(puddle);
@@ -250,12 +261,13 @@ namespace GanglandUndercover.SocialDeduction
                 DestroyImmediate(debris.GetComponent<CapsuleCollider>());
 
                 MeshRenderer mr = debris.GetComponent<MeshRenderer>();
-                mr.material = new Material(Shader.Find("Standard"));
-                mr.material.color = baseColor + new Color(
+                Material material = CreateGeneratedMaterial("Standard");
+                material.color = baseColor + new Color(
                     RandomRange(-0.1f, 0.1f),
                     RandomRange(-0.1f, 0.1f),
                     RandomRange(-0.1f, 0.1f)
                 );
+                AssignGeneratedMaterial(mr, material);
 
                 debris.transform.SetParent(transform);
                 scatteredObjects.Add(debris);
@@ -319,7 +331,7 @@ namespace GanglandUndercover.SocialDeduction
 
         private Material CreatePosterMaterial(string id)
         {
-            Material mat = new Material(Shader.Find("Standard"));
+            Material mat = CreateGeneratedMaterial("Standard");
             Color[] posterColors = new Color[]
             {
                 new Color(0.9f, 0.2f, 0.1f),
@@ -335,7 +347,7 @@ namespace GanglandUndercover.SocialDeduction
 
         private Material CreateGraffitiMaterial(string id)
         {
-            Material mat = new Material(Shader.Find("Standard"));
+            Material mat = CreateGeneratedMaterial("Standard");
             Color[] grfColors = new Color[]
             {
                 new Color(1f, 0.1f, 0.1f, 0.7f),
@@ -349,14 +361,57 @@ namespace GanglandUndercover.SocialDeduction
             return mat;
         }
 
+        private Material CreateGeneratedMaterial(string shaderName)
+        {
+            Material material = new Material(FindShader(shaderName));
+            scatteredMaterials.Add(material);
+            return material;
+        }
+
+        private static Shader FindShader(string shaderName)
+        {
+            return Shader.Find(shaderName)
+                ?? Shader.Find("Universal Render Pipeline/Lit")
+                ?? Shader.Find("Standard")
+                ?? Shader.Find("Unlit/Color")
+                ?? Shader.Find("Sprites/Default");
+        }
+
+        private static void AssignGeneratedMaterial(Renderer renderer, Material material)
+        {
+            if (renderer != null)
+            {
+                renderer.sharedMaterial = material;
+            }
+        }
+
+        private static void DestroyGenerated(Object target)
+        {
+            if (Application.isPlaying)
+            {
+                Destroy(target);
+            }
+            else
+            {
+                DestroyImmediate(target);
+            }
+        }
+
         private float RandomRange(float min, float max)
         {
+            EnsureRandom();
             return (float)(min + rng.NextDouble() * (max - min));
         }
 
         private T RandomElement<T>(T[] array)
         {
+            EnsureRandom();
             return array[rng.Next(array.Length)];
+        }
+
+        private void EnsureRandom()
+        {
+            rng ??= new System.Random(42);
         }
 
         private void OnDestroy()

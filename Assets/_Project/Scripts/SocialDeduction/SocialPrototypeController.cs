@@ -91,7 +91,6 @@ namespace GanglandUndercover.SocialDeduction
         // --- 离线聊天系统 ---
         private readonly List<ChatMessage> offlineChatMessages = new List<ChatMessage>();
         private string offlineChatInput = string.Empty;
-        private bool offlineChatInputActive;
         private Vector2 offlineChatScroll;
         private float offlineChatMessageTimer;
         private int offlineChatMessageIndex;
@@ -273,6 +272,7 @@ namespace GanglandUndercover.SocialDeduction
 
         public void StartGame(SocialRole role)
         {
+            EnsureRuntimeScaffolding();
             ClearWorld();
             PlayerRole = role;
             HasStarted = true;
@@ -1634,7 +1634,6 @@ namespace GanglandUndercover.SocialDeduction
             // 初始化离线聊天
             offlineChatMessages.Clear();
             offlineChatInput = string.Empty;
-            offlineChatInputActive = false;
             offlineChatScroll = Vector2.zero;
             offlineChatMessageTimer = 2.5f;
             offlineChatMessageIndex = 0;
@@ -3013,7 +3012,7 @@ namespace GanglandUndercover.SocialDeduction
         /// Tint 着色：将现有材质颜色向 roleColor 方向混合，保留原始纹理/贴图。
         /// 参照 OnlineMatchController.TintCharacterAdapter 逻辑精简版。
         /// </summary>
-        private static void TintCharacterModel(GameObject model, Color roleColor)
+        private void TintCharacterModel(GameObject model, Color roleColor)
         {
             Renderer[] allRenderers = model.GetComponentsInChildren<Renderer>(true);
             if (allRenderers == null)
@@ -3023,7 +3022,7 @@ namespace GanglandUndercover.SocialDeduction
 
             foreach (Renderer renderer in allRenderers)
             {
-                Material material = renderer.material;
+                Material material = CreateTintMaterial(renderer);
                 if (material == null)
                 {
                     continue;
@@ -3033,6 +3032,25 @@ namespace GanglandUndercover.SocialDeduction
                 Color tinted = Color.Lerp(current, roleColor, 0.28f);
                 material.color = new Color(tinted.r, tinted.g, tinted.b, current.a);
             }
+        }
+
+        private Material CreateTintMaterial(Renderer renderer)
+        {
+            if (renderer == null)
+            {
+                return null;
+            }
+
+            if (Application.isPlaying)
+            {
+                return renderer.material;
+            }
+
+            Material source = renderer.sharedMaterial;
+            Material material = source != null ? new Material(source) : new Material(FindColorShader());
+            renderer.sharedMaterial = material;
+            generatedMaterials.Add(material);
+            return material;
         }
 
         /// <summary>
@@ -3479,12 +3497,42 @@ namespace GanglandUndercover.SocialDeduction
 
         private void InitTurnController()
         {
+            if (turnController != null)
+            {
+                turnController.Changed -= OnTurnStateChanged;
+            }
+
             turnController = new GameController();
             turnController.Changed += OnTurnStateChanged;
         }
 
+        private void EnsureTurnController()
+        {
+            if (turnController == null)
+            {
+                InitTurnController();
+            }
+        }
+
+        private void EnsureRuntimeScaffolding()
+        {
+            EnsureTurnController();
+
+            if (hudObject == null)
+            {
+                BuildHud();
+            }
+
+            if (turnHudObject == null)
+            {
+                InitTurnHud();
+            }
+        }
+
         private void InitTurnHud()
         {
+            EnsureTurnController();
+
             if (turnHudObject != null)
             {
                 DestroyGenerated(turnHudObject);
@@ -3497,6 +3545,8 @@ namespace GanglandUndercover.SocialDeduction
 
         private void InitTurnMap()
         {
+            EnsureTurnController();
+
             if (turnMapObject != null)
             {
                 DestroyGenerated(turnMapObject);

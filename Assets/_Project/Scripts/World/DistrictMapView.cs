@@ -12,6 +12,11 @@ namespace GanglandUndercover.World
 
         public void Bind(GameController gameController)
         {
+            if (gameController == null)
+            {
+                throw new System.ArgumentNullException(nameof(gameController));
+            }
+
             controller = gameController;
             controller.Changed += Refresh;
             Build();

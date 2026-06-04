@@ -177,8 +177,6 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             scanRing.anchorMax = new Vector2(ringAnchorMax, ringAnchorMax);
 
             // 绿色区域固定
-            float greenMid = (GreenMinRatio + GreenMaxRatio) / 2f;
-            float greenHalf = (GreenMaxRatio - GreenMinRatio) / 2f;
             float greenOuter = Mathf.Lerp(InnerRadius, OuterRadius, GreenMinRatio) * 0.6f;
             float greenInner = Mathf.Lerp(InnerRadius, OuterRadius, GreenMaxRatio) * 0.6f;
 

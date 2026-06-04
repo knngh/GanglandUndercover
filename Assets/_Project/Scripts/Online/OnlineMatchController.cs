@@ -42,22 +42,12 @@ namespace GanglandUndercover.Online
         private const float CollisionTraceStep = 0.08f;
         private const float RoleRevealSeconds = 6.5f;
         private const ulong LocalPreviewClientId = 0UL;
-        private const ulong BotClientIdBase = 900000UL;
+        private const ulong BotClientIdBase = OnlineBotController.BotClientIdBase;
         private const float BotThinkMinSeconds = 1.2f;
         private const float BotThinkMaxSeconds = 3.4f;
         private const float BotInteractDistance = 0.45f;
-        private const float PreviewCameraSize = 13.4f;
-        private const float ActionCameraSize = 4.25f;
-        private const float BlackoutCameraSize = 3.05f;
-        private const float TaskCameraSize = 4.1f;
-        private const float ActionCameraYOffset = -4.42f;
-        private const float ActionCameraZOffset = -6.85f;
-        private const float PreviewCameraYOffset = -13.6f;
-        private const float PreviewCameraZOffset = -16.2f;
-        private const float ActionCameraFieldOfView = 42f;
-        private const float PreviewCameraFieldOfView = 52f;
-        private const float ActionCameraLookAheadY = 0.88f;
-        private const float ActionCameraLookHeight = 0.42f;
+
+        // Camera constants moved to OnlineCameraRig — use _cameraRig.Configure() for all camera setup.
         private const float PlayerAliveVisualScale = 1.12f;
         private const float PlayerDeadVisualScaleX = 1.04f;
         private const float PlayerDeadVisualScaleY = 0.52f;
@@ -66,18 +56,19 @@ namespace GanglandUndercover.Online
 
 
 
-        private readonly Dictionary<ulong, OnlinePlayerState> players = new Dictionary<ulong, OnlinePlayerState>();
+        internal readonly Dictionary<ulong, OnlinePlayerState> players = new Dictionary<ulong, OnlinePlayerState>();
         private readonly List<OnlineTaskState> tasks = new List<OnlineTaskState>();
-        private readonly List<OnlineBodyState> bodies = new List<OnlineBodyState>();
+        internal readonly List<OnlineBodyState> bodies = new List<OnlineBodyState>();
         private readonly List<string> caseLog = new List<string>();
         private readonly Dictionary<ulong, OnlineRole> privateRoles = new Dictionary<ulong, OnlineRole>();
-        private readonly Dictionary<ulong, ulong> votes = new Dictionary<ulong, ulong>();
-        private readonly Dictionary<ulong, float> killCooldowns = new Dictionary<ulong, float>();
-        private readonly Dictionary<ulong, float> abilityCooldowns = new Dictionary<ulong, float>();
+        internal readonly Dictionary<ulong, ulong> votes = new Dictionary<ulong, ulong>();
+        internal readonly Dictionary<ulong, float> killCooldowns = new Dictionary<ulong, float>();
+        internal readonly Dictionary<ulong, float> abilityCooldowns = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> ventCooldowns = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> botThinkTimers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> botVoteTimers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, Vector3> botTargets = new Dictionary<ulong, Vector3>();
+        private OnlineBotController _botController;
         private readonly Dictionary<ulong, GameObject> playerVisuals = new Dictionary<ulong, GameObject>();
         private readonly Dictionary<ulong, Vector3> playerVisualBaseScales = new Dictionary<ulong, Vector3>();
         private readonly Dictionary<int, GameObject> taskVisuals = new Dictionary<int, GameObject>();
@@ -94,9 +85,27 @@ namespace GanglandUndercover.Online
         private Sprite diamondSprite;
         private Sprite capsuleSprite;
 
-        private NetworkManager networkManager;
+        internal NetworkManager networkManager;
         private UnityTransport transport;
         private UnityServiceBootstrap serviceBootstrap;
+        public OnlineWorldBuilder WorldBuilder;
+        private OnlineWorldBuilder worldBuilder
+        {
+            get
+            {
+                if (WorldBuilder == null)
+                {
+                    WorldBuilder = new OnlineWorldBuilder();
+
+                    if (worldRoot != null)
+                    {
+                        WorldBuilder.Initialize(worldRoot, mapService, solidObstacleRects, walkableRects, worldLabels);
+                    }
+                }
+
+                return WorldBuilder;
+            }
+        }
         private GameObject worldRoot;
         private OnlineMatchHud onlineHud;
         private OnlineSyncManager syncManager;
@@ -124,9 +133,9 @@ namespace GanglandUndercover.Online
         private bool revealRoleOnEject;
         private bool proximityVoiceEnabled;
         [SerializeField] private bool canvasHudEnabled = true;
-        [SerializeField] private OnlineRuleSet ruleSet;
-        [SerializeField] private OnlineMapService mapService;
-        [SerializeField] private OnlineTaskService taskService;
+        [SerializeField] internal OnlineRuleSet ruleSet;
+        [SerializeField] internal OnlineMapService mapService;
+        [SerializeField] internal OnlineTaskService taskService;
         private bool matchStarted;
         private bool localPreviewMode;
         private bool fullMapPreview = true;
@@ -145,19 +154,30 @@ namespace GanglandUndercover.Online
         private float emergencyCooldownTimer;
         private float aiActionGraceTimer;
         private float matchElapsedSeconds;
-        private bool cameraWasConfigured;
+        private int activeTaskId = -1;
+        private int activeTaskStep;
+        private int activeTaskMistakes;
+        private int evidenceMilestoneIndex;
+        private float activeTaskCharge;
+        private float activeTaskFeedbackTimer;
+        private bool activeTaskStepOneDone;
+        private bool activeTaskStepTwoDone;
+        private bool activeTaskStepThreeDone;
+        private bool activeTaskFeedbackPositive;
+        private bool submittingActiveTask;
+        private OnlineCameraRig _cameraRig;
         private float nextVoiceRetryTime;
         private float nextVoicePositionUpdateTime;
         private bool voiceJoinInProgress;
         private bool voiceLeaveInProgress;
         private bool relayOperationInProgress;
-        private ulong currentCameraSubjectId = LocalPreviewClientId;
+        // currentCameraSubjectId moved to OnlineCameraRig; use _cameraRig.SetSubject() / _cameraRig.CurrentSubjectId
         private string desiredVoiceChannel = string.Empty;
         private string pendingVoiceChannel = string.Empty;
 
-        public IReadOnlyDictionary<ulong, OnlinePlayerState> Players => players;
+        public Dictionary<ulong, OnlinePlayerState> Players => players;
         public IReadOnlyList<OnlineTaskState> Tasks => tasks;
-        public IReadOnlyList<OnlineBodyState> Bodies => bodies;
+        public List<OnlineBodyState> Bodies => bodies;
         public IReadOnlyList<string> CaseLog => caseLog;
         public OnlineRole LocalRole => localRole;
         public ulong LocalClientIdValue => LocalClientId();
@@ -173,7 +193,7 @@ namespace GanglandUndercover.Online
         public bool MatchStarted => matchStarted;
         public OnlineMatchPhase Phase => phase;
         public float PhaseTimer => phaseTimer;
-        public string Status => status;
+        public string Status { get => status; internal set => status = value; }
         public int TaskCount => tasks.Count;
         public int BodyCount => bodies.Count;
         public int BotCount => CountBotPlayers();
@@ -240,6 +260,8 @@ namespace GanglandUndercover.Online
         public float MapHalfHeightValue => mapService.MapHalfHeight;
         public OnlineMapService MapService => mapService;
         public OnlineTaskService TaskService => taskService;
+        public NetworkManager NetworkManager => networkManager;
+        public OnlineRuleSet RuleSet => ruleSet;
         public int TargetMatchMinutesMin => Mathf.RoundToInt(ruleSet.MatchTargetMinSeconds / 60f);
         public int TargetMatchMinutesMax => Mathf.RoundToInt(ruleSet.MatchHardLimitSeconds / 60f);
         public string ResultSummary => resultSummary;
@@ -250,6 +272,18 @@ namespace GanglandUndercover.Online
         public bool CanStartMatch => CanStartLobbyMatch();
         public bool RelayOperationInProgress => relayOperationInProgress;
         public int EmergencyMeetingsLeft => emergencyMeetingsLeft;
+        internal float EmergencyCooldownTimer { get => emergencyCooldownTimer; set => emergencyCooldownTimer = value; }
+        internal int NextBodyId => nextBodyId;
+        internal void IncrementNextBodyId() { nextBodyId++; }
+        internal void DecrementEmergencyMeetings() { emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1); }
+        internal void AddBotPlayer(ulong clientId, string displayName, Vector3 spawn, OnlineProfession profession)
+        {
+            players[clientId] = new OnlinePlayerState(clientId, displayName, spawn, true, true, OnlineRole.Unassigned, profession, 0, true);
+        }
+        internal void SetKillCooldown(ulong clientId, float value) { killCooldowns[clientId] = value; }
+        internal void SetAbilityCooldown(ulong clientId, float value) { abilityCooldowns[clientId] = value; }
+        internal bool TryGetKillCooldown(ulong clientId, out float value) => killCooldowns.TryGetValue(clientId, out value);
+        internal bool HasVoted(ulong clientId) => votes.ContainsKey(clientId);
         public float BlackoutTimer => taskService.BlackoutTimer;
         public float LockdownTimer => taskService.LockdownTimer;
         public float CommunicationJamTimer => taskService.CommunicationJamTimer;
@@ -257,10 +291,11 @@ namespace GanglandUndercover.Online
         public float PatrolAlertTimer => taskService.PatrolAlertTimer;
         public bool TacticalMapOpen => tacticalMapOpen;
         public bool IntelBoardOpen => intelBoardOpen;
-        public string VoiceStatus => serviceBootstrap == null ? "Vivox 未挂载。" : serviceBootstrap.VoiceStatus;
-        public string ActiveVoiceChannel => serviceBootstrap == null ? string.Empty : serviceBootstrap.ActiveVoiceChannel;
-        public int VoiceParticipantCount => serviceBootstrap == null ? 0 : serviceBootstrap.ActiveVoiceParticipantCount;
-        public bool VoiceRoutingEnabled => proximityVoiceEnabled || phase == OnlineMatchPhase.Action || phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting;
+        // M1 收尾：语音已移除，以下三个属性转为聊天通道状态映射
+        public string VoiceStatus => chatSystem != null ? "文本聊天: " + chatSystem.CurrentChannel : "文本聊天未初始化";
+        public string ActiveVoiceChannel => chatSystem != null ? chatSystem.CurrentChannel.ToString() : "None";
+        public int VoiceParticipantCount => chatSystem != null ? chatSystem.MessageCount : 0;
+        public bool VoiceRoutingEnabled => true; // 文本聊天始终可用
         public bool LocalTaskInputGateActive => activeTaskId >= 0;
         public string MatchPressureSummary => BuildMatchPressureSummary();
         public string LobbyReadinessSummary => BuildLobbyReadinessSummary();
@@ -369,7 +404,7 @@ namespace GanglandUndercover.Online
             intelBoardOpen = false;
             activeTaskId = -1;
             phase = OnlineMatchPhase.Action;
-            cameraWasConfigured = false;
+            _cameraRig.ResetConfiguration();
             ConfigureMainCamera();
             return Camera.main != null && !Camera.main.orthographic;
         }
@@ -404,9 +439,9 @@ namespace GanglandUndercover.Online
             activeTaskStep = 0;
             activeTaskCharge = 0f;
             activeTaskFeedbackTimer = 0f;
-            blackoutTimer = 0f;
-            currentCameraSubjectId = localClientId;
-            cameraWasConfigured = false;
+            taskService.ResetAllSabotageTimers();
+            _cameraRig.SetSubject(localClientId);
+            _cameraRig.ResetConfiguration();
             status = "编辑器演示视角：已进入九龙港区行动画面。";
 
             if (onlineHud != null)
@@ -431,8 +466,8 @@ namespace GanglandUndercover.Online
             tacticalMapOpen = false;
             intelBoardOpen = false;
             activeTaskId = -1;
-            blackoutTimer = 0f;
-            cameraWasConfigured = false;
+            taskService.ResetAllSabotageTimers();
+            _cameraRig.ResetConfiguration();
             ConfigureMainCamera();
             return Camera.main != null && Camera.main.orthographic;
         }
@@ -460,11 +495,11 @@ namespace GanglandUndercover.Online
             tacticalMapOpen = false;
             intelBoardOpen = false;
             activeTaskId = -1;
-            blackoutTimer = ruleSet.BlackoutSeconds;
-            currentCameraSubjectId = localClientId;
-            cameraWasConfigured = false;
+            taskService.ApplySabotageEffect(SabotageType.Blackout, "编辑器预览");
+            _cameraRig.SetSubject(localClientId);
+            _cameraRig.ResetConfiguration();
             ConfigureMainCamera();
-            return Camera.main != null && !Camera.main.orthographic && Mathf.Abs(Camera.main.fieldOfView - ActionCameraFieldOfView) < 0.5f;
+            return Camera.main != null && !Camera.main.orthographic && Mathf.Abs(Camera.main.fieldOfView - OnlineCameraRig.ActionFieldOfView) < 0.5f;
         }
 
         public void EditorRefreshWorldVisualsForSmokeTest()
@@ -586,7 +621,7 @@ namespace GanglandUndercover.Online
 
             phase = OnlineMatchPhase.Action;
             matchStarted = true;
-            currentCameraSubjectId = LocalClientId();
+            _cameraRig.SetSubject(LocalClientId());
             UpdateWorldVisuals();
             return StageTwoActiveDownedStateCount > 0 && StageTwoForensicSceneCount > 0 && BodyCount > 0;
         }
@@ -655,23 +690,57 @@ namespace GanglandUndercover.Online
 
         private void EnsureRuleSet()
         {
-            if (ruleSet == null)
-            {
-                ruleSet = ScriptableObject.CreateInstance<OnlineRuleSet>();
-            }
+            EnsureCoreServices();
 
             roomAutoFillAi = ruleSet.RoomAutoFillAi;
             revealRoleOnEject = ruleSet.RevealRoleOnEject;
             proximityVoiceEnabled = ruleSet.ProximityVoiceEnabled;
             roomMinPlayers = ruleSet.DefaultRoomMinPlayers;
             roomMaxPlayers = ruleSet.DefaultRoomMaxPlayers;
-            evidenceTarget = ruleSet.DefaultEvidenceTarget;
+            taskService.EvidenceTarget = ruleSet.DefaultEvidenceTarget;
+        }
+
+        private void EnsureCoreServices()
+        {
+            if (ruleSet == null)
+            {
+                ruleSet = ScriptableObject.CreateInstance<OnlineRuleSet>();
+            }
+
+            if (mapService == null)
+            {
+                mapService = GetComponent<OnlineMapService>();
+
+                if (mapService == null)
+                {
+                    mapService = gameObject.AddComponent<OnlineMapService>();
+                }
+            }
+
+            if (taskService == null)
+            {
+                taskService = GetComponent<OnlineTaskService>();
+
+                if (taskService == null)
+                {
+                    taskService = gameObject.AddComponent<OnlineTaskService>();
+                }
+            }
+
+            taskService.Initialize(ruleSet, mapService);
+            EnsureCameraRig();
+        }
+
+        private void EnsureCameraRig()
+        {
+            _cameraRig ??= new OnlineCameraRig();
         }
 
         public OnlineRuleSet ActiveRuleSet => ruleSet != null ? ruleSet : ScriptableObject.CreateInstance<OnlineRuleSet>();
 
         private void Awake()
         {
+            EnsureCoreServices();
             EnsureRuleSet();
             BuildDefaultTasks();
             EnsureWorld();
@@ -679,6 +748,7 @@ namespace GanglandUndercover.Online
             EnsureServiceBootstrap();
             EnsureNetworkStack();
             EnsureCanvasHud();
+            EnsureCameraRig();
             syncManager = GetComponent<OnlineSyncManager>();
             EnsureMigrationManager();
             EnsureChatSystem();
@@ -692,6 +762,8 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            EnsureCoreServices();
+            EnsureRuleSet();
             BuildDefaultTasks();
             EnsureWorld();
             EnsureCanvasHud();
@@ -841,7 +913,7 @@ namespace GanglandUndercover.Online
             GUILayout.BeginArea(new Rect(18f, 18f, leftWidth, leftPanelHeight), GUI.skin.box);
             GUILayout.Label("港区潜线 Release Candidate");
             GUILayout.Label(roomName + " | " + status);
-            GUILayout.Label("阶段: " + PhaseName(phase) + " | 局时: " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链: " + evidenceScore + "/" + evidenceTarget + " | 危机: " + BuildHazardSummary());
+            GUILayout.Label("阶段: " + PhaseName(phase) + " | 局时: " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链: " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 危机: " + BuildHazardSummary());
             GUILayout.Label("本机身份: " + RoleName(localRole) + " | 职责: " + LocalProfessionName());
 
             if (!actionHud)
@@ -1120,42 +1192,16 @@ namespace GanglandUndercover.Online
             onlineHud.Bind(this);
         }
 
+        /// <summary>
+        /// M1 收尾：语音路由已搁置。Vivox 已移除，方案 B（联机文本聊天）替代。
+        /// TickVoiceRouting 保留为空调用点，序列化字段（proximityVoiceEnabled 等）
+        /// 保留以维持 GameStateSnapshot 兼容性。
+        /// 复用时恢复此方法体即可。
+        /// </summary>
         private void TickVoiceRouting()
         {
-            if (!Application.isPlaying || serviceBootstrap == null)
-            {
-                return;
-            }
-
-            if (!IsOnline)
-            {
-                desiredVoiceChannel = string.Empty;
-                RequestLeaveVoiceChannels();
-                return;
-            }
-
-            bool positional = ShouldUsePositionalVoice();
-            desiredVoiceChannel = BuildDesiredVoiceChannel();
-
-            if (string.IsNullOrWhiteSpace(desiredVoiceChannel))
-            {
-                RequestLeaveVoiceChannels();
-                return;
-            }
-
-            if (!voiceJoinInProgress
-                && Time.time >= nextVoiceRetryTime
-                && (serviceBootstrap.ActiveVoiceChannel != desiredVoiceChannel || serviceBootstrap.ActiveVoiceChannelIsPositional != positional))
-            {
-                pendingVoiceChannel = desiredVoiceChannel;
-                _ = JoinVoiceChannelAsync(desiredVoiceChannel, positional);
-            }
-
-            if (positional && serviceBootstrap.ActiveVoiceChannel == desiredVoiceChannel && Time.time >= nextVoicePositionUpdateTime)
-            {
-                serviceBootstrap.UpdatePositionalVoice(LocalVoicePosition());
-                nextVoicePositionUpdateTime = Time.time + VoicePositionUpdateSeconds;
-            }
+            // Vivox removed — per-voice-channel routing disabled.
+            // Re-enable when a replacement voice provider (Dissonance / Photon Voice / platform-native) is integrated.
         }
 
         private async Task JoinVoiceChannelAsync(string channelName, bool positional)
@@ -1538,22 +1584,17 @@ namespace GanglandUndercover.Online
             activeTaskFeedbackTimer = 0f;
             activeTaskFeedbackPositive = false;
             submittingActiveTask = false;
-            evidenceScore = 0;
+            taskService.EvidenceScore = 0;
             lastMeetingReason = "尚未召开会议。";
             lastVoteOutcome = "尚未投票。";
             lastEvidenceEvent = "尚未取得关键证据。";
             lastSabotageEvent = "尚未发生破坏。";
             evidenceMilestoneIndex = 0;
             phaseTimer = 0f;
-            blackoutTimer = 0f;
-            lockdownTimer = 0f;
-            communicationJamTimer = 0f;
-            evidenceLeakTimer = 0f;
-            evidenceLeakAccumulator = 0f;
-            patrolAlertTimer = 0f;
+            taskService.ResetAllSabotageTimers();
             emergencyCooldownTimer = 0f;
             aiActionGraceTimer = 0f;
-            currentCameraSubjectId = LocalPreviewClientId;
+            _cameraRig.SetSubject(LocalPreviewClientId);
             desiredVoiceChannel = string.Empty;
             pendingVoiceChannel = string.Empty;
             voiceJoinInProgress = false;
@@ -1628,7 +1669,7 @@ namespace GanglandUndercover.Online
 
         public void SetEvidenceTarget(int value)
         {
-            evidenceTarget = Mathf.Clamp(value, 34, 56);
+            taskService.EvidenceTarget = Mathf.Clamp(value, 34, 56);
 
             if (IsOnline && IsHost)
             {
@@ -2181,45 +2222,7 @@ namespace GanglandUndercover.Online
         private void TickHostSimulation()
         {
             float deltaTime = Time.deltaTime;
-
-            if (blackoutTimer > 0f)
-            {
-                blackoutTimer = Mathf.Max(0f, blackoutTimer - deltaTime);
-            }
-
-            if (lockdownTimer > 0f)
-            {
-                lockdownTimer = Mathf.Max(0f, lockdownTimer - deltaTime);
-            }
-
-            if (communicationJamTimer > 0f)
-            {
-                communicationJamTimer = Mathf.Max(0f, communicationJamTimer - deltaTime);
-            }
-
-            if (evidenceLeakTimer > 0f)
-            {
-                evidenceLeakTimer = Mathf.Max(0f, evidenceLeakTimer - deltaTime);
-                if (phase == OnlineMatchPhase.Action)
-                {
-                    evidenceLeakAccumulator += deltaTime;
-
-                    if (evidenceLeakAccumulator >= 5f)
-                    {
-                        evidenceScore = Mathf.Max(0, evidenceScore - 1);
-                        evidenceLeakAccumulator = 0f;
-                    }
-                }
-            }
-            else
-            {
-                evidenceLeakAccumulator = 0f;
-            }
-
-            if (patrolAlertTimer > 0f)
-            {
-                patrolAlertTimer = Mathf.Max(0f, patrolAlertTimer - deltaTime);
-            }
+            taskService.TickSabotageTimers(deltaTime);
 
             if (emergencyCooldownTimer > 0f)
             {
@@ -2294,7 +2297,7 @@ namespace GanglandUndercover.Online
                     if (state.Alive)
                     {
                         Vector3 direction = new Vector3(state.Input.x, state.Input.y, 0f);
-                        float speedMultiplier = lockdownTimer > 0f ? 0.72f : patrolAlertTimer > 0f && GetPrivateRole(clientId) == OnlineRole.Gang ? 0.9f : 1f;
+                        float speedMultiplier = taskService.LockdownTimer > 0f ? 0.72f : taskService.PatrolAlertTimer > 0f && GetPrivateRole(clientId) == OnlineRole.Gang ? 0.9f : 1f;
                         state.Position = ResolveMapCollision(state.Position, state.Position + direction * MoveSpeed * speedMultiplier * deltaTime);
                     }
                     else
@@ -2322,7 +2325,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void BroadcastSnapshot()
+        internal void BroadcastSnapshot()
         {
             if (localPreviewMode)
             {
@@ -2342,8 +2345,8 @@ namespace GanglandUndercover.Online
             using FastBufferWriter writer = new FastBufferWriter(8192, Unity.Collections.Allocator.Temp);
             writer.WriteValueSafe(matchStarted);
             writer.WriteValueSafe((int)phase);
-            writer.WriteValueSafe(evidenceScore);
-            writer.WriteValueSafe(evidenceTarget);
+            writer.WriteValueSafe(taskService.EvidenceScore);
+            writer.WriteValueSafe(taskService.EvidenceTarget);
             writer.WriteValueSafe(emergencyMeetingsLeft);
             writer.WriteValueSafe(roomMinPlayers);
             writer.WriteValueSafe(roomMaxPlayers);
@@ -2358,12 +2361,14 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(lastSabotageEvent);
             writer.WriteValueSafe(evidenceMilestoneIndex);
             writer.WriteValueSafe(phaseTimer);
-            writer.WriteValueSafe(blackoutTimer);
-            writer.WriteValueSafe(lockdownTimer);
-            writer.WriteValueSafe(communicationJamTimer);
-            writer.WriteValueSafe(evidenceLeakTimer);
-            writer.WriteValueSafe(patrolAlertTimer);
+            writer.WriteValueSafe(taskService.BlackoutTimer);
+            writer.WriteValueSafe(taskService.LockdownTimer);
+            writer.WriteValueSafe(taskService.CommunicationJamTimer);
+            writer.WriteValueSafe(taskService.EvidenceLeakTimer);
+            writer.WriteValueSafe(taskService.PatrolAlertTimer);
+            writer.WriteValueSafe(taskService.EvidenceLeakAccumulator);
             writer.WriteValueSafe(emergencyCooldownTimer);
+            writer.WriteValueSafe(aiActionGraceTimer);
             writer.WriteValueSafe(matchElapsedSeconds);
             writer.WriteValueSafe(players.Count);
 
@@ -2456,13 +2461,15 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out float snapshotCommunicationJamTimer);
             reader.ReadValueSafe(out float snapshotEvidenceLeakTimer);
             reader.ReadValueSafe(out float snapshotPatrolAlertTimer);
+            reader.ReadValueSafe(out float snapshotEvidenceLeakAccumulator);
             reader.ReadValueSafe(out float snapshotEmergencyCooldownTimer);
+            reader.ReadValueSafe(out float snapshotAiActionGraceTimer);
             reader.ReadValueSafe(out float snapshotMatchElapsedSeconds);
             reader.ReadValueSafe(out int count);
             matchStarted = snapshotMatchStarted;
             phase = (OnlineMatchPhase)phaseValue;
-            evidenceScore = snapshotEvidenceScore;
-            evidenceTarget = snapshotEvidenceTarget;
+            taskService.EvidenceScore = snapshotEvidenceScore;
+            taskService.EvidenceTarget = snapshotEvidenceTarget;
             emergencyMeetingsLeft = snapshotEmergencyMeetingsLeft;
             roomMinPlayers = snapshotRoomMinPlayers;
             roomMaxPlayers = snapshotRoomMaxPlayers;
@@ -2477,12 +2484,11 @@ namespace GanglandUndercover.Online
             lastSabotageEvent = snapshotLastSabotageEvent;
             evidenceMilestoneIndex = snapshotEvidenceMilestoneIndex;
             phaseTimer = snapshotPhaseTimer;
-            blackoutTimer = snapshotBlackoutTimer;
-            lockdownTimer = snapshotLockdownTimer;
-            communicationJamTimer = snapshotCommunicationJamTimer;
-            evidenceLeakTimer = snapshotEvidenceLeakTimer;
-            patrolAlertTimer = snapshotPatrolAlertTimer;
+            taskService.LoadSabotageTimersFromSnapshot(
+                snapshotBlackoutTimer, snapshotLockdownTimer, snapshotCommunicationJamTimer,
+                snapshotEvidenceLeakTimer, snapshotEvidenceLeakAccumulator, snapshotPatrolAlertTimer);
             emergencyCooldownTimer = snapshotEmergencyCooldownTimer;
+            aiActionGraceTimer = snapshotAiActionGraceTimer;
             matchElapsedSeconds = snapshotMatchElapsedSeconds;
             status = "同步在线局：" + PhaseName(phase) + "。";
 
@@ -2573,9 +2579,64 @@ namespace GanglandUndercover.Online
                 reader.ReadValueSafe(out string entry);
                 caseLog.Add(entry);
             }
+
+            // ── 客户端初始快照完整性检查 ──
+            ValidateClientSnapshotIntegrity();
         }
 
-        private void StartOnlineMatch()
+        /// <summary>
+        /// 客户端收到服务器快照后，验证复原的状态是否完整可用。
+        /// 检测残缺快照（如零玩家/零任务/空对局阶段）并记录警告。
+        /// </summary>
+        private void ValidateClientSnapshotIntegrity()
+        {
+            bool hasIssue = false;
+
+            if (matchStarted && players.Count == 0)
+            {
+                Debug.LogError("[ClientSnapshot] 完整性异常：对局已开始但玩家列表为空");
+                hasIssue = true;
+            }
+
+            if (tasks.Count == 0)
+            {
+                Debug.LogWarning("[ClientSnapshot] 完整性警告：任务列表为空，可能影响任务系统正常运行");
+                hasIssue = true;
+            }
+
+            // 各玩家关键字段检查（检测反序列化字节错位）
+            foreach (var kv in players)
+            {
+                var p = kv.Value;
+                if (string.IsNullOrEmpty(p.DisplayName))
+                {
+                    Debug.LogWarning($"[ClientSnapshot] 完整性警告：玩家 {p.ClientId} DisplayName 为空");
+                    hasIssue = true;
+                }
+
+                // 位置检查：NaN/Infinity 表示序列化异常
+                if (float.IsNaN(p.Position.x) || float.IsNaN(p.Position.y) ||
+                    float.IsInfinity(p.Position.x) || float.IsInfinity(p.Position.y))
+                {
+                    Debug.LogError($"[ClientSnapshot] 完整性异常：玩家 {p.ClientId} 位置为 NaN/Infinity");
+                    hasIssue = true;
+                }
+
+                // 未分配角色但 Alive = true 视为异常（仅对局进行中）
+                if (matchStarted && p.Alive && p.PublicRole == OnlineRole.Unassigned)
+                {
+                    Debug.LogWarning($"[ClientSnapshot] 完整性警告：玩家 {p.ClientId} 存活但角色未分配");
+                    hasIssue = true;
+                }
+            }
+
+            if (!hasIssue)
+            {
+                Debug.Log($"[ClientSnapshot] 快照完整性检查通过。玩家 {players.Count} / 任务 {tasks.Count} / 尸体 {bodies.Count} / 投票 {votes.Count}");
+            }
+        }
+
+        internal void StartOnlineMatch()
         {
             if ((!localPreviewMode && (networkManager == null || !networkManager.IsServer)) || players.Count < 1)
             {
@@ -2621,23 +2682,18 @@ namespace GanglandUndercover.Online
             activeTaskFeedbackTimer = 0f;
             activeTaskFeedbackPositive = false;
             submittingActiveTask = false;
-            evidenceScore = 0;
+            taskService.EvidenceScore = 0;
             lastMeetingReason = "尚未召开会议。";
             lastVoteOutcome = "尚未投票。";
             lastEvidenceEvent = "专案启动，证据链待闭合。";
             lastSabotageEvent = "暂未发现破坏。";
             evidenceMilestoneIndex = 0;
             phaseTimer = 0f;
-            blackoutTimer = 0f;
-            lockdownTimer = 0f;
-            communicationJamTimer = 0f;
-            evidenceLeakTimer = 0f;
-            evidenceLeakAccumulator = 0f;
-            patrolAlertTimer = 0f;
+            taskService.ResetAllSabotageTimers();
             emergencyCooldownTimer = 0f;
             emergencyMeetingsLeft = ruleSet.EmergencyMeetingLimitFor(players.Count);
             aiActionGraceTimer = ruleSet.AiActionGraceSeconds;
-            currentCameraSubjectId = LocalPreviewClientId;
+            _cameraRig.SetSubject(LocalPreviewClientId);
             matchElapsedSeconds = 0f;
             resultSummary = "专案简报中。";
             matchStarted = true;
@@ -2832,11 +2888,14 @@ namespace GanglandUndercover.Online
         {
             var snap = new GameStateSnapshot();
 
+            // ── 版本标记 ──
+            snap.Version = GameStateSnapshot.SNAPSHOT_VERSION;
+
             // ── 全局状态 ──
             snap.MatchStarted = matchStarted;
             snap.Phase = phase;
-            snap.EvidenceScore = evidenceScore;
-            snap.EvidenceTarget = evidenceTarget;
+            snap.EvidenceScore = taskService.EvidenceScore;
+            snap.EvidenceTarget = taskService.EvidenceTarget;
             snap.EmergencyMeetingsLeft = emergencyMeetingsLeft;
             snap.EvidenceMilestoneIndex = evidenceMilestoneIndex;
             snap.NextBodyId = nextBodyId;
@@ -2852,12 +2911,12 @@ namespace GanglandUndercover.Online
             snap.LastEvidenceEvent = lastEvidenceEvent;
             snap.LastSabotageEvent = lastSabotageEvent;
             snap.PhaseTimer = phaseTimer;
-            snap.BlackoutTimer = blackoutTimer;
-            snap.LockdownTimer = lockdownTimer;
-            snap.CommunicationJamTimer = communicationJamTimer;
-            snap.EvidenceLeakTimer = evidenceLeakTimer;
-            snap.EvidenceLeakAccumulator = evidenceLeakAccumulator;
-            snap.PatrolAlertTimer = patrolAlertTimer;
+            snap.BlackoutTimer = taskService.BlackoutTimer;
+            snap.LockdownTimer = taskService.LockdownTimer;
+            snap.CommunicationJamTimer = taskService.CommunicationJamTimer;
+            snap.EvidenceLeakTimer = taskService.EvidenceLeakTimer;
+            snap.EvidenceLeakAccumulator = taskService.EvidenceLeakAccumulator;
+            snap.PatrolAlertTimer = taskService.PatrolAlertTimer;
             snap.EmergencyCooldownTimer = emergencyCooldownTimer;
             snap.AiActionGraceTimer = aiActionGraceTimer;
             snap.MatchElapsedSeconds = matchElapsedSeconds;
@@ -2945,11 +3004,24 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void RestoreFromSnapshot(GameStateSnapshot snap)
         {
+            // ── 版本兼容性检查 ──
+            if (snap.Version != GameStateSnapshot.SNAPSHOT_VERSION)
+            {
+                Debug.LogWarning(
+                    $"[RestoreFromSnapshot] 快照版本不匹配: 快照 v{snap.Version}, 当前 v{GameStateSnapshot.SNAPSHOT_VERSION}。" +
+                    "将尽力恢复，但部分状态可能存在差异。");
+            }
+
+            if (!snap.IsValid())
+            {
+                Debug.LogError("[RestoreFromSnapshot] 快照完整性检查失败，恢复后的状态可能不完整。");
+            }
+
             // ── 全局状态 ──
             matchStarted = snap.MatchStarted;
             phase = snap.Phase;
-            evidenceScore = snap.EvidenceScore;
-            evidenceTarget = snap.EvidenceTarget;
+            taskService.EvidenceScore = snap.EvidenceScore;
+            taskService.EvidenceTarget = snap.EvidenceTarget;
             emergencyMeetingsLeft = snap.EmergencyMeetingsLeft;
             evidenceMilestoneIndex = snap.EvidenceMilestoneIndex;
             nextBodyId = snap.NextBodyId;
@@ -2965,12 +3037,9 @@ namespace GanglandUndercover.Online
             lastEvidenceEvent = snap.LastEvidenceEvent;
             lastSabotageEvent = snap.LastSabotageEvent;
             phaseTimer = snap.PhaseTimer;
-            blackoutTimer = snap.BlackoutTimer;
-            lockdownTimer = snap.LockdownTimer;
-            communicationJamTimer = snap.CommunicationJamTimer;
-            evidenceLeakTimer = snap.EvidenceLeakTimer;
-            evidenceLeakAccumulator = snap.EvidenceLeakAccumulator;
-            patrolAlertTimer = snap.PatrolAlertTimer;
+            taskService.LoadSabotageTimersFromSnapshot(
+                snap.BlackoutTimer, snap.LockdownTimer, snap.CommunicationJamTimer,
+                snap.EvidenceLeakTimer, snap.EvidenceLeakAccumulator, snap.PatrolAlertTimer);
             emergencyCooldownTimer = snap.EmergencyCooldownTimer;
             aiActionGraceTimer = snap.AiActionGraceTimer;
             matchElapsedSeconds = snap.MatchElapsedSeconds;
@@ -3085,14 +3154,24 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            // 限流检查
+            if (!chatSystem.CanSendNow())
+            {
+                return;
+            }
+
             OnlineRole role = LocalEffectiveRole();
             Faction faction = ChatSystem.RoleToFaction(role);
             bool isDead = !IsLocalAlive();
             string senderId = LocalClientId().ToString();
             string senderName = GetLocalDisplayName();
 
+            // 确定通道
+            ChatChannel channel = ChatSystem.DetermineChannel(phase, !isDead);
+
             // 本地立即显示
-            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction);
+            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction, channel);
+            chatSystem.MarkSent();
 
             // 联机：发送到服务器
             if (localPreviewMode)
@@ -3107,11 +3186,13 @@ namespace GanglandUndercover.Online
 
             try
             {
-                byte[] contentBytes = System.Text.Encoding.UTF8.GetBytes(content);
-                using FastBufferWriter writer = new FastBufferWriter(4 + 4 + contentBytes.Length + 2048, Unity.Collections.Allocator.Temp);
-                writer.WriteValueSafe((int)role);
-                writer.WriteValueSafe(contentBytes.Length);
-                writer.WriteBytes(contentBytes, contentBytes.Length);
+                Vector3 senderPos = GetLocalPlayerPosition();
+                string payload = ((int)role) + "|" + ((int)channel) + "|" +
+                    senderPos.x.ToString("F2") + "|" + senderPos.y.ToString("F2") + "|" + senderPos.z.ToString("F2") + "|" + content;
+                byte[] payloadBytes = System.Text.Encoding.UTF8.GetBytes(payload);
+                using FastBufferWriter writer = new FastBufferWriter(4 + payloadBytes.Length + 2048, Unity.Collections.Allocator.Temp);
+                writer.WriteValueSafe(payloadBytes.Length);
+                writer.WriteBytes(payloadBytes, payloadBytes.Length);
                 networkManager.CustomMessagingManager.SendNamedMessage(ChatSendMessage, NetworkManager.ServerClientId, writer);
             }
             catch (System.Exception ex)
@@ -3127,60 +3208,91 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            reader.ReadValueSafe(out int roleValue);
-            reader.ReadValueSafe(out int contentLength);
+            reader.ReadValueSafe(out int payloadLength);
 
-            if (contentLength <= 0 || contentLength > 2048)
+            if (payloadLength <= 0 || payloadLength > 4096)
             {
                 return;
             }
 
-            byte[] contentBytes = new byte[contentLength];
-            reader.ReadBytes(ref contentBytes, contentLength);
-            string content = System.Text.Encoding.UTF8.GetString(contentBytes);
+            byte[] payloadBytes = new byte[payloadLength];
+            reader.ReadBytes(ref payloadBytes, payloadLength);
+            string payload = System.Text.Encoding.UTF8.GetString(payloadBytes);
+            string[] parts = payload.Split('|');
 
+            // 格式: role|channel|posX|posY|posZ|content (6+ parts)
+            if (parts.Length < 6)
+            {
+                return;
+            }
+
+            string content = string.Join("|", parts, 5, parts.Length - 5);
+            if (!int.TryParse(parts[0], out int roleValue)) return;
             OnlineRole role = (OnlineRole)roleValue;
+            if (!int.TryParse(parts[1], out int channelValue)) return;
+            ChatChannel channel = (ChatChannel)channelValue;
+            float.TryParse(parts[2], out float senderPosX);
+            float.TryParse(parts[3], out float senderPosY);
+            float.TryParse(parts[4], out float senderPosZ);
+            Vector3 senderPos = new Vector3(senderPosX, senderPosY, senderPosZ);
+
             Faction faction = ChatSystem.RoleToFaction(role);
             bool isDead = !players.TryGetValue(senderClientId, out OnlinePlayerState senderState) || !senderState.Alive;
             string senderName = players.TryGetValue(senderClientId, out OnlinePlayerState nameState) ? nameState.DisplayName : "玩家" + senderClientId;
 
             // 本地显示（服务器也显示）
-            chatSystem.ReceiveMessage(senderClientId.ToString(), senderName, content, isDead, faction);
+            chatSystem.ReceiveMessage(senderClientId.ToString(), senderName, content, isDead, faction, channel);
 
-            // 转发：会议阶段广播给所有人，行动阶段仅发送给同阵营
-            byte[] forwardBytes = System.Text.Encoding.UTF8.GetBytes(senderClientId + "|" + senderName + "|" + content + "|" + (isDead ? "1" : "0") + "|" + ((int)faction).ToString());
+            // 按通道路由转发
+            string forwardPayload = senderClientId + "|" + senderName + "|" + content + "|" + (isDead ? "1" : "0") + "|" + ((int)faction) + "|" + ((int)channel);
+            byte[] forwardBytes = System.Text.Encoding.UTF8.GetBytes(forwardPayload);
             using FastBufferWriter writer = new FastBufferWriter(4 + forwardBytes.Length + 2048, Unity.Collections.Allocator.Temp);
             writer.WriteValueSafe(forwardBytes.Length);
             writer.WriteBytes(forwardBytes, forwardBytes.Length);
 
-            if (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
+            if (channel == ChatChannel.Meeting)
             {
-                // 会议期间广播给所有人
+                // 会议频道：广播给所有存活玩家
                 networkManager.CustomMessagingManager.SendNamedMessageToAll(ChatBroadcastMessage, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
             }
-            else if (phase == OnlineMatchPhase.Action)
+            else if (channel == ChatChannel.Ghost)
             {
-                // 行动阶段：仅发送给同阵营客户端
+                // 鬼魂频道：仅发送给死亡玩家
                 foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
                 {
-                    if (kv.Key == senderClientId)
+                    if (kv.Key == senderClientId) continue;
+                    if (!kv.Value.Alive)
                     {
-                        continue;
+                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
                     }
+                }
+            }
+            else if (channel == ChatChannel.Proximity)
+            {
+                // 近距离频道：发送给发送者附近范围的存活玩家（不分阵营）
+                const float proximityRange = 12f;
+                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
+                {
+                    if (kv.Key == senderClientId) continue;
+                    if (!kv.Value.Alive) continue;
 
-                    OnlineRole targetRole = GetPrivateRole(kv.Key);
-                    Faction targetFaction = ChatSystem.RoleToFaction(targetRole);
-
-                    if (ChatSystem.IsSameFaction(faction, targetFaction))
+                    Vector3 targetPos = GetPlayerPosition(kv.Key);
+                    float dist = Vector3.Distance(senderPos, targetPos);
+                    if (dist <= proximityRange)
                     {
-                        ulong targetClientId = kv.Key;
-                        // 跳过本地服务器（已在上面显示）
-                        if (networkManager.IsHost && targetClientId == NetworkManager.ServerClientId)
-                        {
-                            continue;
-                        }
-
-                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, targetClientId, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                    }
+                }
+            }
+            else // Global
+            {
+                // 全局频道：发送给所有存活玩家
+                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
+                {
+                    if (kv.Key == senderClientId) continue;
+                    if (kv.Value.Alive)
+                    {
+                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
                     }
                 }
             }
@@ -3205,6 +3317,8 @@ namespace GanglandUndercover.Online
             string payload = System.Text.Encoding.UTF8.GetString(bytes);
             string[] parts = payload.Split('|');
 
+            // 新格式: senderId|senderName|content|isDead|faction|channel (6 parts)
+            // 兼容旧格式: senderId|senderName|content|isDead|faction (5 parts)
             if (parts.Length < 5)
             {
                 return;
@@ -3222,7 +3336,13 @@ namespace GanglandUndercover.Online
             }
 
             Faction faction = (Faction)factionValue;
-            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction);
+            ChatChannel channel = ChatChannel.Global;
+            if (parts.Length >= 6)
+            {
+                int.TryParse(parts[5], out int channelValue);
+                channel = (ChatChannel)channelValue;
+            }
+            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction, channel);
         }
 
         private string GetLocalDisplayName()
@@ -3266,7 +3386,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void TryInteractWithTask(ulong senderClientId, OnlinePlayerState player)
+        internal void TryInteractWithTask(ulong senderClientId, OnlinePlayerState player)
         {
             OnlineTaskState nearestTask = FindNearestTask(player.Position);
 
@@ -3285,7 +3405,7 @@ namespace GanglandUndercover.Online
                 nearestTask.Sabotaged = true;
                 nearestTask.Completed = false;
                 nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
-                evidenceScore = Mathf.Max(0, evidenceScore - SabotageEvidencePenalty(sabotageType));
+                taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - SabotageEvidencePenalty(sabotageType));
                 string actorLabel = role == OnlineRole.Mole ? "线人" : "黑帮";
                 status = actorLabel + "秘密破坏了 " + nearestTask.Name + "。";
                 lastSabotageEvent = status + " 影响: " + SabotageName(sabotageType);
@@ -3318,11 +3438,11 @@ namespace GanglandUndercover.Online
                     if (nearestTask.Progress >= nearestTask.RequiredProgress)
                     {
                         nearestTask.Completed = true;
-                        evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + EvidenceGainFor(nearestTask.Id, player.Profession, role));
+                        taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + EvidenceGainFor(nearestTask.Id, player.Profession, role));
                         player.Suspicion = Mathf.Max(0, player.Suspicion - 1);
                         players[senderClientId] = player;
                         status = nearestTask.Name + " 完成，证据链推进。";
-                        lastEvidenceEvent = status + " 当前 " + evidenceScore + "/" + evidenceTarget;
+                        lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
                         UpdateEvidenceMilestone();
                         AddCaseLog(status);
                         PlayCue("task");
@@ -3570,7 +3690,7 @@ namespace GanglandUndercover.Online
             BroadcastSnapshot();
         }
 
-        private void TryUseProfessionAbility(ulong senderClientId, OnlinePlayerState player)
+        internal void TryUseProfessionAbility(ulong senderClientId, OnlinePlayerState player)
         {
             if (abilityCooldowns.TryGetValue(senderClientId, out float cooldown) && cooldown > 0f)
             {
@@ -3588,21 +3708,21 @@ namespace GanglandUndercover.Online
                     status = player.DisplayName + " 发起重点盘问，案情板标记最高嫌疑。";
                     break;
                 case OnlineProfession.Forensics:
-                    evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + 1);
+                    taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + 1);
                     status = player.DisplayName + " 快速鉴证，证据链 +1。";
-                    lastEvidenceEvent = status + " 当前 " + evidenceScore + "/" + evidenceTarget;
+                    lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
                     UpdateEvidenceMilestone();
                     break;
                 case OnlineProfession.Tech:
-                    blackoutTimer = 0f;
+                    taskService.RepairSabotageEffect(SabotageType.Blackout);
                     RepairSabotagedTasks(1);
                     status = player.DisplayName + " 重启监控和电闸，解除一次破坏。";
                     break;
                 case OnlineProfession.UndercoverAgent:
-                    evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + 2);
+                    taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + 2);
                     player.Suspicion += 2;
                     status = player.DisplayName + " 秘密上传线报，证据链 +2 但暴露风险上升。";
-                    lastEvidenceEvent = status + " 当前 " + evidenceScore + "/" + evidenceTarget;
+                    lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
                     UpdateEvidenceMilestone();
                     break;
                 case OnlineProfession.Enforcer:
@@ -3621,7 +3741,7 @@ namespace GanglandUndercover.Online
                     break;
                 case OnlineProfession.Fixer:
                     RepairSabotagedTasks(2);
-                    evidenceScore = Mathf.Max(0, evidenceScore - 1);
+                    taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - 1);
                     status = player.DisplayName + " 篡改现场，修复表象但证据链被污染。";
                     break;
                 case OnlineProfession.Driver:
@@ -3680,7 +3800,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (communicationJamTimer > 0f)
+            if (taskService.CommunicationJamTimer > 0f)
             {
                 status = "通讯干扰中，无法启动紧急会议，需修复无线电监听。";
                 BroadcastSnapshot();
@@ -3714,11 +3834,11 @@ namespace GanglandUndercover.Online
             BroadcastSnapshot();
         }
 
-        private void BeginMeeting(string reason)
+        internal void BeginMeeting(string reason)
         {
             phase = OnlineMatchPhase.Meeting;
             phaseTimer = ruleSet.MeetingIntroSeconds;
-            blackoutTimer = 0f;
+            taskService.RepairSabotageEffect(SabotageType.Blackout);
             activeTaskId = -1;
             activeTaskStep = 0;
             activeTaskCharge = 0f;
@@ -3771,7 +3891,7 @@ namespace GanglandUndercover.Online
             return FindNearestOpenPosition(worldSeat, mapService.ScaleMapPosition(Vector3.zero));
         }
 
-        private void ApplyVote(ulong voterClientId, ulong targetClientId)
+        internal void ApplyVote(ulong voterClientId, ulong targetClientId)
         {
             if (phase != OnlineMatchPhase.Meeting && phase != OnlineMatchPhase.Voting)
             {
@@ -3901,7 +4021,7 @@ namespace GanglandUndercover.Online
             BroadcastSnapshot();
         }
 
-        private void EvaluateWinConditions()
+        internal void EvaluateWinConditions()
         {
             if (!matchStarted || phase == OnlineMatchPhase.Result)
             {
@@ -3914,7 +4034,7 @@ namespace GanglandUndercover.Online
             if (syncManager != null)
             {
                 EvaluateResult bridgeResult = syncManager.EvaluateVictory(
-                    evidenceScore, evidenceTarget, players,
+                    taskService.EvidenceScore, taskService.EvidenceTarget, players,
                     GetPrivateRole, tasks, matchStarted, phase, localRole);
 
                 if (bridgeResult.HasResult)
@@ -3925,7 +4045,7 @@ namespace GanglandUndercover.Online
             }
 
             // 兜底：在线原生快速判定（证据链 / 存活阵营）
-            if (evidenceScore >= evidenceTarget)
+            if (taskService.EvidenceScore >= taskService.EvidenceTarget)
             {
                 SetResult("警方胜利：证据链闭合。");
                 return;
@@ -3970,7 +4090,7 @@ namespace GanglandUndercover.Online
         private void ActivateGhostModeForLocalPlayer(ulong clientId)
         {
             // 查找本地玩家的 SocialCharacter GameObject
-            SocialCharacter[] allChars = FindObjectsOfType<SocialCharacter>();
+            SocialCharacter[] allChars = FindObjectsByType<SocialCharacter>();
             SocialCharacter localChar = null;
 
             foreach (SocialCharacter sc in allChars)
@@ -4009,13 +4129,13 @@ namespace GanglandUndercover.Online
 
             // 优先让 VictoryBridge 做超时判定
             if (syncManager != null && syncManager.TryTimeLimitEvaluation(
-                matchElapsedSeconds, ruleSet.MatchHardLimitSeconds, evidenceScore, evidenceTarget, tasks, out string bridgeResult))
+                matchElapsedSeconds, ruleSet.MatchHardLimitSeconds, taskService.EvidenceScore, taskService.EvidenceTarget, tasks, out string bridgeResult))
             {
                 SetResult(bridgeResult);
                 return;
             }
 
-            if (evidenceScore >= Mathf.CeilToInt(evidenceTarget * 0.82f) || CountCompletedTasks() >= Mathf.CeilToInt(tasks.Count * 0.72f))
+            if (taskService.EvidenceScore >= Mathf.CeilToInt(taskService.EvidenceTarget * 0.82f) || CountCompletedTasks() >= Mathf.CeilToInt(tasks.Count * 0.72f))
             {
                 SetResult("警方胜利：行动超时前已掌握关键证据。");
             }
@@ -4029,12 +4149,7 @@ namespace GanglandUndercover.Online
         {
             phase = OnlineMatchPhase.Result;
             phaseTimer = 0f;
-            blackoutTimer = 0f;
-            lockdownTimer = 0f;
-            communicationJamTimer = 0f;
-            evidenceLeakTimer = 0f;
-            evidenceLeakAccumulator = 0f;
-            patrolAlertTimer = 0f;
+            taskService.ResetAllSabotageTimers();
             emergencyCooldownTimer = 0f;
             aiActionGraceTimer = 0f;
             lastMeetingReason = "尚未召开会议。";
@@ -4063,7 +4178,7 @@ namespace GanglandUndercover.Online
 
         private void UpdateEvidenceMilestone()
         {
-            int milestone = EvidenceMilestoneFor(evidenceScore, evidenceTarget);
+            int milestone = EvidenceMilestoneFor(taskService.EvidenceScore, taskService.EvidenceTarget);
 
             if (milestone <= evidenceMilestoneIndex)
             {
@@ -4233,7 +4348,7 @@ namespace GanglandUndercover.Online
                             botTargets[botId] = PickSabotageTarget();
                         }
                     }
-                    else if (UnityEngine.Random.value < 0.2f && communicationJamTimer <= 0f && emergencyMeetingsLeft > 0 && Vector3.Distance(bot.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
+                    else if (UnityEngine.Random.value < 0.2f && taskService.CommunicationJamTimer <= 0f && emergencyMeetingsLeft > 0 && Vector3.Distance(bot.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
                     {
                         emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
                         emergencyCooldownTimer = ruleSet.EmergencyCooldownSeconds;
@@ -4376,31 +4491,27 @@ namespace GanglandUndercover.Online
 
         private void ApplySabotageEffect(SabotageType sabotageType, string taskName)
         {
+            taskService.ApplySabotageEffect(sabotageType, taskName);
             switch (sabotageType)
             {
                 case SabotageType.Blackout:
-                    blackoutTimer = ruleSet.BlackoutSeconds;
                     status = "黑帮切断电闸，港区进入黑灯。";
                     AddCaseLog(status);
                     PlayCue("blackout");
                     break;
                 case SabotageType.Lockdown:
-                    lockdownTimer = ruleSet.LockdownSeconds;
                     status = taskName + " 引发门禁封锁，部分路线被迫绕行。";
                     AddCaseLog(status);
                     break;
                 case SabotageType.Communications:
-                    communicationJamTimer = ruleSet.CommunicationJamSeconds;
                     status = taskName + " 被干扰，紧急会议暂时无法呼叫。";
                     AddCaseLog(status);
                     break;
                 case SabotageType.EvidenceLeak:
-                    evidenceLeakTimer = ruleSet.EvidenceLeakSeconds;
                     status = taskName + " 泄露证据，证据链持续受损。";
                     AddCaseLog(status);
                     break;
                 case SabotageType.PatrolAlert:
-                    patrolAlertTimer = ruleSet.PatrolAlertSeconds;
                     MarkNearbyGangSuspicion(mapService.ScaleMapPosition(Vector3.zero), 1);
                     status = taskName + " 触发巡逻警戒，靠近指挥区的嫌疑上升。";
                     AddCaseLog(status);
@@ -4410,24 +4521,7 @@ namespace GanglandUndercover.Online
 
         private void RepairSabotageEffect(SabotageType sabotageType)
         {
-            switch (sabotageType)
-            {
-                case SabotageType.Blackout:
-                    blackoutTimer = 0f;
-                    break;
-                case SabotageType.Lockdown:
-                    lockdownTimer = 0f;
-                    break;
-                case SabotageType.Communications:
-                    communicationJamTimer = 0f;
-                    break;
-                case SabotageType.EvidenceLeak:
-                    evidenceLeakTimer = 0f;
-                    break;
-                case SabotageType.PatrolAlert:
-                    patrolAlertTimer = 0f;
-                    break;
-            }
+            taskService.RepairSabotageEffect(sabotageType);
         }
 
         /// <summary>
@@ -4565,7 +4659,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private bool TryFindNearestVictim(Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
+        internal bool TryFindNearestVictim(Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
         {
             victimClientId = SkipVoteTarget;
             victim = default;
@@ -4593,7 +4687,7 @@ namespace GanglandUndercover.Online
             return victimClientId != SkipVoteTarget;
         }
 
-        private bool TryFindNearestBody(Vector3 position, out int bodyIndex)
+        internal bool TryFindNearestBody(Vector3 position, out int bodyIndex)
         {
             bodyIndex = -1;
             float bestDistance = ruleSet.ReportRange;
@@ -4664,7 +4758,7 @@ namespace GanglandUndercover.Online
             return count;
         }
 
-        private OnlineRole GetPrivateRole(ulong clientId)
+        internal OnlineRole GetPrivateRole(ulong clientId)
         {
             return privateRoles.TryGetValue(clientId, out OnlineRole role) ? role : OnlineRole.Police;
         }
@@ -5053,7 +5147,7 @@ namespace GanglandUndercover.Online
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("港区任务 | 调查组推进任务，黑帮可伪装靠近并破坏");
             builder.AppendLine("局时: " + FormatMatchTime(matchElapsedSeconds) + "/20:00");
-            builder.AppendLine("证据链: " + evidenceScore + "/" + evidenceTarget);
+            builder.AppendLine("证据链: " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget);
             builder.AppendLine("紧急会议: " + emergencyMeetingsLeft + " | 危机: " + BuildHazardSummary());
             builder.AppendLine("局势压力: " + BuildMatchPressureSummary());
             builder.AppendLine("最近证据: " + lastEvidenceEvent);
@@ -5097,7 +5191,7 @@ namespace GanglandUndercover.Online
         private string BuildFocusedIntel()
         {
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine("局时 " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链 " + evidenceScore + "/" + evidenceTarget + " | 会议 " + emergencyMeetingsLeft);
+            builder.AppendLine("局时 " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 会议 " + emergencyMeetingsLeft);
             builder.AppendLine("目标: 警方闭合证据链或投出黑帮；黑帮通过击倒、破坏和会议误导拖到 20 分钟。");
             builder.AppendLine("局势压力: " + BuildMatchPressureSummary());
             builder.AppendLine("你的任务: " + BuildLocalObjectiveSummary());
@@ -5193,29 +5287,29 @@ namespace GanglandUndercover.Online
         {
             List<string> hazards = new List<string>();
 
-            if (blackoutTimer > 0f)
+            if (taskService.BlackoutTimer > 0f)
             {
-                hazards.Add("黑灯 " + Mathf.CeilToInt(blackoutTimer));
+                hazards.Add("黑灯 " + Mathf.CeilToInt(taskService.BlackoutTimer));
             }
 
-            if (lockdownTimer > 0f)
+            if (taskService.LockdownTimer > 0f)
             {
-                hazards.Add("封锁 " + Mathf.CeilToInt(lockdownTimer));
+                hazards.Add("封锁 " + Mathf.CeilToInt(taskService.LockdownTimer));
             }
 
-            if (communicationJamTimer > 0f)
+            if (taskService.CommunicationJamTimer > 0f)
             {
-                hazards.Add("断讯 " + Mathf.CeilToInt(communicationJamTimer));
+                hazards.Add("断讯 " + Mathf.CeilToInt(taskService.CommunicationJamTimer));
             }
 
-            if (evidenceLeakTimer > 0f)
+            if (taskService.EvidenceLeakTimer > 0f)
             {
-                hazards.Add("泄证 " + Mathf.CeilToInt(evidenceLeakTimer));
+                hazards.Add("泄证 " + Mathf.CeilToInt(taskService.EvidenceLeakTimer));
             }
 
-            if (patrolAlertTimer > 0f)
+            if (taskService.PatrolAlertTimer > 0f)
             {
-                hazards.Add("巡逻 " + Mathf.CeilToInt(patrolAlertTimer));
+                hazards.Add("巡逻 " + Mathf.CeilToInt(taskService.PatrolAlertTimer));
             }
 
             return hazards.Count == 0 ? "无" : string.Join(" / ", hazards);
@@ -5223,7 +5317,7 @@ namespace GanglandUndercover.Online
 
         private string BuildMatchPressureSummary()
         {
-            float evidenceRatio = evidenceScore / (float)Mathf.Max(1, evidenceTarget);
+            float evidenceRatio = taskService.EvidenceScore / (float)Mathf.Max(1, taskService.EvidenceTarget);
             float taskRatio = CountCompletedTasks() / (float)Mathf.Max(1, tasks.Count);
             float timeRatio = Mathf.Clamp01(matchElapsedSeconds / ruleSet.MatchHardLimitSeconds);
             int aliveGang = CountAliveRole(OnlineRole.Gang);
@@ -5273,14 +5367,14 @@ namespace GanglandUndercover.Online
         {
             int nextMilestone = Mathf.Clamp(evidenceMilestoneIndex + 1, 1, 4);
             float targetRatio = nextMilestone == 1 ? 0.25f : nextMilestone == 2 ? 0.5f : nextMilestone == 3 ? 0.75f : 1f;
-            int nextScore = Mathf.CeilToInt(evidenceTarget * targetRatio);
+            int nextScore = Mathf.CeilToInt(taskService.EvidenceTarget * targetRatio);
 
-            if (evidenceScore >= evidenceTarget)
+            if (taskService.EvidenceScore >= taskService.EvidenceTarget)
             {
                 return "证据已闭合";
             }
 
-            return "下阶段还差 " + Mathf.Max(0, nextScore - evidenceScore) + " 证";
+            return "下阶段还差 " + Mathf.Max(0, nextScore - taskService.EvidenceScore) + " 证";
         }
 
         private static string EvidenceMilestoneName(int milestone)
@@ -5348,16 +5442,16 @@ namespace GanglandUndercover.Online
 
         private string BuildVoiceHudLine()
         {
-            if (serviceBootstrap == null)
+            ChatChannel channel = chatSystem != null ? chatSystem.CurrentChannel : ChatChannel.Global;
+            string mode = channel switch
             {
-                return "语音: Vivox 未挂载";
-            }
-
-            string mode = phase == OnlineMatchPhase.Action
-                ? proximityVoiceEnabled && IsLocalAlive() ? "行动近距离" : "行动频道"
-                : phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting ? "会议全员" : "房间语音";
-            string channel = string.IsNullOrWhiteSpace(serviceBootstrap.ActiveVoiceChannel) ? "连接中" : serviceBootstrap.ActiveVoiceChannel;
-            return "语音: " + mode + " | " + channel + " | " + serviceBootstrap.VoiceStatus;
+                ChatChannel.Meeting => "会议频道",
+                ChatChannel.Proximity => "近距离",
+                ChatChannel.Global => "全局",
+                ChatChannel.Ghost => "鬼魂频道",
+                _ => "聊天"
+            };
+            return "聊天: " + mode + " | 输入 T 发言 | " + (chatSystem != null ? chatSystem.MessageCount + "条消息" : "未连接");
         }
 
         private OnlineTaskState FindRecommendedTask(Vector3 position)
@@ -5530,8 +5624,8 @@ namespace GanglandUndercover.Online
             roomMaxPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMaxPlayers, roomMinPlayers, ruleSet.MaximumRoomPlayers));
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
-            GUILayout.Label("证据目标 " + evidenceTarget, GUILayout.Width(110f));
-            evidenceTarget = Mathf.RoundToInt(GUILayout.HorizontalSlider(evidenceTarget, 34, 56));
+            GUILayout.Label("证据目标 " + taskService.EvidenceTarget, GUILayout.Width(110f));
+            taskService.EvidenceTarget = Mathf.RoundToInt(GUILayout.HorizontalSlider(taskService.EvidenceTarget, 34, 56));
             GUILayout.EndHorizontal();
             GUILayout.Label("目标局长: " + TargetMatchMinutesMin + "-" + TargetMatchMinutesMax + " 分钟 | 击倒冷却 " + Mathf.RoundToInt(ruleSet.KillCooldownSeconds) + "s | 会议 " + Mathf.RoundToInt(ruleSet.MeetingIntroSeconds + ruleSet.VotingSeconds) + "s");
             roomAutoFillAi = GUILayout.Toggle(roomAutoFillAi, "人数不足时 AI 补位");
@@ -5587,7 +5681,7 @@ namespace GanglandUndercover.Online
             Rect topBar = new Rect(16f, 14f, topBarWidth, topBarHeight);
             GUILayout.BeginArea(topBar, GUI.skin.box);
             GUILayout.Label("九龙港城行动 | " + RoleName(localRole) + " / " + LocalProfessionName());
-            GUILayout.Label("证据 " + evidenceScore + "/" + evidenceTarget + " | 任务 " + CountCompletedTasks() + "/" + tasks.Count + " | 存活 " + CountAlivePlayers() + "/" + players.Count + " | 会议 " + emergencyMeetingsLeft + " | " + BuildHazardSummary() + (aiActionGraceTimer > 0f ? " | 缓冲 " + Mathf.CeilToInt(aiActionGraceTimer) + "s" : string.Empty));
+            GUILayout.Label("证据 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 任务 " + CountCompletedTasks() + "/" + tasks.Count + " | 存活 " + CountAlivePlayers() + "/" + players.Count + " | 会议 " + emergencyMeetingsLeft + " | " + BuildHazardSummary() + (aiActionGraceTimer > 0f ? " | 缓冲 " + Mathf.CeilToInt(aiActionGraceTimer) + "s" : string.Empty));
             GUILayout.Label("阶段 " + EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
             GUILayout.Label(BuildVoiceHudLine());
             GUILayout.EndArea();
@@ -5896,52 +5990,7 @@ namespace GanglandUndercover.Online
 
         private static Color TaskPanelAccent(int taskId)
         {
-            switch (taskId)
-            {
-                case 0:
-                    return new Color(0.12f, 0.7f, 0.94f, 1f);
-                case 1:
-                case 10:
-                case 23:
-                    return new Color(0.92f, 0.72f, 0.16f, 1f);
-                case 2:
-                case 14:
-                case 24:
-                    return new Color(0.14f, 0.82f, 0.32f, 1f);
-                case 3:
-                case 15:
-                    return new Color(0.82f, 0.84f, 0.92f, 1f);
-                case 4:
-                case 11:
-                case 16:
-                case 22:
-                    return new Color(0.86f, 0.6f, 0.12f, 1f);
-                case 5:
-                case 27:
-                    return new Color(0.72f, 0.2f, 0.82f, 1f);
-                case 6:
-                case 13:
-                case 21:
-                    return new Color(0.72f, 0.86f, 0.18f, 1f);
-                case 7:
-                case 12:
-                    return new Color(0.92f, 0.42f, 0.12f, 1f);
-                case 8:
-                case 18:
-                case 26:
-                    return new Color(0.42f, 0.76f, 0.94f, 1f);
-                case 9:
-                case 19:
-                    return new Color(0.92f, 0.48f, 0.74f, 1f);
-                case 17:
-                    return new Color(0.58f, 0.9f, 0.36f, 1f);
-                case 20:
-                    return new Color(0.94f, 0.84f, 0.2f, 1f);
-                case 25:
-                    return new Color(0.8f, 0.34f, 0.26f, 1f);
-                default:
-                    return new Color(0.08f, 0.62f, 0.82f, 1f);
-            }
+            return OnlineWorldBuilder.TaskPanelAccent(taskId);
         }
 
         private static string TaskPanelFooter(int taskId)
@@ -6383,7 +6432,7 @@ namespace GanglandUndercover.Online
             GUI.color = oldColor;
         }
 
-        private static void DrawMiniMapCorridors(Rect rect)
+        private void DrawMiniMapCorridors(Rect rect)
         {
             Color oldColor = GUI.color;
             GUI.color = new Color(0.22f, 0.25f, 0.26f, 1f);
@@ -6402,7 +6451,7 @@ namespace GanglandUndercover.Online
             GUI.color = oldColor;
         }
 
-        private static void DrawMiniMapArea(Rect mapRect, Vector3 worldCenter, Vector3 worldSize, Color color, string label)
+        private void DrawMiniMapArea(Rect mapRect, Vector3 worldCenter, Vector3 worldSize, Color color, string label)
         {
             Rect area = WorldRectToMapRect(mapRect, worldCenter, worldSize);
             Color oldColor = GUI.color;
@@ -6418,7 +6467,7 @@ namespace GanglandUndercover.Online
             GUI.color = oldColor;
         }
 
-        private static void DrawMiniMapDot(Rect mapRect, Vector3 worldPosition, Color color, float size)
+        private void DrawMiniMapDot(Rect mapRect, Vector3 worldPosition, Color color, float size)
         {
             Vector2 point = WorldToMapPoint(mapRect, worldPosition);
             Color oldColor = GUI.color;
@@ -6427,7 +6476,7 @@ namespace GanglandUndercover.Online
             GUI.color = oldColor;
         }
 
-        private static void DrawMiniMapLabel(Rect mapRect, Vector3 worldPosition, string label, Color color)
+        private void DrawMiniMapLabel(Rect mapRect, Vector3 worldPosition, string label, Color color)
         {
             if (string.IsNullOrEmpty(label))
             {
@@ -6446,7 +6495,7 @@ namespace GanglandUndercover.Online
             GUI.color = oldColor;
         }
 
-        private static Rect WorldRectToMapRect(Rect mapRect, Vector3 worldCenter, Vector3 worldSize)
+        private Rect WorldRectToMapRect(Rect mapRect, Vector3 worldCenter, Vector3 worldSize)
         {
             Vector2 center = WorldToMapPoint(mapRect, worldCenter);
             float width = worldSize.x / (mapService.MapHalfWidth * 2f) * mapRect.width;
@@ -6454,7 +6503,7 @@ namespace GanglandUndercover.Online
             return new Rect(center.x - width * 0.5f, center.y - height * 0.5f, width, height);
         }
 
-        private static Vector2 WorldToMapPoint(Rect mapRect, Vector3 worldPosition)
+        private Vector2 WorldToMapPoint(Rect mapRect, Vector3 worldPosition)
         {
             float x = Mathf.InverseLerp(-mapService.MapHalfWidth, mapService.MapHalfWidth, worldPosition.x);
             float y = Mathf.InverseLerp(-mapService.MapHalfHeight, mapService.MapHalfHeight, worldPosition.y);
@@ -6463,17 +6512,8 @@ namespace GanglandUndercover.Online
 
         private Vector3 LocalCameraTarget()
         {
-            if (players.TryGetValue(currentCameraSubjectId, out OnlinePlayerState subject) && subject.Alive)
-            {
-                return subject.Position;
-            }
-
-            if (players.TryGetValue(LocalClientId(), out OnlinePlayerState state))
-            {
-                return state.Position;
-            }
-
-            return localPosition;
+            EnsureCameraRig();
+            return _cameraRig.GetTarget(players, LocalClientId(), localPosition);
         }
 
         private ulong PickOpeningCameraSubject(ulong fallbackClientId)
@@ -6624,7 +6664,7 @@ namespace GanglandUndercover.Online
             GUI.color = new Color(0.055f, 0.065f, 0.07f, 1f);
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
 
-            float progress = Mathf.Clamp01(evidenceScore / (float)Mathf.Max(1, evidenceTarget));
+            float progress = Mathf.Clamp01(taskService.EvidenceScore / (float)Mathf.Max(1, taskService.EvidenceTarget));
             GUI.color = new Color(0.08f, 0.62f, 0.82f, 1f);
             GUI.DrawTexture(new Rect(rect.x + 12f, rect.y + 16f, (rect.width - 24f) * progress, 10f), Texture2D.whiteTexture);
             GUI.color = new Color(0.72f, 0.18f, 0.16f, 1f);
@@ -6639,7 +6679,7 @@ namespace GanglandUndercover.Online
             }
 
             GUI.color = Color.white;
-            GUI.Label(new Rect(rect.x + 12f, rect.y + 18f, rect.width - 24f, rect.height - 18f), "证据链 " + evidenceScore + "/" + evidenceTarget + "\n未报案 " + CountUnreportedBodies() + " | 被破坏任务 " + sabotaged + "\n" + BuildMeetingEvidenceDigest() + "\n会议原因: " + lastMeetingReason + "\n上轮结论: " + lastVoteOutcome);
+            GUI.Label(new Rect(rect.x + 12f, rect.y + 18f, rect.width - 24f, rect.height - 18f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + "\n未报案 " + CountUnreportedBodies() + " | 被破坏任务 " + sabotaged + "\n" + BuildMeetingEvidenceDigest() + "\n会议原因: " + lastMeetingReason + "\n上轮结论: " + lastVoteOutcome);
             GUI.color = oldColor;
         }
 
@@ -6737,7 +6777,7 @@ namespace GanglandUndercover.Online
 
         private void DrawVoiceRoomStrip()
         {
-            GUILayout.Label("会议语音频道：全员开放 | " + BuildVoiceHudLine());
+            GUILayout.Label("会议聊天频道：全员可见 | " + BuildVoiceHudLine());
             GUILayout.BeginHorizontal();
 
             foreach (OnlinePlayerState state in players.Values)
@@ -6828,11 +6868,11 @@ namespace GanglandUndercover.Online
             GUI.color = new Color(0.055f, 0.065f, 0.07f, 1f);
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
 
-            float evidenceRatio = Mathf.Clamp01(evidenceScore / (float)Mathf.Max(1, evidenceTarget));
+            float evidenceRatio = Mathf.Clamp01(taskService.EvidenceScore / (float)Mathf.Max(1, taskService.EvidenceTarget));
             float taskRatio = Mathf.Clamp01(CountCompletedTasks() / (float)Mathf.Max(1, tasks.Count));
             float survivalRatio = Mathf.Clamp01(CountAlivePlayers() / (float)Mathf.Max(1, players.Count));
 
-            DrawResultBar(new Rect(rect.x + 14f, rect.y + 18f, rect.width - 28f, 16f), evidenceRatio, new Color(0.08f, 0.62f, 0.82f, 1f), "证据链 " + evidenceScore + "/" + evidenceTarget);
+            DrawResultBar(new Rect(rect.x + 14f, rect.y + 18f, rect.width - 28f, 16f), evidenceRatio, new Color(0.08f, 0.62f, 0.82f, 1f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget);
             DrawResultBar(new Rect(rect.x + 14f, rect.y + 50f, rect.width - 28f, 16f), taskRatio, new Color(0.86f, 0.68f, 0.12f, 1f), "任务 " + CountCompletedTasks() + "/" + tasks.Count);
             DrawResultBar(new Rect(rect.x + 14f, rect.y + 82f, rect.width - 28f, 16f), survivalRatio, new Color(0.14f, 0.7f, 0.36f, 1f), "存活 " + CountAlivePlayers() + "/" + players.Count);
             GUI.color = oldColor;
@@ -6868,6 +6908,8 @@ namespace GanglandUndercover.Online
 
         private void BuildDefaultTasks()
         {
+            EnsureCoreServices();
+
             tasks.Clear();
             for (int id = 0; id <= 19; id++)
             {
@@ -6939,6 +6981,9 @@ namespace GanglandUndercover.Online
             worldLabels.Clear();
             worldRoot = new GameObject(WorldRootName);
             worldRoot.transform.SetParent(transform, false);
+            WorldBuilder = new OnlineWorldBuilder();
+            WorldBuilder.Initialize(worldRoot, mapService, solidObstacleRects, walkableRects, worldLabels);
+            WorldBuilder.EnsureRuntimeSprites();
             ConfigureSceneLighting();
             CreateSocialDeductionShipMap();
             CreateNeonLight("会议舱顶灯", new Vector3(0f, 0f, 1.1f), new Color(0.35f, 0.75f, 1f, 1f), 1.8f, 6.4f);
@@ -7026,46 +7071,8 @@ namespace GanglandUndercover.Online
 
         private void ConfigureMainCamera()
         {
-            if (Camera.main == null)
-            {
-                return;
-            }
-
-            Camera camera = Camera.main;
-            camera.nearClipPlane = 0.01f;
-            camera.farClipPlane = 120f;
-            camera.clearFlags = CameraClearFlags.SolidColor;
-            camera.backgroundColor = new Color(0.055f, 0.075f, 0.085f, 1f);
-            bool preview = tacticalMapOpen || phase == OnlineMatchPhase.Lobby || phase == OnlineMatchPhase.Opening || phase == OnlineMatchPhase.Result;
-            float targetSize = preview ? PreviewCameraSize : activeTaskId >= 0 ? TaskCameraSize : blackoutTimer > 0f ? BlackoutCameraSize : ActionCameraSize;
-            Vector3 target = preview ? Vector3.zero : LocalCameraTarget();
-            float yOffset = preview ? PreviewCameraYOffset : ActionCameraYOffset;
-            float zOffset = preview ? PreviewCameraZOffset : ActionCameraZOffset;
-            Vector3 desiredPosition = new Vector3(target.x, target.y + yOffset, zOffset);
-
-            if (camera.orthographic != preview)
-            {
-                cameraWasConfigured = false;
-            }
-
-            camera.orthographic = preview;
-
-            if (preview)
-            {
-                camera.fieldOfView = PreviewCameraFieldOfView;
-                camera.orthographicSize = cameraWasConfigured ? Mathf.Lerp(camera.orthographicSize, targetSize, Time.deltaTime * 4f) : targetSize;
-            }
-            else
-            {
-                camera.fieldOfView = cameraWasConfigured ? Mathf.Lerp(camera.fieldOfView, ActionCameraFieldOfView, Time.deltaTime * 4f) : ActionCameraFieldOfView;
-                desiredPosition += new Vector3(0f, 0.18f, 0.15f);
-            }
-
-            Vector3 lookTarget = preview ? target : target + new Vector3(0f, ActionCameraLookAheadY, ActionCameraLookHeight);
-            Quaternion desiredRotation = Quaternion.LookRotation(lookTarget - desiredPosition, Vector3.up);
-            camera.transform.rotation = Quaternion.Slerp(camera.transform.rotation, desiredRotation, cameraWasConfigured ? Time.deltaTime * 4.5f : 1f);
-            camera.transform.position = Vector3.Lerp(camera.transform.position, desiredPosition, cameraWasConfigured ? Time.deltaTime * 4.8f : 1f);
-            cameraWasConfigured = true;
+            _cameraRig.Configure(Camera.main, phase, tacticalMapOpen, activeTaskId,
+                taskService.BlackoutTimer, players, LocalClientId(), localPosition);
         }
 
         private void UpdateWorldVisuals()
@@ -7103,7 +7110,7 @@ namespace GanglandUndercover.Online
         {
             HashSet<ulong> seen = new HashSet<ulong>();
             ulong localClientId = LocalClientId();
-            currentCameraSubjectId = localClientId;
+            _cameraRig.SetSubject(localClientId);
 
             foreach (OnlinePlayerState state in players.Values)
             {
@@ -7300,53 +7307,12 @@ namespace GanglandUndercover.Online
 
         private GameObject CreateTaskVisual(OnlineTaskState task)
         {
-            GameObject taskObject = new GameObject("Online Task " + task.Name);
-            taskObject.transform.SetParent(worldRoot.transform, false);
-            taskObject.transform.localScale = Vector3.one;
-            Vector3 scaledTaskScale = TaskScale(task.Id);
-            float width = Mathf.Max(0.34f, scaledTaskScale.x);
-            float depth = Mathf.Max(0.24f, scaledTaskScale.y * 0.72f);
-            Color accent = TaskPanelAccent(task.Id);
-            Color darkBase = new Color(0.055f, 0.072f, 0.078f, 1f);
-
-            CreatePropChild(taskObject.transform, "Task Glow", new Vector3(0f, 0f, -0.09f), new Vector3(width * 1.42f, depth * 1.45f, 0.06f), new Color(accent.r, accent.g, accent.b, 0.18f), PrimitiveType.Sphere);
-            CreateMeshBoxChild(taskObject.transform, "Task Pedestal", new Vector3(0f, 0f, 0.08f), new Vector3(width, depth, 0.22f), darkBase);
-            CreateMeshBoxChild(taskObject.transform, "Task Raised Console", new Vector3(0f, depth * 0.18f, 0.28f), new Vector3(width * 0.76f, depth * 0.45f, 0.28f), Darken(accent, 0.42f));
-            CreateMeshBoxChild(taskObject.transform, "Task Screen Glass", new Vector3(0f, depth * 0.42f, 0.47f), new Vector3(width * 0.62f, 0.035f, 0.2f), new Color(0.08f, 0.78f, 0.92f, 1f));
-            CreatePropChild(taskObject.transform, "Task Beacon", new Vector3(width * 0.38f, -depth * 0.22f, 0.46f), new Vector3(0.14f, 0.14f, 0.12f), new Color(0.95f, 0.88f, 0.22f, 1f), PrimitiveType.Cylinder);
-            CreatePropChild(taskObject.transform, "Task Marker", new Vector3(0f, depth * 0.66f, 0.36f), new Vector3(width * 0.38f, 0.06f, 0.06f), accent, PrimitiveType.Cube);
-            CreateTaskEquipment(taskObject.transform, task.Id);
-            SetTaskVisualState(taskObject, task);
-            return taskObject;
+            return worldBuilder.CreateTaskVisual(task, worldRoot.transform);
         }
 
         private void SetTaskVisualState(GameObject visual, OnlineTaskState task)
         {
-            Color accent = task.Completed ? new Color(0.14f, 0.74f, 0.36f, 1f) : task.Sabotaged ? new Color(0.86f, 0.1f, 0.08f, 1f) : TaskPanelAccent(task.Id);
-            Transform marker = visual.transform.Find("Task Marker");
-            Transform screen = visual.transform.Find("Task Screen Glass");
-            Transform beacon = visual.transform.Find("Task Beacon");
-            Transform console = visual.transform.Find("Task Raised Console");
-
-            if (marker != null)
-            {
-                SetColor(marker.gameObject, accent);
-            }
-
-            if (screen != null)
-            {
-                SetColor(screen.gameObject, task.Sabotaged ? new Color(0.95f, 0.14f, 0.08f, 1f) : task.Completed ? new Color(0.16f, 0.92f, 0.5f, 1f) : new Color(0.08f, 0.78f, 0.92f, 1f));
-            }
-
-            if (beacon != null)
-            {
-                SetColor(beacon.gameObject, task.Sabotaged ? new Color(1f, 0.12f, 0.05f, 1f) : new Color(0.95f, 0.88f, 0.22f, 1f));
-            }
-
-            if (console != null)
-            {
-                SetColor(console.gameObject, Darken(accent, task.Completed ? 0.5f : 0.42f));
-            }
+            worldBuilder.SetTaskVisualState(visual, task);
         }
 
         private Sprite TaskVisualSprite(int taskId)
@@ -7396,270 +7362,38 @@ namespace GanglandUndercover.Online
 
         private void CreateTaskEquipment(Transform parent, int taskId)
         {
-            Color screen = new Color(0.04f, 0.62f, 0.82f, 1f);
-            Color darkMetal = new Color(0.05f, 0.07f, 0.08f, 1f);
-            Color warning = new Color(0.92f, 0.74f, 0.08f, 1f);
-
-            switch (taskId)
-            {
-                case 0:
-                    CreatePropChild(parent, "CCTV Monitor A", new Vector3(-0.22f, 0.18f, 0.24f), new Vector3(0.22f, 0.05f, 0.16f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "CCTV Monitor B", new Vector3(0.04f, 0.18f, 0.24f), new Vector3(0.22f, 0.05f, 0.16f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "CCTV Monitor C", new Vector3(0.3f, 0.18f, 0.24f), new Vector3(0.22f, 0.05f, 0.16f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "CCTV Keyboard", new Vector3(0.04f, -0.12f, 0.22f), new Vector3(0.42f, 0.08f, 0.06f), darkMetal, PrimitiveType.Cube);
-                    break;
-                case 1:
-                    CreatePropChild(parent, "Container Seal Tape", new Vector3(0f, 0.26f, 0.18f), new Vector3(0.72f, 0.06f, 0.08f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Inspection Clamp L", new Vector3(-0.42f, 0f, 0.22f), new Vector3(0.08f, 0.5f, 0.12f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Inspection Clamp R", new Vector3(0.42f, 0f, 0.22f), new Vector3(0.08f, 0.5f, 0.12f), darkMetal, PrimitiveType.Cube);
-                    break;
-                case 2:
-                    CreatePropChild(parent, "Breaker Handle", new Vector3(0.14f, 0f, 0.26f), new Vector3(0.08f, 0.42f, 0.08f), new Color(0.8f, 0.12f, 0.08f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Breaker Spark A", new Vector3(-0.18f, 0.1f, 0.28f), new Vector3(0.12f, 0.04f, 0.08f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Breaker Spark B", new Vector3(-0.1f, -0.12f, 0.28f), new Vector3(0.08f, 0.04f, 0.08f), warning, PrimitiveType.Cube);
-                    break;
-                case 3:
-                    CreatePropChild(parent, "Evidence Scan Tray", new Vector3(0f, -0.02f, 0.22f), new Vector3(0.52f, 0.34f, 0.08f), new Color(0.86f, 0.88f, 0.82f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Evidence Scan Beam", new Vector3(0f, 0.22f, 0.3f), new Vector3(0.46f, 0.05f, 0.1f), screen, PrimitiveType.Cube);
-                    break;
-                case 4:
-                    CreatePropChild(parent, "Upload Screen", new Vector3(0f, 0.16f, 0.26f), new Vector3(0.38f, 0.06f, 0.22f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Upload Antenna", new Vector3(0.26f, 0.02f, 0.32f), new Vector3(0.04f, 0.04f, 0.28f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Archive Drive", new Vector3(-0.24f, -0.16f, 0.24f), new Vector3(0.18f, 0.16f, 0.1f), darkMetal, PrimitiveType.Cube);
-                    break;
-                case 5:
-                    CreatePropChild(parent, "Recorder", new Vector3(0f, 0.02f, 0.24f), new Vector3(0.22f, 0.14f, 0.08f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Interview Chair A", new Vector3(-0.36f, 0f, 0.16f), new Vector3(0.14f, 0.22f, 0.12f), new Color(0.44f, 0.18f, 0.1f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Interview Chair B", new Vector3(0.36f, 0f, 0.16f), new Vector3(0.14f, 0.22f, 0.12f), new Color(0.44f, 0.18f, 0.1f, 1f), PrimitiveType.Cube);
-                    break;
-                case 6:
-                    CreatePropChild(parent, "Radio Mast", new Vector3(0.22f, 0.04f, 0.34f), new Vector3(0.04f, 0.04f, 0.38f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Radio Dial A", new Vector3(-0.18f, -0.1f, 0.24f), new Vector3(0.1f, 0.1f, 0.06f), screen, PrimitiveType.Cylinder);
-                    CreatePropChild(parent, "Radio Waveform", new Vector3(0.02f, 0.18f, 0.26f), new Vector3(0.38f, 0.05f, 0.1f), screen, PrimitiveType.Cube);
-                    break;
-                case 7:
-                    CreatePropChild(parent, "Access Gate L", new Vector3(-0.35f, 0.1f, 0.2f), new Vector3(0.06f, 0.42f, 0.2f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Access Gate R", new Vector3(0.35f, 0.1f, 0.2f), new Vector3(0.06f, 0.42f, 0.2f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Card Reader", new Vector3(0f, -0.18f, 0.26f), new Vector3(0.22f, 0.1f, 0.12f), screen, PrimitiveType.Cube);
-                    break;
-                case 8:
-                    CreatePropChild(parent, "Witness Binoculars", new Vector3(0f, 0.04f, 0.26f), new Vector3(0.32f, 0.1f, 0.1f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Tripod Stem", new Vector3(0f, -0.18f, 0.22f), new Vector3(0.05f, 0.28f, 0.05f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Photo Tag", new Vector3(0.26f, 0.18f, 0.22f), new Vector3(0.16f, 0.08f, 0.08f), new Color(0.86f, 0.86f, 0.78f, 1f), PrimitiveType.Cube);
-                    break;
-                case 9:
-                    CreatePropChild(parent, "Clinic Tray", new Vector3(0f, 0.02f, 0.24f), new Vector3(0.44f, 0.22f, 0.08f), new Color(0.86f, 0.86f, 0.8f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Sample Tube A", new Vector3(-0.12f, 0.12f, 0.32f), new Vector3(0.05f, 0.05f, 0.18f), screen, PrimitiveType.Cylinder);
-                    CreatePropChild(parent, "Sample Tube B", new Vector3(0.12f, 0.12f, 0.32f), new Vector3(0.05f, 0.05f, 0.18f), new Color(0.68f, 0.18f, 0.18f, 1f), PrimitiveType.Cylinder);
-                    break;
-                case 10:
-                    CreatePropChild(parent, "Patrol Clipboard", new Vector3(-0.18f, 0.08f, 0.24f), new Vector3(0.18f, 0.24f, 0.06f), new Color(0.8f, 0.74f, 0.56f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Dock Rope Knot", new Vector3(0.2f, -0.05f, 0.22f), new Vector3(0.18f, 0.12f, 0.1f), new Color(0.46f, 0.34f, 0.18f, 1f), PrimitiveType.Sphere);
-                    break;
-                case 11:
-                    CreatePropChild(parent, "Ledger Screen", new Vector3(0f, 0.18f, 0.26f), new Vector3(0.38f, 0.06f, 0.2f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Cash Stack A", new Vector3(-0.18f, -0.12f, 0.24f), new Vector3(0.16f, 0.1f, 0.06f), new Color(0.18f, 0.52f, 0.24f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Cash Stack B", new Vector3(0.08f, -0.14f, 0.24f), new Vector3(0.16f, 0.1f, 0.06f), new Color(0.18f, 0.52f, 0.24f, 1f), PrimitiveType.Cube);
-                    break;
-                case 12:
-                    CreatePropChild(parent, "Shutter Motor", new Vector3(-0.2f, 0.12f, 0.24f), new Vector3(0.18f, 0.18f, 0.12f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Shutter Chain", new Vector3(0.16f, 0.02f, 0.28f), new Vector3(0.05f, 0.38f, 0.06f), warning, PrimitiveType.Cube);
-                    break;
-                case 13:
-                    CreatePropChild(parent, "Signal Dish", new Vector3(0f, 0.12f, 0.28f), new Vector3(0.24f, 0.08f, 0.24f), screen, PrimitiveType.Cylinder);
-                    CreatePropChild(parent, "Comms Cable", new Vector3(0.24f, -0.08f, 0.24f), new Vector3(0.3f, 0.04f, 0.05f), darkMetal, PrimitiveType.Cube);
-                    break;
-                case 14:
-                    CreatePropChild(parent, "Generator Body", new Vector3(0f, 0f, 0.22f), new Vector3(0.42f, 0.24f, 0.16f), new Color(0.22f, 0.26f, 0.16f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Generator Coil", new Vector3(0.28f, 0f, 0.26f), new Vector3(0.1f, 0.1f, 0.1f), warning, PrimitiveType.Cylinder);
-                    break;
-                case 15:
-                    CreatePropChild(parent, "Ballistics Tray", new Vector3(0f, 0f, 0.24f), new Vector3(0.46f, 0.2f, 0.08f), new Color(0.82f, 0.82f, 0.76f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Bullet Tag A", new Vector3(-0.14f, 0.06f, 0.3f), new Vector3(0.08f, 0.04f, 0.06f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Bullet Tag B", new Vector3(0.16f, -0.04f, 0.3f), new Vector3(0.08f, 0.04f, 0.06f), warning, PrimitiveType.Cube);
-                    break;
-                case 16:
-                    CreatePropChild(parent, "Cash Counter", new Vector3(0f, 0.1f, 0.25f), new Vector3(0.38f, 0.16f, 0.12f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Counter Display", new Vector3(0f, 0.24f, 0.32f), new Vector3(0.24f, 0.04f, 0.08f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Money Bundle", new Vector3(0.18f, -0.08f, 0.3f), new Vector3(0.16f, 0.1f, 0.06f), new Color(0.18f, 0.52f, 0.24f, 1f), PrimitiveType.Cube);
-                    break;
-                case 17:
-                    CreatePropChild(parent, "Checkpoint Pole", new Vector3(0f, 0.02f, 0.32f), new Vector3(0.05f, 0.05f, 0.34f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Checkpoint Scanner", new Vector3(0.18f, 0.04f, 0.24f), new Vector3(0.16f, 0.12f, 0.08f), screen, PrimitiveType.Cube);
-                    break;
-                case 18:
-                    CreatePropChild(parent, "Plate Camera", new Vector3(0f, 0.12f, 0.26f), new Vector3(0.28f, 0.1f, 0.12f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Plate Frame", new Vector3(0f, -0.1f, 0.24f), new Vector3(0.34f, 0.08f, 0.06f), new Color(0.82f, 0.82f, 0.72f, 1f), PrimitiveType.Cube);
-                    break;
-                case 19:
-                    CreatePropChild(parent, "Medical Tablet", new Vector3(0f, 0.1f, 0.26f), new Vector3(0.28f, 0.06f, 0.18f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Patient File", new Vector3(-0.18f, -0.08f, 0.24f), new Vector3(0.18f, 0.12f, 0.05f), new Color(0.82f, 0.76f, 0.58f, 1f), PrimitiveType.Cube);
-                    break;
-                case 20:
-                    CreatePropChild(parent, "Fish Stall Code Board", new Vector3(0f, 0.14f, 0.26f), new Vector3(0.42f, 0.08f, 0.16f), new Color(0.82f, 0.72f, 0.22f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Seafood Crate", new Vector3(-0.22f, -0.12f, 0.23f), new Vector3(0.18f, 0.16f, 0.08f), new Color(0.18f, 0.46f, 0.54f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Hidden Note", new Vector3(0.2f, -0.1f, 0.26f), new Vector3(0.14f, 0.08f, 0.04f), warning, PrimitiveType.Cube);
-                    break;
-                case 21:
-                    CreatePropChild(parent, "Voice Recorder", new Vector3(0f, 0.02f, 0.24f), new Vector3(0.34f, 0.16f, 0.08f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Wave Screen", new Vector3(0f, 0.2f, 0.3f), new Vector3(0.42f, 0.05f, 0.1f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Tape Reel", new Vector3(0.24f, -0.1f, 0.28f), new Vector3(0.1f, 0.1f, 0.06f), screen, PrimitiveType.Cylinder);
-                    break;
-                case 22:
-                    CreatePropChild(parent, "Money Bag", new Vector3(0f, -0.02f, 0.26f), new Vector3(0.26f, 0.26f, 0.12f), new Color(0.18f, 0.46f, 0.2f, 1f), PrimitiveType.Sphere);
-                    CreatePropChild(parent, "Evidence Tag", new Vector3(0.22f, 0.14f, 0.28f), new Vector3(0.14f, 0.08f, 0.04f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Seal Strap", new Vector3(0f, -0.02f, 0.34f), new Vector3(0.32f, 0.05f, 0.04f), warning, PrimitiveType.Cube);
-                    break;
-                case 23:
-                    CreatePropChild(parent, "Cold Storage Door", new Vector3(0f, 0.08f, 0.26f), new Vector3(0.5f, 0.08f, 0.2f), new Color(0.58f, 0.72f, 0.78f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Temperature Strip", new Vector3(0f, 0.24f, 0.32f), new Vector3(0.32f, 0.04f, 0.05f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Frozen Box", new Vector3(-0.2f, -0.12f, 0.24f), new Vector3(0.18f, 0.16f, 0.08f), new Color(0.72f, 0.86f, 0.9f, 1f), PrimitiveType.Cube);
-                    break;
-                case 24:
-                    CreatePropChild(parent, "Drone Body", new Vector3(0f, 0f, 0.28f), new Vector3(0.22f, 0.14f, 0.08f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Drone Rotor L", new Vector3(-0.26f, 0.16f, 0.3f), new Vector3(0.18f, 0.04f, 0.05f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Drone Rotor R", new Vector3(0.26f, 0.16f, 0.3f), new Vector3(0.18f, 0.04f, 0.05f), screen, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Drone Dock", new Vector3(0f, -0.16f, 0.22f), new Vector3(0.42f, 0.1f, 0.06f), warning, PrimitiveType.Cube);
-                    break;
-                case 25:
-                    CreatePropChild(parent, "Motor Plate", new Vector3(0f, 0.08f, 0.26f), new Vector3(0.42f, 0.08f, 0.1f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Tyre Track A", new Vector3(-0.18f, -0.1f, 0.22f), new Vector3(0.18f, 0.05f, 0.05f), new Color(0.02f, 0.02f, 0.02f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Tyre Track B", new Vector3(0.18f, -0.1f, 0.22f), new Vector3(0.18f, 0.05f, 0.05f), new Color(0.02f, 0.02f, 0.02f, 1f), PrimitiveType.Cube);
-                    break;
-                case 26:
-                    CreatePropChild(parent, "Route Map", new Vector3(0f, 0.1f, 0.26f), new Vector3(0.38f, 0.2f, 0.06f), new Color(0.78f, 0.74f, 0.56f, 1f), PrimitiveType.Cube);
-                    CreatePropChild(parent, "Pin A", new Vector3(-0.12f, 0.14f, 0.32f), new Vector3(0.06f, 0.06f, 0.04f), new Color(0.9f, 0.1f, 0.06f, 1f), PrimitiveType.Cylinder);
-                    CreatePropChild(parent, "Pin B", new Vector3(0.14f, 0f, 0.32f), new Vector3(0.06f, 0.06f, 0.04f), new Color(0.08f, 0.35f, 0.9f, 1f), PrimitiveType.Cylinder);
-                    break;
-                case 27:
-                    CreatePropChild(parent, "Safehouse Door Lock", new Vector3(0f, 0.08f, 0.26f), new Vector3(0.28f, 0.18f, 0.08f), darkMetal, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Security Chain", new Vector3(0f, -0.08f, 0.28f), new Vector3(0.36f, 0.04f, 0.05f), warning, PrimitiveType.Cube);
-                    CreatePropChild(parent, "Witness Folder", new Vector3(-0.22f, 0.14f, 0.24f), new Vector3(0.16f, 0.1f, 0.04f), new Color(0.82f, 0.76f, 0.58f, 1f), PrimitiveType.Cube);
-                    break;
-                default:
-                    CreatePropChild(parent, "Task Panel", new Vector3(0f, 0f, 0.24f), new Vector3(0.32f, 0.18f, 0.08f), screen, PrimitiveType.Cube);
-                    break;
-            }
+            worldBuilder.CreateTaskEquipment(parent, taskId);
         }
 
         private GameObject CreatePlayerVisual(OnlinePlayerState state)
         {
-            GameObject playerObject = CreateSpriteObject("Online Player " + state.ClientId, softCircleSprite, new Color(1f, 1f, 1f, 0f));
-            playerObject.transform.SetParent(worldRoot.transform, false);
-            playerObject.transform.localScale = new Vector3(1.34f, 1.34f, 1f);
-            CreatePropChild(playerObject.transform, "Local Ring", new Vector3(0f, -0.42f, -0.36f), new Vector3(0.72f, 0.42f, 0.06f), new Color(0.08f, 0.72f, 0.95f, 0.62f), PrimitiveType.Cylinder);
-            CreatePropChild(playerObject.transform, "Local Arrow", new Vector3(0f, 0.46f, 0.12f), new Vector3(0.22f, 0.12f, 0.06f), new Color(0.95f, 0.82f, 0.12f, 1f), PrimitiveType.Cube);
-            CreateSpriteChild(playerObject.transform, "Silhouette Outline", roundedRectSprite, new Vector3(0f, -0.08f, 0.01f), new Vector3(0.56f, 0.74f, 0.18f), new Color(0f, 0f, 0f, 0.58f));
-            CreatePropChild(playerObject.transform, "Shadow", new Vector3(0f, -0.36f, -0.38f), new Vector3(0.62f, 0.16f, 0.1f), new Color(0f, 0f, 0f, 0.36f), PrimitiveType.Cylinder);
-            CreateMeshPrimitiveChild(playerObject.transform, "Body Volume", PrimitiveType.Capsule, new Vector3(0f, -0.08f, 0.22f), new Vector3(0.34f, 0.34f, 0.62f), PlayerColor(state, false), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshPrimitiveChild(playerObject.transform, "Helmet Volume", PrimitiveType.Sphere, new Vector3(0.04f, 0.2f, 0.52f), new Vector3(0.38f, 0.32f, 0.32f), PlayerColor(state, false), Quaternion.identity);
-            CreateMeshBoxChild(playerObject.transform, "Visor Volume", new Vector3(0.13f, 0.42f, 0.56f), new Vector3(0.28f, 0.04f, 0.12f), new Color(0.58f, 0.9f, 1f, 1f));
-            CreateMeshBoxChild(playerObject.transform, "Pack Volume", new Vector3(-0.32f, -0.04f, 0.28f), new Vector3(0.14f, 0.32f, 0.34f), Darken(PlayerAccentColor(state), 0.7f));
-            CreateMeshPrimitiveChild(playerObject.transform, "Arm L", PrimitiveType.Capsule, new Vector3(-0.26f, -0.08f, 0.28f), new Vector3(0.09f, 0.09f, 0.36f), PlayerAccentColor(state), Quaternion.Euler(90f, 0f, 12f));
-            CreateMeshPrimitiveChild(playerObject.transform, "Arm R", PrimitiveType.Capsule, new Vector3(0.26f, -0.08f, 0.28f), new Vector3(0.09f, 0.09f, 0.36f), PlayerAccentColor(state), Quaternion.Euler(90f, 0f, -12f));
-            CreateMeshPrimitiveChild(playerObject.transform, "Boot L", PrimitiveType.Capsule, new Vector3(-0.11f, -0.5f, 0.16f), new Vector3(0.1f, 0.1f, 0.22f), Darken(PlayerAccentColor(state), 0.52f), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshPrimitiveChild(playerObject.transform, "Boot R", PrimitiveType.Capsule, new Vector3(0.11f, -0.5f, 0.16f), new Vector3(0.1f, 0.1f, 0.22f), Darken(PlayerAccentColor(state), 0.52f), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshBoxChild(playerObject.transform, "Facing Light", new Vector3(0.18f, 0.38f, 0.44f), new Vector3(0.08f, 0.035f, 0.08f), new Color(0.92f, 1f, 1f, 1f));
-            CreateMeshBoxChild(playerObject.transform, "Badge Plate", new Vector3(0.0f, 0.22f, 0.43f), new Vector3(0.18f, 0.035f, 0.08f), new Color(0.92f, 0.78f, 0.2f, 1f));
-            CreateMeshBoxChild(playerObject.transform, "Shoulder L", new Vector3(-0.22f, 0.1f, 0.42f), new Vector3(0.12f, 0.06f, 0.08f), Darken(PlayerAccentColor(state), 0.82f));
-            CreateMeshBoxChild(playerObject.transform, "Shoulder R", new Vector3(0.22f, 0.1f, 0.42f), new Vector3(0.12f, 0.06f, 0.08f), Darken(PlayerAccentColor(state), 0.82f));
-            CreateSpriteChild(playerObject.transform, "Backpack", capsuleSprite, new Vector3(-0.31f, -0.04f, 0.07f), new Vector3(0.2f, 0.42f, 0.1f), Darken(PlayerAccentColor(state), 0.75f));
-            CreateSpriteChild(playerObject.transform, "Torso", capsuleSprite, new Vector3(0f, -0.12f, 0.09f), new Vector3(0.46f, 0.6f, 0.18f), PlayerAccentColor(state));
-            CreateSpriteChild(playerObject.transform, "Coat", capsuleSprite, new Vector3(0f, -0.04f, 0.16f), new Vector3(0.5f, 0.56f, 0.11f), PlayerColor(state, false));
-            CreateSpriteChild(playerObject.transform, "Leg L", capsuleSprite, new Vector3(-0.13f, -0.47f, 0.05f), new Vector3(0.13f, 0.22f, 0.12f), Darken(PlayerAccentColor(state), 0.6f));
-            CreateSpriteChild(playerObject.transform, "Leg R", capsuleSprite, new Vector3(0.13f, -0.47f, 0.05f), new Vector3(0.13f, 0.22f, 0.12f), Darken(PlayerAccentColor(state), 0.6f));
-            CreateSpriteChild(playerObject.transform, "Visor", capsuleSprite, new Vector3(0.1f, 0.2f, 0.24f), new Vector3(0.34f, 0.18f, 0.08f), new Color(0.58f, 0.9f, 1f, 1f));
-            CreateSpriteChild(playerObject.transform, "Visor Shine", capsuleSprite, new Vector3(0.18f, 0.26f, 0.28f), new Vector3(0.14f, 0.05f, 0.04f), new Color(0.92f, 1f, 1f, 1f));
-            CreateProfessionAccessory(playerObject.transform, state);
-            CreateStageTwoCharacterStateLayer(playerObject.transform, state);
-            CreateStageTwoCharacterRig(playerObject, state);
-            CreateFreeCharacterAdapter(playerObject.transform, state);
-            CreateWorldLabel(playerObject.transform, state.DisplayName, new Vector3(0f, 0.92f, -0.34f), 0.038f);
-            return playerObject;
+            GameObject visual = worldBuilder.CreatePlayerVisual(state, state.ClientId == LocalClientId());
+            if (visual != null)
+            {
+                CreateFreeCharacterAdapter(visual.transform, state);
+            }
+
+            return visual;
         }
 
         private void CreateStageTwoCharacterRig(GameObject playerObject, OnlinePlayerState state)
         {
-            StageTwoCharacterRig rig = playerObject.GetComponent<StageTwoCharacterRig>();
-
-            if (rig == null)
-            {
-                rig = playerObject.AddComponent<StageTwoCharacterRig>();
-            }
-
-            rig.Configure("runtime-" + state.Profession, FreeCharacterPrefabPath(state));
-            rig.BodyRoot = FindChildTransform(playerObject.transform, "Body Volume", "Torso", "Coat");
-            rig.HeadRoot = FindChildTransform(playerObject.transform, "Helmet Volume", "Visor", "Visor Volume");
-            rig.LeftArm = FindChildTransform(playerObject.transform, "Arm L", "Shoulder L");
-            rig.RightArm = FindChildTransform(playerObject.transform, "Arm R", "Shoulder R");
-            rig.LeftFoot = FindChildTransform(playerObject.transform, "Boot L", "Leg L");
-            rig.RightFoot = FindChildTransform(playerObject.transform, "Boot R", "Leg R");
-            rig.StateRoot = FindChildTransform(playerObject.transform, "Stage2 Character interaction radius", "Stage2 Meeting seated pad", "Stage2 Downed chalk silhouette");
+            worldBuilder.CreateStageTwoCharacterRig(playerObject, state);
         }
 
         private void CreateStageTwoCharacterStateLayer(Transform parent, OnlinePlayerState state)
         {
-            Color accent = PlayerAccentColor(state);
-            CreateSpriteChild(parent, "Stage2 Character interaction radius", circleSprite, new Vector3(0f, -0.18f, -0.44f), new Vector3(ruleSet.InteractionRange * 2f, ruleSet.InteractionRange * 1.18f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.12f));
-            CreateSpriteChild(parent, "Stage2 VoiceRadius action proximity", circleSprite, new Vector3(0f, -0.18f, -0.46f), new Vector3(2.35f, 1.36f, 0.05f), new Color(0.08f, 0.7f, 0.9f, 0.1f));
-            CreateSpriteChild(parent, "Stage2 Downed chalk silhouette", roundedRectSprite, new Vector3(0.04f, -0.24f, -0.42f), new Vector3(0.86f, 0.28f, 0.06f), new Color(0.9f, 0.88f, 0.74f, 0.48f));
-            CreateMeshBoxChild(parent, "Stage2 Downed personal item", new Vector3(-0.28f, -0.36f, 0.16f), new Vector3(0.12f, 0.035f, 0.1f), new Color(0.92f, 0.76f, 0.18f, 1f), -12f);
-            CreateMeshBoxChild(parent, "Stage2 Character facing wedge", new Vector3(0f, 0.58f, 0.18f), new Vector3(0.16f, 0.035f, 0.09f), new Color(0.94f, 0.86f, 0.18f, 1f));
-            CreateMeshBoxChild(parent, "Stage2 Character action hand prop", new Vector3(0.34f, -0.16f, 0.32f), new Vector3(0.12f, 0.04f, 0.16f), new Color(0.86f, 0.82f, 0.62f, 1f), -18f);
-            CreateMeshBoxChild(parent, "Stage2 Character report beacon", new Vector3(0f, 0.66f, 0.68f), new Vector3(0.28f, 0.035f, 0.08f), new Color(0.92f, 0.16f, 0.08f, 1f));
-            CreateSpriteChild(parent, "Stage2 Report proximity ping", circleSprite, new Vector3(0f, 0.28f, 0.44f), new Vector3(0.32f, 0.18f, 0.05f), new Color(0.95f, 0.18f, 0.1f, 0.36f));
-            CreateMeshPrimitiveChild(parent, "Stage2 Meeting seated pad", PrimitiveType.Cylinder, new Vector3(0f, -0.5f, -0.34f), new Vector3(0.32f, 0.035f, 0.22f), new Color(0.08f, 0.32f, 0.42f, 0.92f), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshBoxChild(parent, "Stage2 Meeting vote tablet", new Vector3(0.24f, -0.2f, 0.28f), new Vector3(0.18f, 0.035f, 0.12f), new Color(0.95f, 0.72f, 0.12f, 1f), 12f);
-            CreateMeshBoxChild(parent, "Stage2 Meeting voice mic", new Vector3(-0.24f, -0.12f, 0.3f), new Vector3(0.08f, 0.035f, 0.16f), new Color(0.08f, 0.72f, 0.86f, 1f), -8f);
-            CreateSpriteChild(parent, "Stage2 Vote locked marker", diamondSprite, new Vector3(0.24f, 0.1f, 0.36f), new Vector3(0.12f, 0.12f, 0.05f), new Color(0.2f, 0.9f, 0.38f, 0.9f));
-            CreateMeshBoxChild(parent, "Stage2 Character footstep L", new Vector3(-0.18f, -0.76f, -0.3f), new Vector3(0.14f, 0.035f, 0.045f), Darken(accent, 0.72f), -10f);
-            CreateMeshBoxChild(parent, "Stage2 Character footstep R", new Vector3(0.18f, -0.7f, -0.3f), new Vector3(0.14f, 0.035f, 0.045f), Darken(accent, 0.72f), 10f);
+            worldBuilder.CreateStageTwoCharacterStateLayer(parent, state);
         }
 
         private void CreateProfessionAccessory(Transform parent, OnlinePlayerState state)
         {
-            switch (state.Profession)
-            {
-                case OnlineProfession.Inspector:
-                    CreateSpriteChild(parent, "Badge", diamondSprite, new Vector3(0.18f, 0.08f, 0.2f), new Vector3(0.08f, 0.08f, 0.05f), new Color(0.95f, 0.78f, 0.18f, 1f));
-                    CreateSpriteChild(parent, "Radio", capsuleSprite, new Vector3(-0.22f, 0.05f, 0.2f), new Vector3(0.07f, 0.12f, 0.05f), new Color(0.03f, 0.05f, 0.06f, 1f));
-                    break;
-                case OnlineProfession.Forensics:
-                    CreateSpriteChild(parent, "Glove L", capsuleSprite, new Vector3(-0.33f, -0.28f, 0.18f), new Vector3(0.1f, 0.1f, 0.05f), new Color(0.72f, 0.95f, 0.9f, 1f));
-                    CreateSpriteChild(parent, "Sample Case", roundedRectSprite, new Vector3(0.28f, -0.34f, 0.18f), new Vector3(0.16f, 0.12f, 0.05f), new Color(0.82f, 0.82f, 0.76f, 1f));
-                    break;
-                case OnlineProfession.Tech:
-                    CreateSpriteChild(parent, "Tech Tablet", roundedRectSprite, new Vector3(0.0f, -0.04f, 0.23f), new Vector3(0.2f, 0.12f, 0.05f), new Color(0.04f, 0.72f, 0.86f, 1f));
-                    break;
-                case OnlineProfession.UndercoverAgent:
-                    CreateSpriteChild(parent, "Hidden Wire", capsuleSprite, new Vector3(0.0f, 0.08f, 0.22f), new Vector3(0.06f, 0.2f, 0.04f), new Color(0.58f, 0.42f, 0.86f, 1f));
-                    break;
-                case OnlineProfession.Enforcer:
-                    CreateSpriteChild(parent, "Chain", capsuleSprite, new Vector3(0.0f, 0.14f, 0.22f), new Vector3(0.22f, 0.04f, 0.04f), new Color(0.9f, 0.76f, 0.24f, 1f));
-                    break;
-                case OnlineProfession.Fixer:
-                    CreateSpriteChild(parent, "Ledger", roundedRectSprite, new Vector3(0.24f, -0.02f, 0.22f), new Vector3(0.14f, 0.18f, 0.05f), new Color(0.74f, 0.62f, 0.38f, 1f));
-                    break;
-                case OnlineProfession.Driver:
-                    CreateSpriteChild(parent, "Cap", capsuleSprite, new Vector3(0f, 0.5f, 0.22f), new Vector3(0.28f, 0.08f, 0.06f), new Color(0.08f, 0.08f, 0.1f, 1f));
-                    break;
-            }
+            worldBuilder.CreateProfessionAccessory(parent, state);
         }
 
         private GameObject CreateBodyVisual(OnlineBodyState body)
         {
-            GameObject bodyObject = CreateSpriteObject("Online Body " + body.VictimClientId, roundedRectSprite, new Color(0.65f, 0.04f, 0.04f, 1f));
-            bodyObject.transform.SetParent(worldRoot.transform, false);
-            bodyObject.transform.localScale = new Vector3(0.42f, 0.22f, 0.12f);
-            CreatePropChild(bodyObject.transform, "Body Chalk", new Vector3(0f, 0f, -0.04f), new Vector3(0.68f, 0.42f, 0.08f), new Color(0.9f, 0.9f, 0.8f, 0.28f), PrimitiveType.Cylinder);
-            CreatePropChild(bodyObject.transform, "Stage2 Forensic evidence card", new Vector3(-0.36f, 0.14f, 0.08f), new Vector3(0.12f, 0.08f, 0.06f), new Color(0.95f, 0.78f, 0.16f, 1f), PrimitiveType.Cube);
-            CreatePropChild(bodyObject.transform, "Stage2 Forensic blood marker", new Vector3(0.28f, -0.12f, 0.06f), new Vector3(0.16f, 0.04f, 0.05f), new Color(0.86f, 0.04f, 0.03f, 0.9f), PrimitiveType.Cube);
-            CreatePropChild(bodyObject.transform, "Stage2 Forensic police tape A", new Vector3(0f, 0.34f, 0.08f), new Vector3(0.72f, 0.035f, 0.05f), new Color(0.95f, 0.72f, 0.08f, 1f), PrimitiveType.Cube);
-            CreatePropChild(bodyObject.transform, "Stage2 Forensic police tape B", new Vector3(0f, -0.34f, 0.08f), new Vector3(0.72f, 0.035f, 0.05f), new Color(0.95f, 0.72f, 0.08f, 1f), PrimitiveType.Cube);
-            CreateSpriteChild(bodyObject.transform, "Stage2 Report body radius", circleSprite, new Vector3(0f, 0f, -0.08f), new Vector3(ruleSet.ReportRange * 2f, ruleSet.ReportRange * 1.22f, 0.05f), new Color(0.95f, 0.2f, 0.12f, 0.14f));
-            CreateWorldLabel(bodyObject.transform, "报案", new Vector3(0f, 0.52f, -0.14f), 0.055f);
-            CreateWorldLabel(bodyObject.transform, "尸体", new Vector3(0f, 0.32f, -0.12f), 0.06f);
-            return bodyObject;
+            return worldBuilder.CreateBodyVisual(body);
         }
 
         private void CreateFloor()
@@ -7669,10 +7403,10 @@ namespace GanglandUndercover.Online
             CreateProp("港区主干道暗面", new Vector3(0f, -0.1f, -0.3f), new Vector3(24.0f, 8.6f, 0.08f), new Color(0.094f, 0.112f, 0.116f, 1f));
             CreateProp("港区北侧仓储街块", new Vector3(0f, 4.7f, -0.305f), new Vector3(22.5f, 4.7f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
             CreateProp("港区南侧封控街块", new Vector3(0f, -5.2f, -0.305f), new Vector3(22.2f, 3.9f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
-            CreateProp("北侧港区围挡", new Vector3(0f, DesignmapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("南侧港区围挡", new Vector3(0f, -DesignmapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("西侧港区围挡", new Vector3(-DesignmapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("东侧港区围挡", new Vector3(DesignmapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("北侧港区围挡", new Vector3(0f, mapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("南侧港区围挡", new Vector3(0f, -mapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("西侧港区围挡", new Vector3(-mapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("东侧港区围挡", new Vector3(mapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
         }
 
         private void CreateRoadNetwork()
@@ -8411,190 +8145,77 @@ namespace GanglandUndercover.Online
 
         private GameObject CreatePrimitiveProp(string propName, PrimitiveType primitiveType, Vector3 position, Vector3 scale, Color color)
         {
-            GameObject prop = primitiveType == PrimitiveType.Cylinder || primitiveType == PrimitiveType.Sphere
-                ? CreateSpriteObject(propName, circleSprite, color)
-                : CreateSpriteObject(propName, roundedRectSprite, color);
-            prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = mapService.ScaleMapPosition(position);
-            prop.transform.localScale = mapService.ScaleMapSize(scale);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreatePrimitiveProp(propName, primitiveType, position, scale, color);
         }
 
         private GameObject CreateSolidPrimitiveProp(string propName, PrimitiveType primitiveType, Vector3 position, Vector3 scale, Color color)
         {
-            GameObject prop = CreatePrimitiveProp(propName, primitiveType, position, scale, color);
-            RegisterSolidObstacle(position, scale);
-            AttachPhysicsCollider(prop, scale, primitiveType == PrimitiveType.Cylinder || primitiveType == PrimitiveType.Sphere);
-            return prop;
+            return worldBuilder.CreateSolidPrimitiveProp(propName, primitiveType, position, scale, color);
         }
 
         private GameObject CreateProp(string propName, Vector3 position, Vector3 scale, Color color)
         {
-            GameObject prop = CreateSpriteObject(propName, roundedRectSprite, color);
-            prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = mapService.ScaleMapPosition(position);
-            prop.transform.localScale = mapService.ScaleMapSize(scale);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreateProp(propName, position, scale, color);
         }
 
         private static Color Darken(Color color, float multiplier)
         {
-            return new Color(color.r * multiplier, color.g * multiplier, color.b * multiplier, color.a);
+            return OnlineWorldBuilder.Darken(color, multiplier);
         }
 
         private GameObject CreateSolidProp(string propName, Vector3 position, Vector3 scale, Color color)
         {
-            GameObject prop = CreateProp(propName, position, scale, color);
-            RegisterSolidObstacle(position, scale);
-            AttachPhysicsCollider(prop, scale, false);
-            return prop;
+            return worldBuilder.CreateSolidProp(propName, position, scale, color);
         }
 
         private GameObject CreateShapeProp(string propName, Sprite sprite, Vector3 position, Vector3 scale, Color color)
         {
-            GameObject prop = CreateSpriteObject(propName, sprite, color);
-            prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = mapService.ScaleMapPosition(position);
-            prop.transform.localScale = mapService.ScaleMapSize(scale);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreateShapeProp(propName, sprite, position, scale, color);
         }
 
         private GameObject CreateRotatedProp(string propName, Vector3 position, Vector3 scale, Color color, float rotationDegrees)
         {
-            GameObject prop = CreateProp(propName, position, scale, color);
-            prop.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreateRotatedProp(propName, position, scale, color, rotationDegrees);
         }
 
         private GameObject CreateMeshBoxProp(string propName, Vector3 position, Vector3 scale, Color color, float rotationDegrees = 0f)
         {
-            GameObject prop = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            prop.name = propName;
-            Remove3DCollider(prop);
-            prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = mapService.ScaleMapPosition(position);
-            prop.transform.localScale = mapService.ScaleMapSize(scale);
-            prop.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees);
-            ConfigureRuntimeMesh(prop, color);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreateMeshBoxProp(propName, position, scale, color, rotationDegrees);
         }
 
         private GameObject CreateSolidMeshBoxProp(string propName, Vector3 position, Vector3 scale, Color color, float rotationDegrees = 0f)
         {
-            GameObject prop = CreateMeshBoxProp(propName, position, scale, color, rotationDegrees);
-            RegisterSolidObstacle(position, scale);
-            AttachPhysicsCollider(prop, scale, false);
-            return prop;
+            return worldBuilder.CreateSolidMeshBoxProp(propName, position, scale, color, rotationDegrees);
         }
 
         private GameObject CreateMeshBoxChild(Transform parent, string propName, Vector3 localPosition, Vector3 scale, Color color, float rotationDegrees = 0f)
         {
-            GameObject prop = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            prop.name = propName;
-            Remove3DCollider(prop);
-            prop.transform.SetParent(parent, false);
-            prop.transform.localPosition = localPosition;
-            prop.transform.localScale = scale;
-            prop.transform.localRotation = Quaternion.Euler(0f, 0f, rotationDegrees);
-            ConfigureRuntimeMesh(prop, color);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreateMeshBoxChild(parent, propName, localPosition, scale, color, rotationDegrees);
         }
 
         private GameObject CreateMeshPrimitiveChild(Transform parent, string propName, PrimitiveType primitiveType, Vector3 localPosition, Vector3 scale, Color color, Quaternion localRotation)
         {
-            GameObject prop = GameObject.CreatePrimitive(primitiveType);
-            prop.name = propName;
-            Remove3DCollider(prop);
-            prop.transform.SetParent(parent, false);
-            prop.transform.localPosition = localPosition;
-            prop.transform.localScale = scale;
-            prop.transform.localRotation = localRotation;
-            ConfigureRuntimeMesh(prop, color);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreateMeshPrimitiveChild(parent, propName, primitiveType, localPosition, scale, color, localRotation);
         }
 
         private GameObject CreateMeshPrimitiveProp(string propName, PrimitiveType primitiveType, Vector3 position, Vector3 scale, Color color, Quaternion rotation)
         {
-            GameObject prop = GameObject.CreatePrimitive(primitiveType);
-            prop.name = propName;
-            Remove3DCollider(prop);
-            prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = mapService.ScaleMapPosition(position);
-            prop.transform.localScale = mapService.ScaleMapSize(scale);
-            prop.transform.rotation = rotation;
-            ConfigureRuntimeMesh(prop, color);
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreateMeshPrimitiveProp(propName, primitiveType, position, scale, color, rotation);
         }
 
         private static void Remove3DCollider(GameObject prop)
         {
-            UnityEngine.Collider collider = prop.GetComponent<UnityEngine.Collider>();
-
-            if (collider == null)
-            {
-                return;
-            }
-
-            if (Application.isPlaying)
-            {
-                DestroyImmediate(collider);
-            }
-            else
-            {
-                DestroyImmediate(collider);
-            }
+            OnlineWorldBuilder.Remove3DCollider(prop);
         }
 
         private void ConfigureRuntimeMesh(GameObject prop, Color color)
         {
-            Renderer renderer = prop.GetComponent<Renderer>();
-
-            if (renderer == null)
-            {
-                return;
-            }
-
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
-            renderer.sharedMaterial = RuntimeMeshMaterial(color);
+            worldBuilder.ConfigureRuntimeMesh(prop, color);
         }
 
         private Material RuntimeMeshMaterial(Color color)
         {
-            string key = Mathf.RoundToInt(color.r * 255f) + "-"
-                + Mathf.RoundToInt(color.g * 255f) + "-"
-                + Mathf.RoundToInt(color.b * 255f) + "-"
-                + Mathf.RoundToInt(color.a * 255f);
-
-            if (runtimeMeshMaterials.TryGetValue(key, out Material cached))
-            {
-                return cached;
-            }
-
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard") ?? Shader.Find("Sprites/Default");
-            Material material = new Material(shader);
-            material.color = color;
-
-            if (material.HasProperty("_BaseColor"))
-            {
-                material.SetColor("_BaseColor", color);
-            }
-
-            if (color.a < 0.99f)
-            {
-                ConfigureTransparentMaterial(material);
-            }
-
-            runtimeMeshMaterials[key] = material;
-            return material;
+            return worldBuilder.RuntimeMeshMaterial(color);
         }
 
         private static void ConfigureTransparentMaterial(Material material)
@@ -8645,520 +8266,134 @@ namespace GanglandUndercover.Online
 
         private void RegisterSolidObstacle(Vector3 position, Vector3 scale)
         {
-            Vector3 scaledPosition = mapService.ScaleMapPosition(position);
-            Vector3 scaledScale = mapService.ScaleMapSize(scale);
-            float width = Mathf.Max(0.01f, Mathf.Abs(scaledScale.x));
-            float height = Mathf.Max(0.01f, Mathf.Abs(scaledScale.y));
-            solidObstacleRects.Add(new Rect(scaledPosition.x - width * 0.5f, scaledPosition.y - height * 0.5f, width, height));
+            worldBuilder.RegisterSolidObstacle(position, scale);
         }
 
         private void RegisterWalkableArea(Vector3 position, Vector3 scale)
         {
-            Vector3 scaledPosition = mapService.ScaleMapPosition(position);
-            Vector3 scaledScale = mapService.ScaleMapSize(scale);
-            float width = Mathf.Max(0.01f, Mathf.Abs(scaledScale.x));
-            float height = Mathf.Max(0.01f, Mathf.Abs(scaledScale.y));
-            walkableRects.Add(new Rect(scaledPosition.x - width * 0.5f, scaledPosition.y - height * 0.5f, width, height));
+            worldBuilder.RegisterWalkableArea(position, scale);
         }
 
         private static void AttachPhysicsCollider(GameObject prop, Vector3 designScale, bool round)
         {
-            if (prop == null)
-            {
-                return;
-            }
-
-            Remove3DCollider(prop);
-            Rigidbody2D body = prop.GetComponent<Rigidbody2D>();
-
-            if (body == null)
-            {
-                body = prop.AddComponent<Rigidbody2D>();
-            }
-
-            body.bodyType = RigidbodyType2D.Static;
-            body.simulated = true;
-
-            if (round)
-            {
-                CircleCollider2D circle = prop.GetComponent<CircleCollider2D>();
-
-                if (circle == null)
-                {
-                    circle = prop.AddComponent<CircleCollider2D>();
-                }
-
-                circle.radius = 0.5f;
-                circle.isTrigger = false;
-                return;
-            }
-
-            BoxCollider2D box = prop.GetComponent<BoxCollider2D>();
-
-            if (box == null)
-            {
-                box = prop.AddComponent<BoxCollider2D>();
-            }
-
-            float width = Mathf.Abs(designScale.x) <= 0.18f ? 0.82f : 1f;
-            float height = Mathf.Abs(designScale.y) <= 0.18f ? 0.82f : 1f;
-            box.size = new Vector2(width, height);
-            box.isTrigger = false;
+            OnlineWorldBuilder.AttachPhysicsCollider(prop, designScale, round);
         }
 
         private GameObject CreatePropChild(Transform parent, string propName, Vector3 localPosition, Vector3 scale, Color color, PrimitiveType primitiveType)
         {
-            GameObject prop = primitiveType == PrimitiveType.Cylinder || primitiveType == PrimitiveType.Sphere
-                ? CreateSpriteObject(propName, circleSprite, color)
-                : CreateSpriteObject(propName, roundedRectSprite, color);
-            prop.transform.SetParent(parent, false);
-            prop.transform.localPosition = localPosition;
-            prop.transform.localScale = scale;
-            SetSortingFromZ(prop);
-            return prop;
+            return worldBuilder.CreatePropChild(parent, propName, localPosition, scale, color, primitiveType);
         }
 
         private GameObject CreateSpriteChild(Transform parent, string objectName, Sprite sprite, Vector3 localPosition, Vector3 scale, Color color)
         {
-            GameObject child = CreateSpriteObject(objectName, sprite, color);
-            child.transform.SetParent(parent, false);
-            child.transform.localPosition = localPosition;
-            child.transform.localScale = scale;
-            SetSortingFromZ(child);
-            return child;
+            return worldBuilder.CreateSpriteChild(parent, objectName, sprite, localPosition, scale, color);
         }
 
         private GameObject CreateAssetStoreProp(string propName, string resourcePath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false, bool preserveMaterials = true)
         {
-            GameObject prefab = LoadResourcePrefab(resourcePath);
-
-            if (prefab == null || worldRoot == null)
-            {
-                return CreateModelFallbackProp(propName + " Fallback", position, footprint, rotationDegrees, FallbackColorForModel(resourcePath));
-            }
-
-            GameObject model = InstantiateModelPrefab(prefab);
-
-            if (model == null)
-            {
-                return CreateModelFallbackProp(propName + " Fallback", position, footprint, rotationDegrees, FallbackColorForModel(resourcePath));
-            }
-
-            model.name = propName;
-            model.transform.SetParent(worldRoot.transform, false);
-            model.transform.position = mapService.ScaleMapPosition(position);
-            model.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees) * Quaternion.Euler(-90f, 0f, 0f);
-            model.transform.localScale = Vector3.one;
-            FitModelToFootprint(model, mapService.ScaleMapPosition(position), footprint, stretchToFootprint);
-            ConfigureModelRenderers(model, preserveMaterials);
-            SetSortingFromZ(model);
-            return model;
+            return worldBuilder.CreateAssetStoreProp(propName, resourcePath, position, footprint, rotationDegrees, stretchToFootprint, preserveMaterials);
         }
 
         private GameObject CreateSolidAssetStoreProp(string propName, string resourcePath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false, bool preserveMaterials = true)
         {
-            GameObject model = CreateAssetStoreProp(propName, resourcePath, position, footprint, rotationDegrees, stretchToFootprint, preserveMaterials);
-
-            if (model != null)
-            {
-                RegisterSolidObstacle(position, footprint);
-                AttachPhysicsCollider(model, footprint, false);
-            }
-
-            return model;
+            return worldBuilder.CreateSolidAssetStoreProp(propName, resourcePath, position, footprint, rotationDegrees, stretchToFootprint, preserveMaterials);
         }
 
         private GameObject CreateModelProp(string propName, string relativeFbxPath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false)
         {
-            GameObject prefab = LoadQuaterniusModel(relativeFbxPath);
-
-            if (prefab == null || worldRoot == null)
-            {
-                return CreateModelFallbackProp(propName + " Fallback", position, footprint, rotationDegrees, FallbackColorForModel(relativeFbxPath));
-            }
-
-            GameObject model = InstantiateModelPrefab(prefab);
-
-            if (model == null)
-            {
-                return CreateModelFallbackProp(propName + " Fallback", position, footprint, rotationDegrees, FallbackColorForModel(relativeFbxPath));
-            }
-
-            model.name = propName;
-            model.transform.SetParent(worldRoot.transform, false);
-            model.transform.position = mapService.ScaleMapPosition(position);
-            model.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees) * Quaternion.Euler(-90f, 0f, 0f);
-            model.transform.localScale = Vector3.one;
-            FitModelToFootprint(model, mapService.ScaleMapPosition(position), footprint, stretchToFootprint);
-            ConfigureModelRenderers(model, false);
-            SetSortingFromZ(model);
-            return model;
+            return worldBuilder.CreateModelProp(propName, relativeFbxPath, position, footprint, rotationDegrees, stretchToFootprint);
         }
 
         private GameObject CreateModelFallbackProp(string propName, Vector3 position, Vector3 footprint, float rotationDegrees, Color color)
         {
-            GameObject fallback = new GameObject(propName);
-            fallback.transform.SetParent(worldRoot.transform, false);
-            fallback.transform.position = mapService.ScaleMapPosition(position);
-            fallback.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees);
-            Vector3 size = mapService.ScaleMapSize(footprint);
-            float width = Mathf.Max(0.08f, Mathf.Abs(size.x));
-            float depth = Mathf.Max(0.08f, Mathf.Abs(size.y));
-            float height = Mathf.Max(0.08f, Mathf.Abs(footprint.z));
-
-            CreateMeshBoxChild(fallback.transform, "Fallback Base", new Vector3(0f, 0f, height * 0.35f), new Vector3(width, depth, height * 0.7f), Darken(color, 0.8f));
-            CreateMeshBoxChild(fallback.transform, "Fallback Face", new Vector3(0f, depth * 0.38f, height * 0.76f), new Vector3(width * 0.72f, Mathf.Max(0.025f, depth * 0.08f), height * 0.26f), color);
-
-            if (footprint.z > 0.18f)
-            {
-                CreateMeshBoxChild(fallback.transform, "Fallback Light Strip", new Vector3(0f, -depth * 0.38f, height * 1.02f), new Vector3(width * 0.52f, Mathf.Max(0.02f, depth * 0.08f), height * 0.12f), new Color(0.08f, 0.78f, 0.92f, 1f));
-            }
-
-            SetSortingFromZ(fallback);
-            return fallback;
+            return worldBuilder.CreateModelFallbackProp(propName, position, footprint, rotationDegrees, color);
         }
 
         private static Color FallbackColorForModel(string relativeFbxPath)
         {
-            if (relativeFbxPath.IndexOf("Light", StringComparison.Ordinal) >= 0)
-            {
-                return new Color(0.08f, 0.78f, 0.92f, 1f);
-            }
-
-            if (relativeFbxPath.IndexOf("Crate", StringComparison.Ordinal) >= 0 || relativeFbxPath.IndexOf("Chest", StringComparison.Ordinal) >= 0)
-            {
-                return new Color(0.72f, 0.52f, 0.14f, 1f);
-            }
-
-            if (relativeFbxPath.IndexOf("Door", StringComparison.Ordinal) >= 0)
-            {
-                return new Color(0.42f, 0.48f, 0.5f, 1f);
-            }
-
-            if (relativeFbxPath.IndexOf("Computer", StringComparison.Ordinal) >= 0 || relativeFbxPath.IndexOf("AccessPoint", StringComparison.Ordinal) >= 0)
-            {
-                return new Color(0.08f, 0.32f, 0.42f, 1f);
-            }
-
-            return new Color(0.24f, 0.28f, 0.3f, 1f);
+            return OnlineWorldBuilder.FallbackColorForModel(relativeFbxPath);
         }
 
         private GameObject CreateSolidModelProp(string propName, string relativeFbxPath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false)
         {
-            GameObject model = CreateModelProp(propName, relativeFbxPath, position, footprint, rotationDegrees, stretchToFootprint);
-
-            if (model != null)
-            {
-                RegisterSolidObstacle(position, footprint);
-                AttachPhysicsCollider(model, footprint, false);
-            }
-
-            return model;
+            return worldBuilder.CreateSolidModelProp(propName, relativeFbxPath, position, footprint, rotationDegrees, stretchToFootprint);
         }
 
         private void CreateWallModelOverlay(string wallName, Vector3 position, Vector3 scale)
         {
-            if (Mathf.Abs(scale.x) < 0.2f && Mathf.Abs(scale.y) < 0.2f)
-            {
-                return;
-            }
-
-            bool horizontal = Mathf.Abs(scale.x) >= Mathf.Abs(scale.y);
-            string modelPath = horizontal ? "Walls/ShortWall_Metal2_Straight.fbx" : "Walls/WallAstra_Straight.fbx";
-            float rotation = horizontal ? 0f : 90f;
-            Vector3 footprint = new Vector3(Mathf.Max(Mathf.Abs(scale.x), 0.18f), Mathf.Max(Mathf.Abs(scale.y), 0.18f), Mathf.Max(Mathf.Abs(scale.z), 0.16f));
-            CreateModelProp(wallName + " CC0 Wall Module", modelPath, position + new Vector3(0f, 0f, 0.08f), footprint, rotation, true);
+            worldBuilder.CreateWallModelOverlay(wallName, position, scale);
         }
 
         private void CreateDoorModelOverlay(string markerName, Vector3 position, Vector3 scale)
         {
-            bool horizontal = Mathf.Abs(scale.x) >= Mathf.Abs(scale.y);
-            string doorPath = markerName.Contains("黑市") || markerName.Contains("维修") || markerName.Contains("暗")
-                ? "Platforms/Door_DarkMetal.fbx"
-                : "Platforms/Door_Frame_A.fbx";
-            float rotation = horizontal ? 0f : 90f;
-            Vector3 footprint = horizontal
-                ? new Vector3(Mathf.Max(0.72f, Mathf.Abs(scale.x)), 0.34f, 0.32f)
-                : new Vector3(0.34f, Mathf.Max(0.72f, Mathf.Abs(scale.y)), 0.32f);
-            CreateModelProp(markerName + " CC0 Door Frame", doorPath, position + new Vector3(0f, 0f, 0.1f), footprint, rotation, true);
+            worldBuilder.CreateDoorModelOverlay(markerName, position, scale);
         }
 
         private GameObject LoadQuaterniusModel(string relativeFbxPath)
         {
-            string cacheKey = "Quaternius/" + relativeFbxPath;
-
-            if (modelPrefabCache.TryGetValue(cacheKey, out GameObject cached))
-            {
-                return cached;
-            }
-
-            GameObject prefab = null;
-
-#if UNITY_EDITOR
-            prefab = AssetDatabase.LoadAssetAtPath<GameObject>(QuaterniusFbxRoot + relativeFbxPath);
-#endif
-            if (prefab == null)
-            {
-                string resourcePath = "Quaternius/ModularSciFiMegaKit/FBX/" + relativeFbxPath.Replace(".fbx", string.Empty);
-                prefab = Resources.Load<GameObject>(resourcePath);
-            }
-
-            modelPrefabCache[cacheKey] = prefab;
-            return prefab;
+            return worldBuilder.LoadQuaterniusModel(relativeFbxPath);
         }
 
         private GameObject LoadResourcePrefab(string resourcePath)
         {
-            string normalized = NormalizeResourcePath(resourcePath);
-            string cacheKey = "Resource/" + normalized;
-
-            if (modelPrefabCache.TryGetValue(cacheKey, out GameObject cached))
-            {
-                return cached;
-            }
-
-            GameObject prefab = null;
-
-#if UNITY_EDITOR
-            string assetPath = RuntimeResourcesRoot + normalized + ".prefab";
-            prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
-
-            if (prefab == null)
-            {
-                assetPath = RuntimeResourcesRoot + normalized + ".fbx";
-                prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
-            }
-#endif
-            if (prefab == null)
-            {
-                prefab = Resources.Load<GameObject>(normalized);
-            }
-
-            modelPrefabCache[cacheKey] = prefab;
-            return prefab;
+            return worldBuilder.LoadResourcePrefab(resourcePath);
         }
 
         private static string NormalizeResourcePath(string resourcePath)
         {
-            string normalized = resourcePath.Replace('\\', '/').Trim();
-
-            if (normalized.StartsWith("Assets/_Project/Resources/", StringComparison.Ordinal))
-            {
-                normalized = normalized.Substring("Assets/_Project/Resources/".Length);
-            }
-
-            if (normalized.StartsWith("/", StringComparison.Ordinal))
-            {
-                normalized = normalized.Substring(1);
-            }
-
-            string extension = System.IO.Path.GetExtension(normalized);
-
-            if (!string.IsNullOrEmpty(extension))
-            {
-                normalized = normalized.Substring(0, normalized.Length - extension.Length);
-            }
-
-            return normalized;
+            return OnlineWorldBuilder.NormalizeResourcePath(resourcePath);
         }
 
         private static GameObject InstantiateModelPrefab(GameObject prefab)
         {
-#if UNITY_EDITOR
-            if (!Application.isPlaying)
-            {
-                return PrefabUtility.InstantiatePrefab(prefab) as GameObject;
-            }
-#endif
-            return Instantiate(prefab);
+            return OnlineWorldBuilder.InstantiateModelPrefab(prefab);
         }
 
-        private static void FitModelToFootprint(GameObject model, Vector3 targetPosition, Vector3 footprint, bool stretchToFootprint)
+        private void FitModelToFootprint(GameObject model, Vector3 targetPosition, Vector3 footprint, bool stretchToFootprint)
         {
-            if (!TryGetRendererBounds(model, out Bounds bounds))
-            {
-                return;
-            }
-
-            Vector3 desired = mapService.ScaleMapSize(footprint);
-            float desiredX = Mathf.Max(0.04f, Mathf.Abs(desired.x));
-            float desiredY = Mathf.Max(0.04f, Mathf.Abs(desired.y));
-            float desiredZ = Mathf.Max(0.05f, Mathf.Abs(footprint.z));
-
-            if (stretchToFootprint)
-            {
-                Vector3 localScale = model.transform.localScale;
-                float xFactor = bounds.size.x > 0.001f ? desiredX / bounds.size.x : 1f;
-                float yFactor = bounds.size.y > 0.001f ? desiredY / bounds.size.y : 1f;
-                float zFactor = bounds.size.z > 0.001f ? desiredZ / bounds.size.z : Mathf.Min(xFactor, yFactor);
-                model.transform.localScale = new Vector3(localScale.x * xFactor, localScale.y * zFactor, localScale.z * yFactor);
-            }
-            else
-            {
-                float xFactor = bounds.size.x > 0.001f ? desiredX / bounds.size.x : 1f;
-                float yFactor = bounds.size.y > 0.001f ? desiredY / bounds.size.y : 1f;
-                float factor = Mathf.Clamp(Mathf.Min(xFactor, yFactor), 0.02f, 3.0f);
-                model.transform.localScale *= factor;
-            }
-
-            AlignModelBounds(model, targetPosition);
+            worldBuilder.FitModelToFootprint(model, targetPosition, footprint, stretchToFootprint);
         }
 
         private static void AlignModelBounds(GameObject model, Vector3 targetPosition)
         {
-            if (!TryGetRendererBounds(model, out Bounds bounds))
-            {
-                return;
-            }
-
-            Vector3 offset = new Vector3(targetPosition.x - bounds.center.x, targetPosition.y - bounds.center.y, targetPosition.z - bounds.min.z);
-            model.transform.position += offset;
+            OnlineWorldBuilder.AlignModelBounds(model, targetPosition);
         }
 
         private static bool TryGetRendererBounds(GameObject model, out Bounds bounds)
         {
-            Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
-            bounds = new Bounds(model.transform.position, Vector3.zero);
-            bool hasBounds = false;
-
-            foreach (Renderer renderer in renderers)
-            {
-                if (renderer == null)
-                {
-                    continue;
-                }
-
-                if (!hasBounds)
-                {
-                    bounds = renderer.bounds;
-                    hasBounds = true;
-                }
-                else
-                {
-                    bounds.Encapsulate(renderer.bounds);
-                }
-            }
-
-            return hasBounds;
+            return OnlineWorldBuilder.TryGetRendererBounds(model, out bounds);
         }
 
         private static void ConfigureModelRenderers(GameObject model, bool preserveMaterials)
         {
-            foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>(true))
-            {
-                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
-
-                if (renderer.sharedMaterial == null)
-                {
-                    Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-                    renderer.sharedMaterial = new Material(shader);
-                }
-
-                Material material = Application.isPlaying ? renderer.material : renderer.sharedMaterial;
-
-                if (material != null)
-                {
-                    if (preserveMaterials)
-                    {
-                        Color sourceColor = ReadMaterialColor(material, Color.white);
-
-                        if (material.HasProperty("_BaseColor"))
-                        {
-                            Color baseColor = material.GetColor("_BaseColor");
-                            material.SetColor("_BaseColor", new Color(Mathf.Clamp01(baseColor.r * 1.04f), Mathf.Clamp01(baseColor.g * 1.04f), Mathf.Clamp01(baseColor.b * 1.04f), baseColor.a));
-                        }
-
-                        SetMaterialColor(material, new Color(Mathf.Clamp01(sourceColor.r * 1.04f), Mathf.Clamp01(sourceColor.g * 1.04f), Mathf.Clamp01(sourceColor.b * 1.04f), sourceColor.a));
-                        continue;
-                    }
-
-                    if (material.HasProperty("_BaseColor"))
-                    {
-                        Color color = ReadMaterialColor(material, Color.white);
-                        material.SetColor("_BaseColor", new Color(Mathf.Clamp01(color.r * 1.1f), Mathf.Clamp01(color.g * 1.1f), Mathf.Clamp01(color.b * 1.1f), color.a));
-                    }
-
-                    SetMaterialColor(material, new Color(0.92f, 0.94f, 0.98f, 1f));
-                }
-            }
+            OnlineWorldBuilder.ConfigureModelRenderers(model, preserveMaterials);
         }
 
         private static Color ReadMaterialColor(Material material, Color fallback)
         {
-            if (material == null)
-            {
-                return fallback;
-            }
-
-            if (material.HasProperty("_BaseColor"))
-            {
-                return material.GetColor("_BaseColor");
-            }
-
-            if (material.HasProperty("_Color"))
-            {
-                return material.GetColor("_Color");
-            }
-
-            return fallback;
+            return OnlineWorldBuilder.ReadMaterialColor(material, fallback);
         }
 
         private static void SetMaterialColor(Material material, Color color)
         {
-            if (material == null)
-            {
-                return;
-            }
-
-            if (material.HasProperty("_BaseColor"))
-            {
-                material.SetColor("_BaseColor", color);
-            }
-
-            if (material.HasProperty("_Color"))
-            {
-                material.SetColor("_Color", color);
-            }
+            OnlineWorldBuilder.SetMaterialColor(material, color);
         }
 
 
 
         private void CreateNeonLight(string lightName, Vector3 position, Color color, float intensity, float range)
         {
-            GameObject lightObject = new GameObject(lightName);
-            lightObject.transform.SetParent(worldRoot.transform, false);
-            lightObject.transform.position = mapService.ScaleMapPosition(position);
-            Light light = lightObject.AddComponent<Light>();
-            light.type = LightType.Point;
-            light.color = color;
-            light.intensity = intensity;
-            light.range = range;
+            worldBuilder.CreateNeonLight(lightName, position, color, intensity, range);
         }
 
         private void ConfigureSceneLighting()
         {
-            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.62f, 0.66f, 0.68f, 1f);
-
-            GameObject lightObject = new GameObject("CC0 Model Fill Light");
-            lightObject.transform.SetParent(worldRoot.transform, false);
-            lightObject.transform.rotation = Quaternion.Euler(0f, 0f, 0f);
-            Light light = lightObject.AddComponent<Light>();
-            light.type = LightType.Directional;
-            light.intensity = 0.55f;
-            light.color = new Color(0.8f, 0.88f, 1f, 1f);
+            worldBuilder.ConfigureSceneLighting();
         }
 
         private void CreateEmergencyBell()
         {
-            GameObject bell = CreateSpriteObject("紧急铃", circleSprite, new Color(0.72f, 0.08f, 0.06f, 1f));
-            bell.transform.SetParent(worldRoot.transform, false);
-            bell.transform.position = mapService.ScaleMapPosition(new Vector3(0f, 0f, 0.12f));
-            bell.transform.localScale = new Vector3(0.58f, 0.58f, 0.34f);
-            SetSortingFromZ(bell);
-            CreatePropChild(bell.transform, "Bell Highlight", new Vector3(0f, 0f, 0.08f), new Vector3(0.52f, 0.52f, 0.08f), new Color(1f, 0.34f, 0.22f, 0.9f), PrimitiveType.Cylinder);
-            CreateWorldLabelAt("紧急铃", mapService.ScaleMapPosition(new Vector3(0f, 0.48f, -0.16f)), 0.075f);
+            worldBuilder.CreateEmergencyBell();
         }
 
         private void CreateSocialDeductionShipMap()
@@ -9172,7 +8407,7 @@ namespace GanglandUndercover.Online
             CreateRoadNetwork();
             CreateMapStructureLayer();
             CreateArchitecturalVolumeLayer();
-            CreatemapService.ShipRooms();
+            CreateShipRooms();
             CreateShipRoomFrames();
             CreateShipTaskDressing();
             CreateLargeMapProps();
@@ -9192,7 +8427,7 @@ namespace GanglandUndercover.Online
             CreateShipFloor();
             CreateShipCorridors();
             CreateCorridorVolumeLayer();
-            CreatemapService.ShipRooms();
+            CreateShipRooms();
             CreateShipRoomFrames();
             CreateShipTaskDressing();
             CreateUnderworldPassageNodes();
@@ -9336,7 +8571,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void CreatemapService.ShipRooms()
+        private void CreateShipRooms()
         {
             foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
@@ -11553,16 +10788,7 @@ namespace GanglandUndercover.Online
 
         private void EnsureRuntimeSprites()
         {
-            if (roundedRectSprite != null && circleSprite != null && softCircleSprite != null && diamondSprite != null && capsuleSprite != null)
-            {
-                return;
-            }
-
-            roundedRectSprite = CreateRoundedRectSprite("Runtime Rounded Rect", 32, 6);
-            circleSprite = CreateCircleSprite("Runtime Circle", 32, false);
-            softCircleSprite = CreateCircleSprite("Runtime Soft Circle", 32, true);
-            diamondSprite = CreateDiamondSprite("Runtime Diamond", 32);
-            capsuleSprite = CreateRoundedRectSprite("Runtime Capsule", 32, 14);
+            worldBuilder.EnsureRuntimeSprites();
         }
 
         private GameObject CreateSpriteObject(string objectName, Sprite sprite, Color color)
@@ -11578,319 +10804,67 @@ namespace GanglandUndercover.Online
 
         private static Sprite CreateRoundedRectSprite(string spriteName, int size, int radius)
         {
-            Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-            texture.name = spriteName + " Texture";
-            texture.filterMode = FilterMode.Bilinear;
-            Color clear = new Color(1f, 1f, 1f, 0f);
-            Color fill = Color.white;
-
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    float dx = Mathf.Max(radius - x, 0, x - (size - radius - 1));
-                    float dy = Mathf.Max(radius - y, 0, y - (size - radius - 1));
-                    float distance = Mathf.Sqrt(dx * dx + dy * dy);
-                    texture.SetPixel(x, y, distance <= radius ? fill : clear);
-                }
-            }
-
-            texture.Apply();
-            return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), size);
+            return OnlineWorldBuilder.CreateRoundedRectSprite(spriteName, size, radius);
         }
 
         private static Sprite CreateCircleSprite(string spriteName, int size, bool softEdge)
         {
-            Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-            texture.name = spriteName + " Texture";
-            texture.filterMode = FilterMode.Bilinear;
-            Vector2 center = new Vector2((size - 1) * 0.5f, (size - 1) * 0.5f);
-            float radius = size * 0.48f;
-
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    float distance = Vector2.Distance(new Vector2(x, y), center);
-                    float alpha = softEdge ? Mathf.Clamp01((radius - distance) / (radius * 0.18f)) : distance <= radius ? 1f : 0f;
-                    texture.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
-                }
-            }
-
-            texture.Apply();
-            return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), size);
+            return OnlineWorldBuilder.CreateCircleSprite(spriteName, size, softEdge);
         }
 
         private static Sprite CreateDiamondSprite(string spriteName, int size)
         {
-            Texture2D texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
-            texture.name = spriteName + " Texture";
-            texture.filterMode = FilterMode.Bilinear;
-            float center = (size - 1) * 0.5f;
-            Color clear = new Color(1f, 1f, 1f, 0f);
-
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    float manhattan = Mathf.Abs(x - center) + Mathf.Abs(y - center);
-                    texture.SetPixel(x, y, manhattan <= center ? Color.white : clear);
-                }
-            }
-
-            texture.Apply();
-            return Sprite.Create(texture, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f), size);
+            return OnlineWorldBuilder.CreateDiamondSprite(spriteName, size);
         }
 
         private TextMesh CreateWorldLabelAt(string text, Vector3 position, float characterSize)
         {
-            GameObject labelObject = new GameObject("Label " + text);
-            labelObject.transform.SetParent(worldRoot.transform, false);
-            labelObject.transform.position = position;
-            TextMesh label = labelObject.AddComponent<TextMesh>();
-            label.text = text;
-            label.anchor = TextAnchor.MiddleCenter;
-            label.alignment = TextAlignment.Center;
-            label.characterSize = characterSize;
-            label.fontSize = 48;
-            label.color = new Color(0.72f, 0.78f, 0.72f, 0.96f);
-            MeshRenderer renderer = labelObject.GetComponent<MeshRenderer>();
-
-            if (renderer != null)
-            {
-                renderer.sortingOrder = SortingOrderForZ(position.z) + 20;
-            }
-
-            if (Camera.main != null)
-            {
-                BillboardLabel(labelObject.transform);
-            }
-
-            worldLabels.Add(label);
-            return label;
+            return worldBuilder.CreateWorldLabelAt(text, position, characterSize);
         }
 
         private TextMesh CreateWorldLabel(Transform parent, string text, Vector3 localPosition, float characterSize)
         {
-            GameObject labelObject = new GameObject("Label");
-            labelObject.transform.SetParent(parent, false);
-            labelObject.transform.localPosition = localPosition;
-            TextMesh label = labelObject.AddComponent<TextMesh>();
-            label.text = text;
-            label.anchor = TextAnchor.MiddleCenter;
-            label.alignment = TextAlignment.Center;
-            label.characterSize = characterSize;
-            label.fontSize = 48;
-            label.color = new Color(0.88f, 0.92f, 0.88f, 1f);
-            MeshRenderer renderer = labelObject.GetComponent<MeshRenderer>();
-
-            if (renderer != null)
-            {
-                renderer.sortingOrder = 900;
-            }
-
-            if (Camera.main != null)
-            {
-                BillboardLabel(labelObject.transform);
-            }
-
-            return label;
+            return worldBuilder.CreateWorldLabel(parent, text, localPosition, characterSize);
         }
 
         private static void BillboardLabel(Transform labelTransform)
         {
-            if (labelTransform == null || Camera.main == null)
-            {
-                return;
-            }
-
-            Vector3 direction = Camera.main.transform.position - labelTransform.position;
-
-            if (direction.sqrMagnitude <= 0.0001f)
-            {
-                return;
-            }
-
-            labelTransform.rotation = Quaternion.LookRotation(direction.normalized, Camera.main.transform.up);
+            OnlineWorldBuilder.BillboardLabel(labelTransform);
         }
 
         private string BuildPlayerWorldLabel(OnlinePlayerState state, bool isLocal)
         {
-            if (!state.Alive)
-            {
-                return "出局";
-            }
-
-            if (isLocal)
-            {
-                return "你\n" + ProfessionName(state.Profession);
-            }
-
-            return state.DisplayName.Length > 4 ? state.DisplayName.Substring(0, 4) : state.DisplayName;
+            return worldBuilder.BuildPlayerWorldLabel(state, isLocal);
         }
 
         private bool ShouldShowPlayerWorldLabel(OnlinePlayerState state, bool isLocal)
         {
-            if (phase == OnlineMatchPhase.Action)
-            {
-                if (tacticalMapOpen)
-                {
-                    return true;
-                }
-
-                return isLocal || !state.Alive;
-            }
-
-            return true;
+            return worldBuilder.ShouldShowPlayerWorldLabel(state, isLocal, phase, tacticalMapOpen);
         }
 
         private bool IsNearCameraSubject(Vector3 position)
         {
-            if (tacticalMapOpen || phase != OnlineMatchPhase.Action)
-            {
-                return true;
-            }
-
-            return Vector3.Distance(position, LocalCameraTarget()) <= 2.4f;
+            return _cameraRig.IsNearSubject(position, LocalCameraTarget(), tacticalMapOpen, phase);
         }
 
         private static void SetTextMeshVisible(TextMesh label, bool visible)
         {
-            MeshRenderer renderer = label == null ? null : label.GetComponent<MeshRenderer>();
-
-            if (renderer != null)
-            {
-                renderer.enabled = visible;
-            }
+            OnlineWorldBuilder.SetTextMeshVisible(label, visible);
         }
 
         private static void RemoveStaleVisuals<T>(Dictionary<T, GameObject> visuals, HashSet<T> seen)
         {
-            List<T> stale = new List<T>();
-
-            foreach (KeyValuePair<T, GameObject> pair in visuals)
-            {
-                if (!seen.Contains(pair.Key))
-                {
-                    stale.Add(pair.Key);
-                }
-            }
-
-            foreach (T key in stale)
-            {
-                if (visuals[key] != null)
-                {
-                    Destroy(visuals[key]);
-                }
-
-                visuals.Remove(key);
-            }
+            OnlineWorldBuilder.RemoveStaleVisuals(visuals, seen);
         }
 
         private static void SetColor(GameObject target, Color color)
         {
-            SpriteRenderer spriteRenderer = target.GetComponent<SpriteRenderer>();
-
-            if (spriteRenderer != null)
-            {
-                spriteRenderer.color = color;
-                return;
-            }
-
-            Renderer renderer = target.GetComponent<Renderer>();
-
-            if (renderer != null)
-            {
-                Material material = Application.isPlaying ? renderer.material : renderer.sharedMaterial;
-
-                if (material == null)
-                {
-                    material = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard"));
-
-                    if (Application.isPlaying)
-                    {
-                        renderer.material = material;
-                    }
-                    else
-                    {
-                        renderer.sharedMaterial = material;
-                    }
-                }
-
-                material.color = color;
-            }
+            OnlineWorldBuilder.SetColor(target, color);
         }
 
         private static void SetPlayerVisualColors(GameObject visual, OnlinePlayerState state, bool isLocal)
         {
-            SpriteRenderer rootRenderer = visual.GetComponent<SpriteRenderer>();
-
-            if (rootRenderer != null)
-            {
-                rootRenderer.color = new Color(1f, 1f, 1f, 0f);
-            }
-
-            Transform coat = visual.transform.Find("Coat");
-
-            if (coat != null)
-            {
-                SetColor(coat.gameObject, PlayerColor(state, isLocal));
-            }
-
-            Transform bodyVolume = visual.transform.Find("Body Volume");
-
-            if (bodyVolume != null)
-            {
-                SetColor(bodyVolume.gameObject, PlayerColor(state, isLocal));
-            }
-
-            Transform helmetVolume = visual.transform.Find("Helmet Volume");
-
-            if (helmetVolume != null)
-            {
-                SetColor(helmetVolume.gameObject, PlayerColor(state, isLocal));
-            }
-
-            Transform packVolume = visual.transform.Find("Pack Volume");
-            Transform localRing = visual.transform.Find("Local Ring");
-            Transform localArrow = visual.transform.Find("Local Arrow");
-
-            Color accent = PlayerAccentColor(state);
-            Transform torso = visual.transform.Find("Torso");
-            Transform armL = visual.transform.Find("Arm L");
-            Transform armR = visual.transform.Find("Arm R");
-
-            if (torso != null)
-            {
-                SetColor(torso.gameObject, accent);
-            }
-
-            if (armL != null)
-            {
-                SetColor(armL.gameObject, accent);
-            }
-
-            if (armR != null)
-            {
-                SetColor(armR.gameObject, accent);
-            }
-
-            if (packVolume != null)
-            {
-                SetColor(packVolume.gameObject, Darken(accent, 0.7f));
-            }
-
-            if (localRing != null)
-            {
-                localRing.gameObject.SetActive(isLocal && state.Alive);
-                SetColor(localRing.gameObject, new Color(0.08f, 0.72f, 0.95f, 0.62f));
-            }
-
-            if (localArrow != null)
-            {
-                localArrow.gameObject.SetActive(isLocal && state.Alive);
-                SetColor(localArrow.gameObject, new Color(0.95f, 0.82f, 0.12f, 1f));
-            }
+            OnlineWorldBuilder.SetPlayerVisualColors(visual, state, isLocal);
         }
 
         private void UpdatePlayerStageTwoStateLayer(GameObject visual, OnlinePlayerState state, bool isLocal)
@@ -11998,57 +10972,27 @@ namespace GanglandUndercover.Online
 
         private static Transform FindChildTransform(Transform root, params string[] names)
         {
-            if (root == null || names == null)
-            {
-                return null;
-            }
-
-            for (int i = 0; i < names.Length; i++)
-            {
-                Transform found = root.Find(names[i]);
-
-                if (found != null)
-                {
-                    return found;
-                }
-            }
-
-            return null;
+            return OnlineWorldBuilder.FindChildTransform(root, names);
         }
 
         private static void SetChildActive(GameObject root, string childName, bool active)
         {
-            Transform child = root == null ? null : root.transform.Find(childName);
-
-            if (child != null && child.gameObject.activeSelf != active)
-            {
-                child.gameObject.SetActive(active);
-            }
+            OnlineWorldBuilder.SetChildActive(root, childName, active);
         }
 
         private static void SetSortingFromZ(GameObject target)
         {
-            int sortingOrder = SortingOrderForZ(target.transform.position.z);
-
-            foreach (SpriteRenderer renderer in target.GetComponentsInChildren<SpriteRenderer>(true))
-            {
-                renderer.sortingOrder = sortingOrder + SortingOrderForLocalZ(renderer.transform.localPosition.z);
-            }
-
-            foreach (MeshRenderer renderer in target.GetComponentsInChildren<MeshRenderer>(true))
-            {
-                renderer.sortingOrder = sortingOrder + SortingOrderForLocalZ(renderer.transform.localPosition.z) + 20;
-            }
+            OnlineWorldBuilder.SetSortingFromZ(target);
         }
 
         private static int SortingOrderForZ(float z)
         {
-            return Mathf.RoundToInt((z + 2f) * 100f);
+            return OnlineWorldBuilder.SortingOrderForZ(z);
         }
 
         private static int SortingOrderForLocalZ(float z)
         {
-            return Mathf.RoundToInt(z * 40f);
+            return OnlineWorldBuilder.SortingOrderForLocalZ(z);
         }
 
         private void EnsureAudio()
@@ -12154,18 +11098,13 @@ namespace GanglandUndercover.Online
             botTargets.Clear();
             migrationManager?.ResetState();
             BuildDefaultTasks();
-            evidenceScore = 0;
+            taskService.EvidenceScore = 0;
             evidenceMilestoneIndex = 0;
             lastMeetingReason = "尚未召开会议。";
             lastVoteOutcome = "尚未投票。";
             lastEvidenceEvent = "尚未取得关键证据。";
             lastSabotageEvent = "尚未发生破坏。";
-            blackoutTimer = 0f;
-            lockdownTimer = 0f;
-            communicationJamTimer = 0f;
-            evidenceLeakTimer = 0f;
-            evidenceLeakAccumulator = 0f;
-            patrolAlertTimer = 0f;
+            taskService.ResetAllSabotageTimers();
             emergencyCooldownTimer = 0f;
             aiActionGraceTimer = 0f;
             evidenceMilestoneIndex = 0;
@@ -12229,79 +11168,17 @@ namespace GanglandUndercover.Online
 
         private static Vector3 TaskScale(int taskId)
         {
-            switch (taskId)
-            {
-                case 0:
-                    return new Vector3(0.42f, 0.24f, 0.22f);
-                case 1:
-                case 23:
-                case 25:
-                    return new Vector3(0.5f, 0.32f, 0.22f);
-                case 2:
-                    return new Vector3(0.32f, 0.1f, 0.32f);
-                case 3:
-                case 21:
-                case 24:
-                    return new Vector3(0.34f, 0.34f, 0.2f);
-                case 4:
-                    return new Vector3(0.36f, 0.22f, 0.28f);
-                case 5:
-                case 20:
-                case 22:
-                case 26:
-                case 27:
-                    return new Vector3(0.34f, 0.34f, 0.2f);
-                default:
-                    return new Vector3(0.34f, 0.34f, 0.18f);
-            }
+            return OnlineWorldBuilder.TaskScale(taskId);
         }
 
         private static Color PlayerAccentColor(OnlinePlayerState state)
         {
-            switch (state.Profession)
-            {
-                case OnlineProfession.Inspector:
-                    return new Color(0.08f, 0.18f, 0.45f, 1f);
-                case OnlineProfession.Forensics:
-                    return new Color(0.14f, 0.52f, 0.5f, 1f);
-                case OnlineProfession.Tech:
-                    return new Color(0.18f, 0.36f, 0.72f, 1f);
-                case OnlineProfession.UndercoverAgent:
-                    return new Color(0.42f, 0.28f, 0.62f, 1f);
-                case OnlineProfession.Enforcer:
-                    return new Color(0.48f, 0.08f, 0.08f, 1f);
-                case OnlineProfession.Fixer:
-                    return new Color(0.36f, 0.26f, 0.08f, 1f);
-                case OnlineProfession.Driver:
-                    return new Color(0.1f, 0.38f, 0.18f, 1f);
-                default:
-                    return new Color(0.32f, 0.32f, 0.36f, 1f);
-            }
+            return OnlineWorldBuilder.PlayerAccentColor(state);
         }
 
         private static Color PlayerColor(OnlinePlayerState state, bool isLocal)
         {
-            if (!state.Alive)
-            {
-                return new Color(0.32f, 0.32f, 0.32f, 1f);
-            }
-
-            if (isLocal)
-            {
-                return new Color(0.96f, 0.82f, 0.18f, 1f);
-            }
-
-            if (state.PublicRole == OnlineRole.Gang)
-            {
-                return new Color(0.75f, 0.08f, 0.08f, 1f);
-            }
-
-            if (state.PublicRole == OnlineRole.Undercover)
-            {
-                return new Color(0.16f, 0.6f, 0.78f, 1f);
-            }
-
-            return new Color(0.78f, 0.78f, 0.86f, 1f);
+            return OnlineWorldBuilder.PlayerColor(state, isLocal);
         }
 
 
@@ -12325,116 +11202,191 @@ namespace GanglandUndercover.Online
 
         private static string TaskNameFor(int id)
         {
-            switch (id)
-            {
-                case 0:
-                    return "调取监控";
-                case 1:
-                    return "查封货柜";
-                case 2:
-                    return "修复电闸";
-                case 3:
-                    return "扫描证物";
-                case 4:
-                    return "上传档案";
-                case 5:
-                    return "盘问线人";
-                case 6:
-                    return "无线电监听";
-                case 7:
-                    return "门禁取证";
-                case 8:
-                    return "天台目击";
-                case 9:
-                    return "诊所搜查";
-                case 10:
-                    return "码头巡线";
-                case 11:
-                    return "财务追踪";
-                case 12:
-                    return "解除卷闸";
-                case 13:
-                    return "恢复通讯";
-                case 14:
-                    return "备用发电";
-                case 15:
-                    return "整理弹道";
-                case 16:
-                    return "清点赃款";
-                case 17:
-                    return "巡逻打卡";
-                case 18:
-                    return "追踪车牌";
-                case 19:
-                    return "核对病历";
-                case 20:
-                    return "追查鱼档暗号";
-                case 21:
-                    return "比对电话录音";
-                case 22:
-                    return "封存黑钱袋";
-                case 23:
-                    return "检查码头冷柜";
-                case 24:
-                    return "恢复警用无人机";
-                case 25:
-                    return "排查后巷摩托";
-                case 26:
-                    return "核验巡逻路线";
-                case 27:
-                    return "加固证人安全屋";
-                default:
-                    return "未知任务";
-            }
+            return OnlineWorldBuilder.TaskNameFor(id);
         }
 
         private static string TaskDistrictName(int id)
         {
-            switch (id)
+            return OnlineWorldBuilder.TaskDistrictName(id);
+        }
+
+        private Vector3 ScaleMapPosition(Vector3 position)
+        {
+            return mapService.ScaleMapPosition(position);
+        }
+
+        private Vector3 ScaleMapSize(Vector3 size)
+        {
+            return mapService.ScaleMapSize(size);
+        }
+
+        private Vector3 ResolveMapCollision(Vector3 from, Vector3 requested)
+        {
+            Vector3 clamped = mapService.ClampToOnlineMap(requested);
+
+            if (IsWalkable(clamped))
             {
-                case 1:
-                case 10:
-                case 23:
-                    return "西码头货柜场";
-                case 0:
-                case 21:
-                    return "监控中心";
-                case 2:
-                case 14:
-                    return "港区电房";
-                case 3:
-                case 15:
-                case 26:
-                    return "证物库";
-                case 4:
-                case 24:
-                    return "警队指挥车棚";
-                case 5:
-                    return "茶餐厅骑楼";
-                case 6:
-                case 13:
-                case 20:
-                    return "庙街夜市棚群";
-                case 7:
-                case 11:
-                case 16:
-                case 22:
-                    return "黑钱金融楼";
-                case 8:
-                case 27:
-                    return "天台机房";
-                case 9:
-                case 19:
-                    return "地下诊所唐楼";
-                case 12:
-                case 25:
-                    return "后巷排档楼";
-                case 17:
-                case 18:
-                    return "中环主干道";
-                default:
-                    return "九龙港城";
+                return clamped;
             }
+
+            Vector3 horizontal = mapService.ClampToOnlineMap(new Vector3(clamped.x, from.y, 0f));
+            if (IsWalkable(horizontal))
+            {
+                return horizontal;
+            }
+
+            Vector3 vertical = mapService.ClampToOnlineMap(new Vector3(from.x, clamped.y, 0f));
+            if (IsWalkable(vertical))
+            {
+                return vertical;
+            }
+
+            return FindNearestOpenPosition(clamped, from);
+        }
+
+        private Vector3 FindNearestOpenPosition(Vector3 desired, Vector3 fallback)
+        {
+            Vector3 clamped = mapService.ClampToOnlineMap(desired);
+
+            if (IsWalkable(clamped))
+            {
+                return clamped;
+            }
+
+            if (fallback != Vector3.zero)
+            {
+                Vector3 safeFallback = mapService.ClampToOnlineMap(fallback);
+                if (IsWalkable(safeFallback))
+                {
+                    return safeFallback;
+                }
+            }
+
+            for (int ring = 1; ring <= 10; ring++)
+            {
+                float radius = CollisionTraceStep * ring * 4f;
+
+                for (int i = 0; i < 16; i++)
+                {
+                    float angle = i / 16f * Mathf.PI * 2f;
+                    Vector3 candidate = mapService.ClampToOnlineMap(clamped + new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f) * radius);
+
+                    if (IsWalkable(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return mapService.ClampToOnlineMap(fallback == Vector3.zero ? Vector3.zero : fallback);
+        }
+
+        private Vector3 GetLocalPlayerPosition()
+        {
+            return players.TryGetValue(LocalClientId(), out OnlinePlayerState state) ? state.Position : localPosition;
+        }
+
+        private Vector3 GetPlayerPosition(ulong clientId)
+        {
+            return players.TryGetValue(clientId, out OnlinePlayerState state) ? state.Position : Vector3.zero;
+        }
+
+        private static OnlineProfession BotProfession(int index)
+        {
+            return OnlineBotController.BotProfession(index);
+        }
+
+        private static OnlineProfession ProfessionFor(OnlineRole role, int index)
+        {
+            if (role == OnlineRole.Gang || role == OnlineRole.Mole)
+            {
+                OnlineProfession[] gangProfessions =
+                {
+                    OnlineProfession.Enforcer,
+                    OnlineProfession.Fixer,
+                    OnlineProfession.Driver
+                };
+                return gangProfessions[index % gangProfessions.Length];
+            }
+
+            if (role == OnlineRole.Undercover)
+            {
+                return OnlineProfession.UndercoverAgent;
+            }
+
+            OnlineProfession[] policeProfessions =
+            {
+                OnlineProfession.Inspector,
+                OnlineProfession.Forensics,
+                OnlineProfession.Tech
+            };
+            return policeProfessions[index % policeProfessions.Length];
+        }
+
+        private static string RoleName(OnlineRole role)
+        {
+            switch (role)
+            {
+                case OnlineRole.Police:
+                    return "警方";
+                case OnlineRole.Undercover:
+                    return "卧底";
+                case OnlineRole.Gang:
+                    return "黑帮";
+                case OnlineRole.Mole:
+                    return "线人";
+                default:
+                    return "未分配";
+            }
+        }
+
+        private static string ProfessionName(OnlineProfession profession)
+        {
+            switch (profession)
+            {
+                case OnlineProfession.Inspector:
+                    return "督察";
+                case OnlineProfession.Forensics:
+                    return "法证";
+                case OnlineProfession.Tech:
+                    return "技术";
+                case OnlineProfession.UndercoverAgent:
+                    return "卧底";
+                case OnlineProfession.Enforcer:
+                    return "打手";
+                case OnlineProfession.Fixer:
+                    return "善后";
+                case OnlineProfession.Driver:
+                    return "车手";
+                default:
+                    return "未知";
+            }
+        }
+
+        private static string PhaseName(OnlineMatchPhase matchPhase)
+        {
+            switch (matchPhase)
+            {
+                case OnlineMatchPhase.Lobby:
+                    return "房间";
+                case OnlineMatchPhase.Opening:
+                    return "简报";
+                case OnlineMatchPhase.Action:
+                    return "行动";
+                case OnlineMatchPhase.Meeting:
+                    return "会议";
+                case OnlineMatchPhase.Voting:
+                    return "投票";
+                case OnlineMatchPhase.Result:
+                    return "结算";
+                default:
+                    return "未知";
+            }
+        }
+
+        private static int TaskRequiredProgress(int taskId)
+        {
+            return OnlineTaskService.TaskRequiredProgress(taskId);
         }
 
 

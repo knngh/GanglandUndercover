@@ -25,7 +25,7 @@ Chinese setup notes are in `Assets/_Project/Docs/UnitySetup.zh-CN.md`.
 
 - Create Host, then start an online match. If fewer than five people are connected, the match auto-fills AI players.
 - Join Client connects to a Host IP on port `7777`.
-- The room panel supports player name, room name, minimum and maximum player counts, evidence target, AI fill, role-reveal-on-eject, and proximity voice rules.
+- The room panel supports player name, room name, minimum and maximum player counts, evidence target, AI fill, role-reveal-on-eject, and online text chat with three channels (meeting, global, proximity) plus a ghost-only channel for dead players. Proximity voice (Vivox) has been removed — text chat replaces it.
 - Each match opens with a dedicated briefing / role reveal phase before action begins.
 - Police and Undercover win by completing evidence tasks or voting out all gang players.
 - Gang wins by knocking down enough investigators, sabotaging evidence, or reaching parity with non-gang survivors.
@@ -48,4 +48,4 @@ Chinese setup notes are in `Assets/_Project/Docs/UnitySetup.zh-CN.md`.
 
 ## Engine Direction
 
-Continue in Unity for the full production track. The priority is building a distinctive online police-and-gang deduction game with fast iteration, Netcode/Lobby/Relay/Vivox integration, and a stable multiplayer vertical slice before considering a higher-cost engine switch. Unreal can be revisited later only if the project moves toward realistic third-person production, cinematic animation, and large authored environments.
+Continue in Unity for the full production track. The priority is building a distinctive online police-and-gang deduction game with fast iteration, Netcode/Lobby/Relay/online text chat, and a stable multiplayer vertical slice before considering a higher-cost engine switch. Unreal can be revisited later only if the project moves toward realistic third-person production, cinematic animation, and large authored environments.
