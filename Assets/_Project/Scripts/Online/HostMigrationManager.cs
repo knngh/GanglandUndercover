@@ -23,6 +23,10 @@ namespace GanglandUndercover.Online
         private const float HeartbeatInterval = 2.0f;
         private const float HeartbeatTimeout = 5.0f;
 
+        [Header("M7.2 迁移配置")]
+        [SerializeField] private bool useFallbackOnMigrationFail = true;  // 默认降级：Host掉线→友好结算
+        [SerializeField] private float migrationTimeout = 30f;            // 迁移总超时
+
         private OnlineMatchController matchController;
         private NetworkManager networkManager;
 
@@ -31,6 +35,7 @@ namespace GanglandUndercover.Online
         private float lastHeartbeatReceiveTime;
         private bool migrationInProgress;
         private bool hostDisconnectedDetected;
+        private float migrationElapsed;       // M7.2: 迁移已耗时
 
         // 迁移 UI 提示
         private string migrationStatus = string.Empty;
@@ -38,6 +43,9 @@ namespace GanglandUndercover.Online
 
         // 旧主机断连前最后的快照（客户端缓存，用于提交给新主机）
         private GameStateSnapshot? cachedSnapshot;
+
+        // M7.2: 追踪旧主机 ClientId
+        private ulong oldHostClientId;
 
         public bool MigrationInProgress => migrationInProgress;
         public string MigrationStatus => migrationStatus;
@@ -180,35 +188,41 @@ namespace GanglandUndercover.Online
             }
 
             migrationInProgress = true;
+            migrationElapsed = 0f;
             migrationStatus = "主机迁移中...";
             migrationMessageAlpha = 1.0f;
 
+            // M7.2: 记录旧主机 ID（用于选举时排除）
+            oldHostClientId = matchController.OldHostClientId();
+
             // 阶段一：缓存当前快照
             cachedSnapshot = matchController.CaptureSnapshot();
+
+            // M7.2 降级策略：少于 2 人直接结算
+            if (GetRemainingPlayerCount() <= 1)
+            {
+                Debug.LogWarning("[HostMigrationManager] 只剩 1 名玩家，迁移失败。");
+                FallbackToGameOver("主机已离线，剩余玩家不足。");
+                return;
+            }
 
             // 阶段二：从剩余客户端选举新主机
             ulong newHostId = ElectNewHost();
             ulong localClientId = matchController.LocalClientIdValue;
 
-            if (newHostId == 0 || newHostId == localClientId)
+            if (newHostId == localClientId)
             {
-                // 本地客户端就是新主机（或只剩自己）
-                if (GetRemainingPlayerCount() <= 1)
-                {
-                    Debug.LogWarning("[HostMigrationManager] 只剩 1 名玩家，迁移失败，游戏结束。");
-                    migrationStatus = "主机已离线，剩余玩家不足，对局结束。";
-                    matchController.ForceGameOver("主机离线，存活玩家不足，对局结束。");
-                    migrationInProgress = false;
-                    return;
-                }
-
                 // 本机成为新主机
                 BecomeNewHost();
             }
-            else
+            else if (newHostId > 0)
             {
                 // 等待新主机广播快照
                 Debug.Log("[HostMigrationManager] 新主机选举为 " + newHostId + "，等待快照同步。");
+            }
+            else
+            {
+                FallbackToGameOver("无法选举新主机。");
             }
         }
 
@@ -225,22 +239,13 @@ namespace GanglandUndercover.Online
             {
                 ulong clientId = client.ClientId;
 
-                // 跳过旧主机 (Server/Host 自身)
-                if (networkManager.IsServer || networkManager.IsHost)
+                // M7.2: 排除旧主机
+                if (clientId == oldHostClientId) continue;
+
+                // 选择最小 clientId 作为新主机
+                if (bestId == 0 || clientId < bestId)
                 {
-                    // 本机是旧主机的情况下，其他客户端都有效
-                    if (bestId == 0 || clientId < bestId)
-                    {
-                        bestId = clientId;
-                    }
-                }
-                else
-                {
-                    // 客户端视角：排除旧主机（自身连接已断），选择最小 clientId
-                    if (bestId == 0 || clientId < bestId)
-                    {
-                        bestId = clientId;
-                    }
+                    bestId = clientId;
                 }
             }
 
@@ -321,6 +326,35 @@ namespace GanglandUndercover.Online
             }
 
             migrationMessageAlpha = Mathf.Lerp(migrationMessageAlpha, 1.0f, Time.deltaTime * 2.0f);
+
+            // M7.2: 迁移超时降级
+            migrationElapsed += Time.deltaTime;
+            if (migrationElapsed >= migrationTimeout)
+            {
+                FallbackToGameOver("主机迁移超时（" + migrationTimeout.ToString("F0") + "s），自动结算。");
+            }
+        }
+
+        /// <summary>M7.2 降级策略：Host 掉线 → 友好结算</summary>
+        private void FallbackToGameOver(string reason)
+        {
+            migrationStatus = reason;
+            migrationMessageAlpha = 1.0f;
+            migrationInProgress = false;
+            hostDisconnectedDetected = false;
+
+            if (!useFallbackOnMigrationFail)
+            {
+                Debug.LogWarning("[HostMigrationManager] 迁移失败但已关闭降级结算: " + reason);
+                return;
+            }
+
+            if (matchController != null)
+            {
+                matchController.ForceGameOver(reason);
+            }
+
+            Debug.Log("[HostMigrationManager] 降级结算: " + reason);
         }
 
         private void OnGUI()

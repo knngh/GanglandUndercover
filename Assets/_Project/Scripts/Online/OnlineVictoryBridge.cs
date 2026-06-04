@@ -192,39 +192,53 @@ namespace GanglandUndercover.Online
             Func<ulong, OnlineRole> getPrivateRole,
             IReadOnlyList<OnlineTaskState> tasks)
         {
-            // 证据链闭合
-            if (evidenceScore >= evidenceTarget)
-                return "警方胜利：证据链闭合。";
-
-            int aliveGang = 0;
-            int aliveNonGang = 0;
+            int aliveGang = 0, alivePolice = 0, aliveUndercover = 0, aliveMole = 0, totalAlive = 0;
 
             foreach (var kv in players)
             {
                 if (!kv.Value.Alive) continue;
-                if (getPrivateRole(kv.Key) == OnlineRole.Gang)
-                    aliveGang++;
-                else
-                    aliveNonGang++;
+                totalAlive++;
+                switch (getPrivateRole(kv.Key))
+                {
+                    case OnlineRole.Gang:       aliveGang++; break;
+                    case OnlineRole.Police:     alivePolice++; break;
+                    case OnlineRole.Undercover: aliveUndercover++; break;
+                    case OnlineRole.Mole:       aliveMole++; break;
+                }
             }
 
-            if (aliveGang == 0 && players.Count >= 2)
+            int gangSide = aliveGang + aliveUndercover + aliveMole;
+            int policeSide = alivePolice;
+
+            // 1) 证据链闭合
+            if (evidenceScore >= evidenceTarget)
+                return "警方胜利：证据链闭合。";
+
+            // 2) 黑帮全灭
+            if (gangSide == 0 && totalAlive >= 2)
                 return "警方胜利：黑帮全部出局。";
 
-            if (aliveGang > 0 && (aliveNonGang == 0 || (players.Count >= 4 && aliveGang >= aliveNonGang)))
+            // 3) 卧底特殊胜利：警方与黑帮均出局，仅卧底存活。
+            if (alivePolice == 0 && aliveUndercover > 0 && aliveGang == 0 && aliveMole == 0)
+                return "卧底胜利：警方与黑帮两败俱伤，卧底成功接管港区。";
+
+            // 4) 黑帮人数碾压。人数相等仍应继续进入会议/行动博弈。
+            if (gangSide > 0 && (policeSide == 0 || (totalAlive >= 4 && gangSide > policeSide)))
                 return "黑帮胜利：港区控制权失守。";
 
-            // 补充：所有任务完成且证据过半
+            // 5) 全部任务完成 + 证据过半
             int totalTasks = tasks.Count;
             int completedTasks = tasks.Count(t => t.Completed);
             int sabotagedTasks = tasks.Count(t => t.Sabotaged);
 
-            if (completedTasks >= totalTasks && evidenceScore >= Mathf.CeilToInt(evidenceTarget * 0.5f))
+            if (totalTasks > 0 && completedTasks >= totalTasks && evidenceScore >= Mathf.CeilToInt(evidenceTarget * 0.5f))
                 return "警方胜利：全部任务完成，证据链已足够收网。";
 
-            // 破坏过多且证据不足
-            if (sabotagedTasks >= totalTasks / 2 && evidenceScore < Mathf.CeilToInt(evidenceTarget * 0.3f))
+            // 6) 破坏过半 + 证据不足
+            if (totalTasks > 0 && sabotagedTasks >= Mathf.CeilToInt(totalTasks * 0.5f) && evidenceScore < Mathf.CeilToInt(evidenceTarget * 0.3f))
                 return "黑帮胜利：关键设施遭到严重破坏，警方无力回天。";
+
+            // M4.4: 内鬼随黑帮侧获胜；平局人数继续进入会议/行动博弈。
 
             return string.Empty;
         }

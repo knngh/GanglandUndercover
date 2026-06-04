@@ -16,9 +16,18 @@ namespace GanglandUndercover.Online
     /// Extracted from OnlineMatchController for M2 controller slimming.
     /// Holds all rendering layer state (sprites, materials, model caches, collision rects, labels).
     /// Pure class — no MonoBehaviour dependency.
+    /// M3: Use2DBackend defaults to true — all world props render via SpriteRenderer.
     /// </summary>
     public class OnlineWorldBuilder
     {
+        // --- M3 Backend Toggle ---
+        /// <summary>
+        /// When true, all world building uses SpriteRenderer exclusively.
+        /// When false, legacy 3D MeshRenderer path is preserved for comparison.
+        /// Set before calling BuildWorld() / BuildPoliceStation().
+        /// </summary>
+        public bool Use2DBackend = true;
+
         // --- References (set at init) ---
         private GameObject _worldRoot;
         private OnlineMapService _mapService;
@@ -45,6 +54,8 @@ namespace GanglandUndercover.Online
         public IReadOnlyList<TextMesh> WorldLabels => _worldLabels;
         public Sprite RoundedRectSprite => _roundedRectSprite;
         public Sprite CircleSprite => _circleSprite;
+        public Sprite SoftCircleSprite => _softCircleSprite;
+        public Sprite DiamondSprite => _diamondSprite;
         public int ModelPrefabCacheCount => _modelPrefabCache.Count;
         public int RuntimeMeshMaterialCount => _runtimeMeshMaterials.Count;
 
@@ -221,6 +232,10 @@ namespace GanglandUndercover.Online
         public GameObject CreateMeshBoxProp(string propName, Vector3 position, Vector3 scale, Color color,
             float rotationDegrees = 0f)
         {
+            // M3: Delegate to sprite path when 2D backend is active
+            if (Use2DBackend)
+                return CreateRotatedProp(propName, position, scale, color, rotationDegrees);
+
             GameObject prop = GameObject.CreatePrimitive(PrimitiveType.Cube);
             prop.name = propName;
             Remove3DCollider(prop);
@@ -236,6 +251,10 @@ namespace GanglandUndercover.Online
         public GameObject CreateSolidMeshBoxProp(string propName, Vector3 position, Vector3 scale, Color color,
             float rotationDegrees = 0f)
         {
+            // M3: Delegate to sprite path when 2D backend is active
+            if (Use2DBackend)
+                return CreateSolidProp(propName, position, scale, color);
+
             GameObject prop = CreateMeshBoxProp(propName, position, scale, color, rotationDegrees);
             RegisterSolidObstacle(position, scale);
             AttachPhysicsCollider(prop, scale, false);
@@ -245,6 +264,10 @@ namespace GanglandUndercover.Online
         public GameObject CreateMeshBoxChild(Transform parent, string propName, Vector3 localPosition, Vector3 scale,
             Color color, float rotationDegrees = 0f)
         {
+            // M3: Delegate to sprite child path when 2D backend is active
+            if (Use2DBackend)
+                return CreatePropChild(parent, propName, localPosition, scale, color, PrimitiveType.Cube);
+
             GameObject prop = GameObject.CreatePrimitive(PrimitiveType.Cube);
             prop.name = propName;
             Remove3DCollider(prop);
@@ -260,6 +283,10 @@ namespace GanglandUndercover.Online
         public GameObject CreateMeshPrimitiveChild(Transform parent, string propName, PrimitiveType primitiveType,
             Vector3 localPosition, Vector3 scale, Color color, Quaternion localRotation)
         {
+            // M3: Delegate to sprite child path when 2D backend is active
+            if (Use2DBackend)
+                return CreatePropChild(parent, propName, localPosition, scale, color, primitiveType);
+
             GameObject prop = GameObject.CreatePrimitive(primitiveType);
             prop.name = propName;
             Remove3DCollider(prop);
@@ -275,6 +302,10 @@ namespace GanglandUndercover.Online
         public GameObject CreateMeshPrimitiveProp(string propName, PrimitiveType primitiveType, Vector3 position,
             Vector3 scale, Color color, Quaternion rotation)
         {
+            // M3: Delegate to sprite path when 2D backend is active
+            if (Use2DBackend)
+                return CreatePrimitiveProp(propName, primitiveType, position, scale, color);
+
             GameObject prop = GameObject.CreatePrimitive(primitiveType);
             prop.name = propName;
             Remove3DCollider(prop);
@@ -450,6 +481,11 @@ namespace GanglandUndercover.Online
             Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false,
             bool preserveMaterials = true)
         {
+            // M3: Skip 3D model loading entirely when 2D backend is active
+            if (Use2DBackend)
+                return CreateModelFallbackProp(propName + " (2D)", position, footprint, rotationDegrees,
+                    FallbackColorForModel(resourcePath));
+
             GameObject prefab = LoadResourcePrefab(resourcePath);
             if (prefab == null || _worldRoot == null)
                 return CreateModelFallbackProp(propName + " Fallback", position, footprint, rotationDegrees,
@@ -490,6 +526,11 @@ namespace GanglandUndercover.Online
         public GameObject CreateModelProp(string propName, string relativeFbxPath, Vector3 position, Vector3 footprint,
             float rotationDegrees = 0f, bool stretchToFootprint = false)
         {
+            // M3: Skip 3D model loading entirely when 2D backend is active
+            if (Use2DBackend)
+                return CreateModelFallbackProp(propName + " (2D)", position, footprint, rotationDegrees,
+                    FallbackColorForModel(relativeFbxPath));
+
             GameObject prefab = LoadQuaterniusModel(relativeFbxPath);
             if (prefab == null || _worldRoot == null)
                 return CreateModelFallbackProp(propName + " Fallback", position, footprint, rotationDegrees,
@@ -555,6 +596,10 @@ namespace GanglandUndercover.Online
         public GameObject CreateModelFallbackProp(string propName, Vector3 position, Vector3 footprint,
             float rotationDegrees, Color color)
         {
+            // M3: Use simple 2D sprite fallback instead of 3D mesh stack
+            if (Use2DBackend)
+                return CreateRotatedProp(propName, position, footprint, color, rotationDegrees);
+
             GameObject fallback = new GameObject(propName);
             fallback.transform.SetParent(_worldRoot.transform, false);
             fallback.transform.position = _mapService.ScaleMapPosition(position);
@@ -793,6 +838,14 @@ namespace GanglandUndercover.Online
 
             CreateWorldLabel(root.transform, label, new Vector3(0f, 0.3f, 0.02f), 0.08f);
             CreateTaskEquipment(root, task);
+
+            // M3: Interactive highlight halo — expands when player is near
+            GameObject halo = CreateSpriteObject("交互光晕", _softCircleSprite, new Color(color.r, color.g, color.b, 0.12f));
+            halo.transform.SetParent(root.transform, false);
+            halo.transform.localPosition = Vector3.zero;
+            halo.transform.localScale = new Vector3(2.0f, 2.0f, 1f);
+            SpriteRenderer haloRenderer = halo.GetComponent<SpriteRenderer>();
+            if (haloRenderer != null) haloRenderer.sortingOrder = -1; // Behind task body
 
             return root;
         }
@@ -1473,6 +1526,11 @@ namespace GanglandUndercover.Online
             bell.transform.position = _mapService.ScaleMapPosition(new Vector3(0f, 0f, 0.12f));
             bell.transform.localScale = new Vector3(0.58f, 0.58f, 0.34f);
             SetSortingFromZ(bell);
+
+            // M4.3: 附挂 EmergencyButton 组件
+            EmergencyButton emergencyBtn = bell.AddComponent<EmergencyButton>();
+            emergencyBtn.InteractionRadius = 0.85f;
+
             CreatePropChild(bell.transform, "Bell Highlight", new Vector3(0f, 0f, 0.08f),
                 new Vector3(0.52f, 0.52f, 0.08f), new Color(1f, 0.34f, 0.22f, 0.9f), PrimitiveType.Cylinder);
             CreateWorldLabelAt("紧急铃", _mapService.ScaleMapPosition(new Vector3(0f, 0.48f, -0.16f)), 0.075f);
@@ -1494,6 +1552,29 @@ namespace GanglandUndercover.Online
                 if (visuals[key] != null) UnityEngine.Object.Destroy(visuals[key]);
                 visuals.Remove(key);
             }
+        }
+        // ====================================================================
+        //  M3: Corpse Marker (ground decal at death position)
+        // ====================================================================
+
+        /// <summary>
+        /// Creates a blood-like ground decal at the death position.
+        /// Semi-transparent soft circle, visible from top-down orthographic camera.
+        /// </summary>
+        public GameObject CreateCorpseMarker(Vector3 position)
+        {
+            EnsureRuntimeSprites();
+            GameObject marker = new GameObject("CorpseMarker");
+            SpriteRenderer renderer = marker.AddComponent<SpriteRenderer>();
+            renderer.sprite = _softCircleSprite;
+            renderer.color = new Color(0.55f, 0.04f, 0.04f, 0.35f);
+            renderer.sortingOrder = 5; // On ground, below characters
+
+            marker.transform.SetParent(_worldRoot != null ? _worldRoot.transform : null, false);
+            marker.transform.position = position;
+            marker.transform.localScale = new Vector3(0.75f, 0.75f, 1f);
+
+            return marker;
         }
     }
 }

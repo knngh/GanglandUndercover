@@ -1,27 +1,91 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace GanglandUndercover.Online
 {
     /// <summary>
-    /// 房间规则配置 ScriptableObject。
-    /// 从 OnlineMatchController 抽出的可配置规则层，默认值与 M0 基线行为一致。
+    /// M4 增强：角色分配表 + 节奏参数。单个 ScriptableObject 控制对局全部可调配置。
     /// </summary>
     [CreateAssetMenu(menuName = "Gangland/Online Rule Set", fileName = "OnlineRuleSet")]
     public class OnlineRuleSet : ScriptableObject
     {
+        // ═══════════════════════════════════════════════════════════════
+        // M4.1 角色分配
+        // ═══════════════════════════════════════════════════════════════
+
+        [Header("── M4.1 角色分配 ──")]
+        [Tooltip("按人数配置阵营比例。列表按 playerCount 升序排列，获取时取 <= 当前人数的最大预设。")]
+        public RoleDistribution[] RoleDistributionTable = new RoleDistribution[]
+        {
+            new RoleDistribution { playerCount = 5,  gang = 1, undercover = 1, mole = 0 },
+            new RoleDistribution { playerCount = 6,  gang = 1, undercover = 1, mole = 1 },
+            new RoleDistribution { playerCount = 7,  gang = 2, undercover = 1, mole = 0 },
+            new RoleDistribution { playerCount = 8,  gang = 2, undercover = 1, mole = 1 },
+            new RoleDistribution { playerCount = 9,  gang = 2, undercover = 2, mole = 1 },
+            new RoleDistribution { playerCount = 10, gang = 3, undercover = 2, mole = 1 },
+        };
+
+        /// <summary>
+        /// 根据玩家数获取阵营分配。取 <= playerCount 的最大预设，兜底为第一项。
+        /// </summary>
+        public RoleDistribution GetRoleDistribution(int playerCount)
+        {
+            if (RoleDistributionTable == null || RoleDistributionTable.Length == 0)
+                return new RoleDistribution { playerCount = playerCount, gang = 1, undercover = 1, mole = 0 };
+
+            RoleDistribution best = RoleDistributionTable[0];
+            for (int i = 0; i < RoleDistributionTable.Length; i++)
+            {
+                if (RoleDistributionTable[i].playerCount <= playerCount &&
+                    RoleDistributionTable[i].playerCount > best.playerCount)
+                    best = RoleDistributionTable[i];
+            }
+            return best;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // M4.2 节奏与时长
+        // ═══════════════════════════════════════════════════════════════
+
+        [Header("── M4.2 节奏 ──")]
+        [Tooltip("任务总量（每个玩家承担的短任务数），默认 4。总任务 = 非Gang人数 × tasksPerPlayer。")]
+        [Range(2, 8)]
+        public int TasksPerNonGangPlayer = 4;
+
+        [Tooltip("任务完成给予的证据分（每完成一个任务）。")]
+        [Range(1, 6)]
+        public int EvidencePerTask = 3;
+
+        [Tooltip("会议后击杀冷却宽容期（秒）。会议结束后的短暂免杀窗口。")]
+        [Range(0f, 10f)]
+        public float PostMeetingKillGraceSeconds = 3f;
+
+        [Tooltip("首次击杀最小延迟（开局后秒数），防止开局秒杀。")]
+        [Range(0f, 30f)]
+        public float FirstKillMinDelaySeconds = 8f;
+
+        [Tooltip("报告尸体冷却时间（秒），防止连续报案刷会议。")]
+        [Range(0f, 15f)]
+        public float ReportCooldownSeconds = 5f;
+
+        // ═══════════════════════════════════════════════════════════════
+        // 原有参数（保留不变，部分调整默认值以匹配 M4 闭合目标）
+        // ═══════════════════════════════════════════════════════════════
+
         [Header("击杀与报案")]
         [Tooltip("击杀互动范围（世界单位）。")]
         public float KillRange = 0.9f;
         [Tooltip("报案互动范围（世界单位）。")]
         public float ReportRange = 1.25f;
-        [Tooltip("击杀冷却时间（秒）。")]
-        public float KillCooldownSeconds = 34f;
+        [Tooltip("击杀冷却时间（秒）。M4 收紧至 25s，确保 10-15 分钟内击杀密度合理。")]
+        public float KillCooldownSeconds = 25f;
 
         [Header("会议与投票")]
         [Tooltip("会议讨论阶段时长（秒）。")]
         public float MeetingIntroSeconds = 35f;
-        [Tooltip("投票阶段时长（秒）。")]
-        public float VotingSeconds = 55f;
+        [Tooltip("投票阶段时长（秒）。M4 收紧至 40s。")]
+        public float VotingSeconds = 40f;
         [Tooltip("紧急会议冷却时间（秒）。")]
         public float EmergencyCooldownSeconds = 75f;
         [Tooltip("紧急会议次数上限。")]
@@ -52,8 +116,7 @@ namespace GanglandUndercover.Online
         public bool RoomAutoFillAi = true;
         [Tooltip("出局时是否公开角色身份。")]
         public bool RevealRoleOnEject = true;
-        [Tooltip("行动阶段是否启用近距离语音。")]
-        [Tooltip("M1 收尾：Vivox 已移除，方案 B（文本聊天）替代。此处保留序列化占位，对游戏逻辑无影响。")]
+        [Tooltip("行动阶段是否启用近距离语音。M1 收尾：Vivox 已移除，方案 B（文本聊天）替代。")]
         public bool ProximityVoiceEnabled = true;
 
         [Header("破坏技能时长")]
@@ -73,10 +136,10 @@ namespace GanglandUndercover.Online
         public float AbilityCooldownSeconds = 13f;
 
         [Header("时间限制")]
-        [Tooltip("比赛最短目标时间（秒）。")]
+        [Tooltip("比赛最短目标时间（秒）。M4 收紧至 600s（10min）。")]
         public float MatchTargetMinSeconds = 600f;
-        [Tooltip("比赛硬性上限时间（秒）。")]
-        public float MatchHardLimitSeconds = 1200f;
+        [Tooltip("比赛硬性上限时间（秒）。M4 收紧至 900s（15min）。")]
+        public float MatchHardLimitSeconds = 900f;
 
         [Header("AI")]
         [Tooltip("AI 行动延迟（秒），联机模式。")]
@@ -98,12 +161,228 @@ namespace GanglandUndercover.Online
         [Tooltip("案卷最大条目数。")]
         public int MaxCaseLogEntries = 8;
 
-        /// <summary>
-        /// 根据当前玩家数计算可用紧急会议次数。
-        /// </summary>
+        // ═══════════════════════════════════════════════════════════════
+        // M8.2 职业能力表
+        // ═══════════════════════════════════════════════════════════════
+
+        [Header("── M8.2 职业能力 ──")]
+        [Tooltip("按职业配置的专属能力列表。每个职业可以有 0-N 个能力。")]
+        public ProfessionAbilitySet[] ProfessionAbilities = new ProfessionAbilitySet[]
+        {
+            // ── 警察方 ──
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.Inspector,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.ReportCooldownReduce, Multiplier = 0.8f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.FootprintTrack, Multiplier = 1f, BonusValue = 0f, Enabled = true },
+                }
+            },
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.Forensics,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.CorpseExamine, Multiplier = 1f, BonusValue = 2f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.TaskSpeedBonus, Multiplier = 1.1f, BonusValue = 0f, Enabled = true },
+                }
+            },
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.Tech,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.RemoteSurveillance, Multiplier = 1f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.EvidenceChainBonus, Multiplier = 1.3f, BonusValue = 0f, Enabled = true },
+                }
+            },
+
+            // ── 黑帮方 ──
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.Enforcer,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.KillCooldownReduce, Multiplier = 0.75f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.DarkVision, Multiplier = 1f, BonusValue = 0f, Enabled = true },
+                }
+            },
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.Fixer,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.BodyDrag, Multiplier = 1f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.SabotageCooldownReduce, Multiplier = 0.8f, BonusValue = 0f, Enabled = true },
+                }
+            },
+
+            // ── 卧底方 ──
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.UndercoverAgent,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.SecretVote, Multiplier = 1f, BonusValue = 0f, Enabled = true },
+                }
+            },
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.Driver,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.VentSpeedBonus, Multiplier = 1.5f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.MoveSpeedBonus, Multiplier = 1.08f, BonusValue = 0f, Enabled = true },
+                }
+            },
+            new ProfessionAbilitySet
+            {
+                Profession = OnlineProfession.Mole,
+                Abilities = new[]
+                {
+                    new ProfessionAbility { Type = AbilityType.SecretVote, Multiplier = 1f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.SabotageCooldownReduce, Multiplier = 0.9f, BonusValue = 0f, Enabled = true },
+                }
+            },
+        };
+
+        // ═══════════════════════════════════════════════════════════════
+        // 便捷查询方法
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>根据当前玩家数计算可用紧急会议次数。</summary>
         public int EmergencyMeetingLimitFor(int playerCount)
         {
             return Mathf.Clamp(playerCount / 3, 1, MaxEmergencyMeetings);
+        }
+
+        /// <summary>计算本局任务总数 = 非Gang人数 × tasksPerNonGangPlayer。</summary>
+        public int TotalTaskCount(int playerCount, int gangCount)
+        {
+            int nonGang = Mathf.Max(1, playerCount - gangCount);
+            return nonGang * TasksPerNonGangPlayer;
+        }
+
+        /// <summary>根据人数缩放证据目标（默认值 × 人数系数）。</summary>
+        public int ScaledEvidenceTarget(int playerCount)
+        {
+            float ratio = Mathf.Clamp(playerCount / 8f, 0.6f, 1.3f);
+            return Mathf.Clamp(
+                Mathf.RoundToInt(DefaultEvidenceTarget * ratio),
+                MinEvidenceTarget,
+                MaxEvidenceTarget);
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // M8.2 职业能力查询
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>获取指定职业的能力集</summary>
+        public ProfessionAbilitySet? GetProfessionAbilities(OnlineProfession profession)
+        {
+            if (ProfessionAbilities == null) return null;
+            foreach (var set in ProfessionAbilities)
+            {
+                if (set.Profession == profession)
+                    return set;
+            }
+            return null;
+        }
+
+        /// <summary>检查职业是否有某能力</summary>
+        public bool HasAbility(OnlineProfession profession, AbilityType type)
+        {
+            var set = GetProfessionAbilities(profession);
+            return set?.HasAbility(type) ?? false;
+        }
+
+        /// <summary>获取职业的某能力倍率（默认 1.0）</summary>
+        public float GetAbilityMultiplier(OnlineProfession profession, AbilityType type)
+        {
+            var set = GetProfessionAbilities(profession);
+            return set?.GetMultiplier(type) ?? 1f;
+        }
+
+        /// <summary>获取职业的某能力附加值（默认 0）</summary>
+        public float GetAbilityBonus(OnlineProfession profession, AbilityType type)
+        {
+            var set = GetProfessionAbilities(profession);
+            return set?.GetBonus(type) ?? 0f;
+        }
+    }
+
+    /// <summary>
+    /// M4.1：按人数配置的阵营分配预设。
+    /// </summary>
+    [Serializable]
+    public struct RoleDistribution
+    {
+        [Tooltip("对应玩家人数（含 Bot）。")]
+        public int playerCount;
+
+        [Tooltip("黑帮阵营人数（Enforcer / Fixer）。")]
+        public int gang;
+
+        [Tooltip("卧底阵营人数（Undercover 公开为黑帮）。")]
+        public int undercover;
+
+        [Tooltip("内鬼人数（Mole 公开为警察）。")]
+        public int mole;
+
+        /// <summary>警察/市民阵营人数 = 总人数 - gang - undercover - mole。</summary>
+        public int PoliceCount => Mathf.Max(1, playerCount - gang - undercover - mole);
+
+        /// <summary>黑帮方总人数（含表面卧底）。</summary>
+        public int GangSideTotal => gang + undercover;
+    }
+
+    /// <summary>
+    /// M8.2：职业能力集合。每个职业包含一组能力。
+    /// </summary>
+    [Serializable]
+    public struct ProfessionAbilitySet
+    {
+        [Tooltip("对应职业")]
+        public OnlineProfession Profession;
+
+        [Tooltip("该职业拥有的能力列表")]
+        public ProfessionAbility[] Abilities;
+
+        /// <summary>检查是否拥有指定能力类型</summary>
+        public bool HasAbility(AbilityType type)
+        {
+            if (Abilities == null) return false;
+            foreach (var a in Abilities)
+            {
+                if (a.Enabled && a.Type == type)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>获取指定能力的倍率（默认 1.0）</summary>
+        public float GetMultiplier(AbilityType type)
+        {
+            if (Abilities == null) return 1f;
+            foreach (var a in Abilities)
+            {
+                if (a.Enabled && a.Type == type)
+                    return a.Multiplier;
+            }
+            return 1f;
+        }
+
+        /// <summary>获取指定能力的附加值（默认 0）</summary>
+        public float GetBonus(AbilityType type)
+        {
+            if (Abilities == null) return 0f;
+            foreach (var a in Abilities)
+            {
+                if (a.Enabled && a.Type == type)
+                    return a.BonusValue;
+            }
+            return 0f;
         }
     }
 }

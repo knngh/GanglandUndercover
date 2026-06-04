@@ -1,21 +1,14 @@
 {
     "name": "GanglandUndercover.Tests",
     "rootNamespace": "GanglandUndercover.Tests",
-    "references": [
-        "Assembly-CSharp"
-    ],
+    "references": [],
     "includePlatforms": [
         "Editor"
     ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
-    "overrideReferences": true,
-    "precompiledReferences": [
-        "nunit.framework.dll",
-        "UnityEngine.TestRunner.dll",
-        "UnityEditor.TestRunner.dll"
-    ],
-    "autoReferenced": false,
+    "overrideReferences": false,
+    "autoReferenced": true,
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],

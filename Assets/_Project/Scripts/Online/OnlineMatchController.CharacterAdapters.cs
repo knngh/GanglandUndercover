@@ -7,6 +7,13 @@ namespace GanglandUndercover.Online
     {
         private void CreateFreeCharacterAdapter(Transform parent, OnlinePlayerState state)
         {
+            // M3: 2D character path — simple circle + direction arrow
+            if (worldBuilder != null && worldBuilder.Use2DBackend)
+            {
+                Create2DCharacterView(parent, state);
+                return;
+            }
+
             string prefabPath = FreeCharacterPrefabPath(state);
             GameObject prefab = LoadResourcePrefab(prefabPath);
 
@@ -148,10 +155,63 @@ namespace GanglandUndercover.Online
 
         private void CreateFallbackCharacterIdentity(Transform parent, OnlinePlayerState state)
         {
+            // M3: Delegate to 2D path when 2D backend is active
+            if (worldBuilder != null && worldBuilder.Use2DBackend)
+            {
+                Create2DCharacterView(parent, state);
+                return;
+            }
+
             Color accent = PlayerAccentColor(state);
             CreateMeshBoxChild(parent, "FreeCharacterAdapter fallback coat panel", new Vector3(0f, -0.08f, 0.58f), new Vector3(0.28f, 0.035f, 0.3f), Darken(accent, 0.72f));
             CreateMeshBoxChild(parent, "FreeCharacterAdapter fallback face strip", new Vector3(0.13f, 0.34f, 0.68f), new Vector3(0.2f, 0.035f, 0.09f), new Color(0.94f, 0.84f, 0.66f, 1f));
             CreateMeshBoxChild(parent, "FreeCharacterAdapter fallback role prop", new Vector3(-0.24f, -0.2f, 0.54f), new Vector3(0.1f, 0.04f, 0.18f), accent);
+        }
+
+        // ====================================================================
+        //  M3: 2D Character View (top-down circle + direction indicator)
+        // ====================================================================
+
+        /// <summary>
+        /// Creates a 2D character representation for orthographic top-down view.
+        /// Body = colored circle (profession-based), Direction = small arrow.
+        /// Replaces 3D prefab loading when Use2DBackend is active.
+        /// </summary>
+        private void Create2DCharacterView(Transform parent, OnlinePlayerState state)
+        {
+            if (worldBuilder == null) return;
+
+            Color bodyColor = PlayerAccentColor(state);
+
+            // --- Body circle ---
+            // Use circleSprite for round, soften color slightly for readability
+            GameObject body = new GameObject("2DChar_" + state.Profession);
+            SpriteRenderer bodyRenderer = body.AddComponent<SpriteRenderer>();
+            bodyRenderer.sprite = worldBuilder.CircleSprite;
+            bodyRenderer.color = new Color(bodyColor.r * 0.85f, bodyColor.g * 0.85f, bodyColor.b * 0.85f, 1f);
+            bodyRenderer.sortingOrder = 100; // Players always on top of world props
+
+            body.transform.SetParent(parent, false);
+            body.transform.localPosition = Vector3.zero;
+            body.transform.localScale = new Vector3(0.64f, 0.64f, 1f);
+
+            // --- Direction indicator (arrow) ---
+            GameObject dir = new GameObject("2DDir_" + state.Profession);
+            SpriteRenderer dirRenderer = dir.AddComponent<SpriteRenderer>();
+            dirRenderer.sprite = worldBuilder.DiamondSprite;
+            dirRenderer.color = Color.white;
+            dirRenderer.sortingOrder = 101; // Above body
+
+            dir.transform.SetParent(body.transform, false);
+            dir.transform.localPosition = new Vector3(0f, 0.42f, 0f);
+            dir.transform.localScale = new Vector3(0.20f, 0.30f, 1f);
+
+            // Store the direction indicator so movement rotation can update it
+            state.Character2DDirectionIndicator = dir;
+
+            // --- Stub SocialChar for compatibility with existing systems ---
+            var socialChar = body.AddComponent<GanglandUndercover.SocialDeduction.SocialCharacter>();
+            state.SocialChar = socialChar;
         }
     }
 }

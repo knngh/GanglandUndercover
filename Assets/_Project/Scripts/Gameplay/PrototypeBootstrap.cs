@@ -224,7 +224,7 @@ namespace GanglandUndercover.Gameplay
 
             GameObject go = new GameObject("Lobby Controller");
             _lobbyController = go.AddComponent<LobbyController>();
-            _lobbyController.Initialize(this, FindExisting<OnlineSyncManager>());
+            _lobbyController.Initialize(this, FindExisting<OnlineSyncManager>(), FindExisting<OnlineMatchController>());
             DontDestroyOnLoad(go);
         }
 

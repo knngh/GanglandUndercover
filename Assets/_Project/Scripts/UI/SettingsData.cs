@@ -124,6 +124,15 @@ namespace GanglandUndercover.UI
             set => _mouseSensitivity = Mathf.Clamp(value, 0.1f, 10f);
         }
 
+        /// <summary>色盲模式：0=关闭，1=红绿色盲，2=蓝黄色盲，3=全色盲</summary>
+        [SerializeField, Range(0, 3)]
+        private int _colorBlindMode;
+        public int ColorBlindMode
+        {
+            get => _colorBlindMode;
+            set => _colorBlindMode = Mathf.Clamp(value, 0, 3);
+        }
+
         /// <summary>按键绑定字典（KeyCode 序列化时以字符串存储）</summary>
         [SerializeField]
         private KeyBindingData _keyBindings = new KeyBindingData();
@@ -142,6 +151,12 @@ namespace GanglandUndercover.UI
             ApplyAudio();
             ApplyGraphics();
             ApplyGame();
+            ApplyAccessibility();
+        }
+
+        private void ApplyAccessibility()
+        {
+            SettingsManager.InvokeColorBlindModeChanged(_colorBlindMode);
         }
 
         // ─── 音频应用 ───────────────────────────────────────────

@@ -15,17 +15,11 @@ namespace GanglandUndercover.Online
         // ====================================================================
 
         public const float PreviewSize = 13.4f;
-        public const float ActionSize = 4.25f;
-        public const float BlackoutSize = 3.05f;
-        public const float TaskSize = 4.1f;
-        public const float ActionYOffset = -4.42f;
-        public const float ActionZOffset = -6.85f;
-        public const float PreviewYOffset = -13.6f;
-        public const float PreviewZOffset = -16.2f;
-        public const float ActionFieldOfView = 42f;
-        public const float PreviewFieldOfView = 52f;
-        public const float ActionLookAheadY = 0.88f;
-        public const float ActionLookHeight = 0.42f;
+        public const float ActionSize = 3.0f;        // [TUNABLE] M3: orthographic size for action top-down view
+        public const float BlackoutSize = 2.4f;
+        public const float TaskSize = 3.2f;
+        public const float ActionZ = -10f;           // M3: fixed Z for orthographic camera above XY plane
+        public const float PreviewZ = -16.2f;
 
         // ====================================================================
         //  State
@@ -127,7 +121,10 @@ namespace GanglandUndercover.Online
 
         /// <summary>
         /// Configure the main camera each frame.
-        /// Determines preview vs action mode, follows the current subject, smoothly interpolates.
+        /// M3: Both preview and action now use orthographic projection with straight-down view.
+        /// Preview = tactical map / lobby / opening / result (wide ortho).
+        /// Action  = gameplay (narrow ortho, track subject).
+        /// All camera rotation is identity — the world is rendered on the XY plane.
         /// </summary>
         public void Configure(
             Camera camera,
@@ -150,6 +147,9 @@ namespace GanglandUndercover.Online
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = new Color(0.055f, 0.075f, 0.085f, 1f);
 
+            // M3: Camera is always orthographic (straight-down top-down view)
+            camera.orthographic = true;
+
             // --- Determine mode ---
             bool preview = tacticalMapOpen
                 || phase == OnlineMatchPhase.Lobby
@@ -165,38 +165,18 @@ namespace GanglandUndercover.Online
                         : ActionSize;
 
             Vector3 target = preview ? Vector3.zero : GetTarget(players, localClientId, localPosition);
-            float yOffset = preview ? PreviewYOffset : ActionYOffset;
-            float zOffset = preview ? PreviewZOffset : ActionZOffset;
-            Vector3 desiredPosition = new Vector3(target.x, target.y + yOffset, zOffset);
 
-            // --- Detect projection change ---
-            if (camera.orthographic != preview)
-            {
-                _wasConfigured = false;
-            }
+            // M3: Straight-down orthographic — camera sits at fixed Z above the XY plane
+            float zOffset = preview ? PreviewZ : ActionZ;
+            Vector3 desiredPosition = new Vector3(target.x, target.y, zOffset);
 
-            camera.orthographic = preview;
+            // --- Snap or smooth orthographicSize ---
+            camera.orthographicSize = _wasConfigured
+                ? Mathf.Lerp(camera.orthographicSize, targetSize, Time.deltaTime * 4f)
+                : targetSize;
 
-            if (preview)
-            {
-                camera.fieldOfView = PreviewFieldOfView;
-                camera.orthographicSize = _wasConfigured
-                    ? Mathf.Lerp(camera.orthographicSize, targetSize, Time.deltaTime * 4f)
-                    : targetSize;
-            }
-            else
-            {
-                camera.fieldOfView = _wasConfigured
-                    ? Mathf.Lerp(camera.fieldOfView, ActionFieldOfView, Time.deltaTime * 4f)
-                    : ActionFieldOfView;
-                desiredPosition += new Vector3(0f, 0.18f, 0.15f);
-            }
-
-            // --- Smooth follow ---
-            Vector3 lookTarget = preview
-                ? target
-                : target + new Vector3(0f, ActionLookAheadY, ActionLookHeight);
-            Quaternion desiredRotation = Quaternion.LookRotation(lookTarget - desiredPosition, Vector3.up);
+            // M3: Camera always looks straight down (identity rotation) for 2D rendering
+            Quaternion desiredRotation = Quaternion.identity;
 
             camera.transform.rotation = Quaternion.Slerp(
                 camera.transform.rotation,

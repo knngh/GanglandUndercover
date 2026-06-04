@@ -8,9 +8,8 @@ using UnityEngine.UI;
 namespace GanglandUndercover.UI
 {
     /// <summary>
-    /// 联机大厅控制器 — uGUI 正式化版本。
-    /// Canvas + InputField + Button，房间码输入、创建/加入、玩家列表、开始按钮。
-    /// 对标 Among Us 风格：深色背景、居中面板、橙色强调色。
+    /// 联机大厅控制器 — M7.1 Relay 连线版本。
+    /// 连接按钮到 OnlineMatchController 的 Relay API，实现完整房间创建/加入链路。
     /// </summary>
     public sealed class LobbyController : MonoBehaviour
     {
@@ -18,6 +17,8 @@ namespace GanglandUndercover.UI
         private static readonly Color PanelBg      = new Color(0.042f, 0.055f, 0.058f, 0.96f);
         private static readonly Color AccentOrange = new Color(0.86f, 0.48f, 0.13f, 1f);
         private static readonly Color AccentBlue  = new Color(0.08f, 0.62f, 0.82f, 1f);
+        private static readonly Color AccentGreen  = new Color(0.18f, 0.78f, 0.35f, 1f);
+        private static readonly Color AccentRed    = new Color(0.88f, 0.22f, 0.18f, 1f);
         private static readonly Color MutedColor   = new Color(0.52f, 0.55f, 0.54f, 1f);
         private static readonly Color TextColor    = new Color(0.92f, 0.94f, 0.93f, 1f);
         private static readonly Color InputBg     = new Color(0.02f, 0.026f, 0.028f, 0.96f);
@@ -25,21 +26,49 @@ namespace GanglandUndercover.UI
 
         private PrototypeBootstrap _bootstrap;
         private OnlineSyncManager _onlineManager;
+        private OnlineMatchController _matchController;
         private Canvas _canvas;
         private GameObject _rootPanel;
         private InputField _roomCodeInput;
+        private Text _roomCodeDisplay;       // M7.1: 显示生成后的房间码
         private Transform _playerListRoot;
         private Text _statusText;
         private Button _startButton;
+        private Button _createButton;
+        private Button _joinButton;
         private bool _visible;
+        private float _refreshTimer;
 
         public bool IsVisible => _visible;
 
-        public void Initialize(PrototypeBootstrap bootstrap, OnlineSyncManager onlineManager)
+        /// <summary>
+        /// 初始化大厅，接收 OnlineMatchController 引用用于 Relay 操作。
+        /// </summary>
+        public void Initialize(PrototypeBootstrap bootstrap, OnlineSyncManager onlineManager,
+            OnlineMatchController matchController)
         {
             _bootstrap = bootstrap;
             _onlineManager = onlineManager;
+            _matchController = matchController;
             BuildUI();
+            SubscribeEvents();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribeEvents();
+        }
+
+        private void Update()
+        {
+            if (!_visible) return;
+            _refreshTimer += Time.deltaTime;
+            if (_refreshTimer >= 1.5f)
+            {
+                _refreshTimer = 0f;
+                RefreshPlayerList();
+                UpdateStartButtonState();
+            }
         }
 
         public void Show()
@@ -47,6 +76,8 @@ namespace GanglandUndercover.UI
             _visible = true;
             if (_rootPanel != null) _rootPanel.SetActive(true);
             RefreshPlayerList();
+            UpdateStartButtonState();
+            UpdateRoomCodeDisplay();
         }
 
         public void Hide()
@@ -54,6 +85,51 @@ namespace GanglandUndercover.UI
             _visible = false;
             if (_rootPanel != null) _rootPanel.SetActive(false);
         }
+
+        // ══════════════════════════════════════════════════════
+        // 事件订阅
+        // ══════════════════════════════════════════════════════
+
+        private void SubscribeEvents()
+        {
+            if (_matchController == null) return;
+            _matchController.OnRelayStatusChanged += OnRelayStatusChanged;
+            _matchController.OnRelayRoomCodeReady += OnRoomCodeReady;
+            _matchController.OnRelayConnectionChanged += OnConnectionChanged;
+        }
+
+        private void UnsubscribeEvents()
+        {
+            if (_matchController == null) return;
+            _matchController.OnRelayStatusChanged -= OnRelayStatusChanged;
+            _matchController.OnRelayRoomCodeReady -= OnRoomCodeReady;
+            _matchController.OnRelayConnectionChanged -= OnConnectionChanged;
+        }
+
+        private void OnRelayStatusChanged(string msg)
+        {
+            if (_statusText != null && _visible)
+                _statusText.text = msg;
+        }
+
+        private void OnRoomCodeReady(string code)
+        {
+            if (_roomCodeDisplay != null)
+            {
+                _roomCodeDisplay.text = "房间码: " + code;
+                _roomCodeDisplay.color = AccentGreen;
+            }
+        }
+
+        private void OnConnectionChanged(bool connected)
+        {
+            RefreshPlayerList();
+            UpdateStartButtonState();
+        }
+
+        // ══════════════════════════════════════════════════════
+        // UI 构建
+        // ══════════════════════════════════════════════════════
 
         private void BuildUI()
         {
@@ -72,7 +148,7 @@ namespace GanglandUndercover.UI
                 0f, 420f, refW * 0.8f, 56f);
 
             GameObject lobbyPanel = CreatePanel("LobbyPanel", _rootPanel.transform, PanelBg);
-            SetPos(lobbyPanel, 0f, 80f, 880f, 480f);
+            SetPos(lobbyPanel, 0f, 60f, 880f, 520f);
 
             // 房间码标签
             CenterTopLabel(CreateText("RoomCodeLabel", lobbyPanel.transform,
@@ -83,60 +159,87 @@ namespace GanglandUndercover.UI
                 "输入 4~6 位房间码", 18, TextColor, InputBg);
             CenterTopLabel(GetRect(_roomCodeInput.gameObject), -68f, 42f);
             _roomCodeInput.GetComponent<RectTransform>().sizeDelta = new Vector2(360f, 42f);
+            _roomCodeInput.characterLimit = 6;
+            _roomCodeInput.onValidateInput += ValidateRoomCode;
+
+            // M7.1: 房间码显示区（创建成功后显示）
+            _roomCodeDisplay = CreateText("RoomCodeDisplay", lobbyPanel.transform,
+                string.Empty, 24, AccentGreen, FontStyle.Bold, TextAnchor.MiddleCenter).GetComponent<Text>();
+            CenterTopLabel(GetRect(_roomCodeDisplay.gameObject), -105f, 30f);
 
             // 创建 / 加入按钮
             var createBtn = MakeButton("CreateRoomButton", lobbyPanel.transform,
                 "创  建  房  间", 200f, 48f, AccentOrange, Color.white, 18);
-            CenterTopLabel(GetRect(createBtn), -130f, 48f);
+            CenterTopLabel(GetRect(createBtn), -148f, 48f);
             GetRect(createBtn).sizeDelta = new Vector2(200f, 48f);
-            GetRect(createBtn).anchoredPosition = new Vector2(-110f, -130f);
-            createBtn.GetComponent<Button>().onClick.AddListener(OnCreateRoom);
+            GetRect(createBtn).anchoredPosition = new Vector2(-110f, -148f);
+            _createButton = createBtn.GetComponent<Button>();
+            _createButton.onClick.AddListener(OnCreateRoom);
 
             var joinBtn = MakeButton("JoinRoomButton", lobbyPanel.transform,
                 "加  入  房  间", 200f, 48f, AccentBlue, Color.white, 18);
-            CenterTopLabel(GetRect(joinBtn), -130f, 48f);
+            CenterTopLabel(GetRect(joinBtn), -148f, 48f);
             GetRect(joinBtn).sizeDelta = new Vector2(200f, 48f);
-            GetRect(joinBtn).anchoredPosition = new Vector2(110f, -130f);
-            joinBtn.GetComponent<Button>().onClick.AddListener(OnJoinRoom);
+            GetRect(joinBtn).anchoredPosition = new Vector2(110f, -148f);
+            _joinButton = joinBtn.GetComponent<Button>();
+            _joinButton.onClick.AddListener(OnJoinRoom);
 
             _statusText = CreateText("StatusText", lobbyPanel.transform,
-                "等待操作...", 14, MutedColor, FontStyle.Normal, TextAnchor.MiddleCenter).GetComponent<Text>();
-            CenterTopLabel(GetRect(_statusText.gameObject), -196f, 26f);
+                "输入房间码加入，或创建新房间", 14, MutedColor, FontStyle.Normal, TextAnchor.MiddleCenter).GetComponent<Text>();
+            CenterTopLabel(GetRect(_statusText.gameObject), -210f, 30f);
 
             CenterTopLabel(CreateText("PlayerListHeader", lobbyPanel.transform,
                 "—  玩  家  列  表  —", 15, MutedColor, FontStyle.Normal, TextAnchor.MiddleCenter).GetComponent<RectTransform>(),
-                -232f, 26f);
+                -245f, 26f);
 
             GameObject playerScroll = CreatePanel("PlayerListScroll", lobbyPanel.transform, InputBg);
-            CenterTopLabel(GetRect(playerScroll), -340f, 140f);
+            CenterTopLabel(GetRect(playerScroll), -350f, 140f);
             GetRect(playerScroll).sizeDelta = new Vector2(600f, 140f);
             _playerListRoot = playerScroll.transform;
 
+            // Ready / 开始游戏按钮行
             _startButton = MakeButton("StartGameButton", lobbyPanel.transform,
-                "开  始  游  戏", 260f, 52f, AccentOrange, Color.white, 20).GetComponent<Button>();
-            CenterTopLabel(GetRect(_startButton.gameObject), -420f, 52f);
-            GetRect(_startButton.gameObject).sizeDelta = new Vector2(260f, 52f);
+                "开  始  游  戏", 220f, 50f, AccentOrange, Color.white, 20).GetComponent<Button>();
+            CenterTopLabel(GetRect(_startButton.gameObject), -435f, 50f);
+            GetRect(_startButton.gameObject).sizeDelta = new Vector2(220f, 50f);
             _startButton.onClick.AddListener(OnStartOnlineGame);
             _startButton.interactable = false;
 
+            // 返回按钮
             var backBtn = MakeButton("BackButton", lobbyPanel.transform,
                 "返  回  主  菜  单", 200f, 44f, ButtonNormal, TextColor, 16);
-            CenterTopLabel(GetRect(backBtn), -480f, 44f);
+            CenterTopLabel(GetRect(backBtn), -500f, 44f);
             GetRect(backBtn).sizeDelta = new Vector2(200f, 44f);
             backBtn.GetComponent<Button>().onClick.AddListener(OnBackToMenu);
         }
 
-        public void RefreshPlayerList()
+        // ══════════════════════════════════════════════════════
+        // 玩家列表 & 按钮状态
+        // ══════════════════════════════════════════════════════
+
+        private void RefreshPlayerList()
         {
             if (_playerListRoot == null) return;
+
             for (int i = _playerListRoot.childCount - 1; i >= 0; i--)
                 Object.Destroy(_playerListRoot.GetChild(i).gameObject);
-            int playerCount = 1;
-            for (int i = 0; i < 4; i++)
+
+            // M7.1: 从 OnlineMatchController 获取真实玩家数据
+            int actualCount = GetConnectedPlayerCount();
+            int maxSlots = 8;
+
+            for (int i = 0; i < maxSlots; i++)
             {
-                bool present = i < playerCount;
+                bool present = i < actualCount;
                 Color c = present ? TextColor : new Color(0.3f, 0.32f, 0.31f, 1f);
-                string label = present ? "玩家 " + (i + 1) : "等待加入...";
+                string label;
+                if (present && i == 0)
+                    label = "🏠 " + (_matchController != null ? _matchController.LocalPlayerName : "房主");
+                else if (present)
+                    label = "👤 玩家 " + (i + 1);
+                else
+                    label = "等待加入...";
+
                 GameObject entry = CreateText("PlayerEntry_" + i, _playerListRoot,
                     label, 14, c, FontStyle.Normal, TextAnchor.MiddleLeft).gameObject;
                 var r = GetRect(entry);
@@ -147,29 +250,79 @@ namespace GanglandUndercover.UI
             }
         }
 
+        private void UpdateStartButtonState()
+        {
+            if (_startButton == null || _matchController == null) return;
+            _startButton.interactable = _matchController.IsHost && GetConnectedPlayerCount() >= 1;
+        }
+
+        private void UpdateRoomCodeDisplay()
+        {
+            if (_roomCodeDisplay == null || _matchController == null) return;
+            string code = _matchController.RelayJoinCode;
+            if (!string.IsNullOrEmpty(code))
+            {
+                _roomCodeDisplay.text = "房间码: " + code;
+                _roomCodeDisplay.color = AccentGreen;
+            }
+        }
+
+        private int GetConnectedPlayerCount()
+        {
+            if (_matchController == null) return 1;
+            // OnlineMatchController 的 players 字典记录所有连接玩家
+            // localPreviewMode 下自身算一个
+            if (_matchController.IsLocalPreview) return 1;
+            return _matchController.PlayerCount;
+        }
+
+        // ══════════════════════════════════════════════════════
+        // 按钮逻辑 — M7.1 Relay 连线
+        // ══════════════════════════════════════════════════════
+
         private void OnCreateRoom()
         {
             AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
-            if (_onlineManager == null) return;
-            if (_statusText != null) _statusText.text = "房间已创建";
-            RefreshPlayerList();
+            if (_matchController == null)
+            {
+                SetStatus("控制器未就绪，请重启。", AccentRed);
+                return;
+            }
+
+            SetStatus("正在通过 Relay 创建房间...", AccentOrange);
+            _matchController.RequestRelayHost();
         }
 
         private void OnJoinRoom()
         {
-            if (_onlineManager == null || _roomCodeInput == null) return;
+            AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+            if (_matchController == null || _roomCodeInput == null)
+            {
+                SetStatus("控制器未就绪，请重启。", AccentRed);
+                return;
+            }
+
             string code = _roomCodeInput.text;
             if (string.IsNullOrWhiteSpace(code))
             {
-                if (_statusText != null) _statusText.text = "请输入房间码";
+                SetStatus("请输入 4~6 位房间码", AccentRed);
                 return;
             }
-            if (_statusText != null) _statusText.text = "正在加入房间: " + code;
-            RefreshPlayerList();
+
+            if (code.Length < 4)
+            {
+                SetStatus("房间码至少 4 位", AccentRed);
+                return;
+            }
+
+            SetStatus("正在加入房间: " + code, AccentBlue);
+            _matchController.RequestRelayClient(code);
         }
 
         private void OnStartOnlineGame()
         {
+            if (_matchController == null || !_matchController.IsHost) return;
+            AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
             Hide();
             _bootstrap?.StartOnlineGame();
         }
@@ -178,6 +331,27 @@ namespace GanglandUndercover.UI
         {
             Hide();
             _bootstrap?.ReturnToMainMenu();
+        }
+
+        // ══════════════════════════════════════════════════════
+        // 辅助
+        // ══════════════════════════════════════════════════════
+
+        private void SetStatus(string msg, Color color)
+        {
+            if (_statusText != null)
+            {
+                _statusText.text = msg;
+                _statusText.color = color;
+            }
+        }
+
+        /// <summary>房间码只允许大写字母和数字</summary>
+        private char ValidateRoomCode(string text, int charIndex, char addedChar)
+        {
+            if (char.IsLetterOrDigit(addedChar))
+                return char.ToUpperInvariant(addedChar);
+            return '\0';
         }
 
         // ─── Canvas fallback ──────────────────────────────────

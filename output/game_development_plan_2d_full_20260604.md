@@ -1,7 +1,7 @@
 # Gangland Undercover 完整开发计划（2D 重做 · 全系统版）
 
 - 日期: 2026-06-04
-- **最后更新: 2026-06-04 16:30 — M1/M2 收尾完成**
+- **最后更新: 2026-06-04 22:02 — M9-M10 与全阶段编译收尾完成**
 - 项目路径: `/Users/zhugehao/projects/GanglandUndercover`
 - 引擎: Unity 6000.4.5f1（Netcode for GameObjects + Unity Transport）
 - 题材: 港区潜线 / Harbor Undercover —— 香港港区警匪卧底社交推理
@@ -14,7 +14,13 @@
 
 | 日期 | 变更 |
 |---|---|
-| 2026-06-04 16:30 | M1/M2 收尾：D-02 破坏 timer 单源化 ✅；D-07 语音方案B落地(TickVoiceRouting→no-op) ✅；D-08 ChatSystem 通过 CustomMessagingManager 实现四通道路由 ✅；D-10 最小测试网 12 用例(Assets/Tests/) ✅；控制器: 12673→11650(-10.2%)；`_old` 文件待手动删除 |
+| 2026-06-04 22:02 | M9-M10 与全阶段编译收尾：修复 `SettingsManager` 本地化 API 调用、色盲模式静态事件触发、`BuildScript` Unity 6 `NamedBuildTarget` using 与 `System.Environment` 命名遮蔽；Runtime/Tests/Editor 三个 C# 编译目标通过。剩余 warning 为 Netcode `RequireOwnership=false` 过时提示与既有语音字段未使用。M0-M10 共 11 个阶段的编译面已闭合，运行时/封测验证仍需执行。 |
+| 2026-06-04 21:21 | M8 编译收尾：修复 `OnlineProfession` Unity using、`MatchStatsCollector` 私有 helper 与 GUID 截断、`OnlineBotController` 旧怀疑值 API；Runtime/Tests/Editor 三个 C# 编译目标通过。 |
+| 2026-06-04 20:41 | M7 编译收尾：修复 Relay/Lobby API 合并、`PrototypeBootstrap` 初始化签名、Canvas map body markers 与地图字段引用、Host 迁移 fallback 字段接线；Runtime/Tests/Editor 三个 C# 编译目标通过。 |
+| 2026-06-04 19:20 | M5-M6 编译收尾：修复 `MapValidator` BFS 步数类型、小游戏完成证据写回、监控摄像头 server 判断与 ClientRpc target helper 命名；Runtime/Tests/Editor 三个 C# 编译目标通过。剩余 warning 为 Netcode `RequireOwnership=false` 过时提示与既有语音字段未使用。 |
+| 2026-06-04 18:00 | M0-M4 编译收尾：修复测试 asmdef 引用错误；`Assets/Tests/CoreSystemTests.cs` 扩展为 20 条 M1-M4 回归测试；`OnlineVictoryBridge` 修正 M4 阵营胜负矩阵和平局/空任务边界；Runtime/Tests/Editor 三个 C# 编译目标通过。Unity Test Runner 与本机双开烟测因当前 Editor 实例占用未执行。 |
+| 2026-06-04 17:00 | **M3 2D化完成**：3.1 相机全程正交 top-down(ActionSize=3.0)；3.2 WorldBuilder.Use2DBackend，5个Mesh方法→Sprite delegate；3.3 角色圆形+朝向箭头+鬼魂半透明(α=0.35)；3.4 尸体血迹标记+任务交互光晕 |
+| 2026-06-04 16:30 | M1/M2 收尾：D-02 破坏 timer 单源化；D-07 语音方案B落地(TickVoiceRouting→no-op)；D-08 ChatSystem 通过 CustomMessagingManager 实现四通道路由；D-10 最小测试网落地到 `Assets/Tests/`；控制器: 12673→11650(-10.2%)；`_old` 文件待手动删除 |
 
 ---
 
@@ -195,17 +201,17 @@
 
 | 里程碑 | 目标 | 关键通过标准 |
 |---|---|---|
-| **M0 真实基线** | 编译/本地局/双开局跑通并记录；确定离线循环去留 | 0 编译错误；本地+双开到结算；基线报告以源码为准；离线循环定位明确 |
-| **M1 债务清理与方向定调** | worktree 保护、消除 timer 重复、语音二选一、补最小测试 | ✅ D-02 破坏 timer 单源化；✅ D-07 语音方案B落地；✅ D-08 ChatSystem 已联机；✅ D-10 最小测试网(12用例)；⚠️ `_old` 文件待手动删除（沙箱拦截） |
-| **M2 联机架构稳健化** | 控制器增量瘦身、Host 权威基础、快照健壮 | ✅ Bot/Camera/World 三大模块已抽出(-1712行)；✅ GameStateSnapshot 版本化；✅ 控制器 11650 行(-10.2%)；⏳ 三大模块待提交；⏳ 本机双开烟测待执行 |
-| **M3 2D 世界表现地基** | 相机正交化、渲染后端 2D 化、角色/尸体/任务 2D | 行动相机 orthographic；2D 渲染后端可切换；双开烟测不退化 |
-| **M4 标准局闭环** | 角色分配/节奏/鬼魂/胜负矩阵成品 | 5/8/10 人局可完整跑；默认 10-15 分钟；胜负有测试 |
-| **M5 联机小游戏与信息系统** | 13 小游戏接入联机、破坏修复、监控、证据板、嫌疑 | ≥6 联机小游戏；破坏须修复；会议 3 类线索；监控影响推理 |
-| **M6 2D 港区玩法地图** | 灰盒→布局→多人测试→tile/sprite→替换 | 灰盒可跑局；多人测试达标；80% 灰盒被替换且路线不变 |
-| **M7 服务、房间与 UI 成品** | Relay 房间码、断线策略、全 Canvas、2D 地图 UI | 双机 Relay 完整局；房间码 Canvas 路径；新玩家不看文档完成第一局 |
-| **M8 内容与平衡** | 警署第二张 2D 图、职业收敛、Bot 升级、平衡数据 | 两张 2D 图可联机；8 人局 10-15 分钟、胜率 45-55 |
-| **M9 收口系统** | 教程、设置、本地化、音频反馈、可访问性 | 新手引导可完成；设置持久化；中英完整；色盲/黑灯可玩 |
-| **M10 封测发行准备** | 构建、日志、测试自动化、发布门槛 | 外部包可分发；72 小时无 P0/P1 |
+| **M0 真实基线** | 编译/本地局/双开局跑通并记录；确定离线循环去留 | C# 编译面 0 error；离线循环定位已记录；本地+双开烟测仍需在关闭当前 Editor 后执行 |
+| **M1 债务清理与方向定调** | worktree 保护、消除 timer 重复、语音二选一、补最小测试 | D-02 破坏 timer 单源化；D-07 语音方案B落地；D-08 ChatSystem 已联机；D-10 最小测试网 20 条测试编译通过；`_old` 文件待手动删除 |
+| **M2 联机架构稳健化** | 控制器增量瘦身、Host 权威基础、快照健壮 | Bot/Camera/World 三大模块已抽出(-1712行)；GameStateSnapshot 版本化；控制器 11650 行(-10.2%)；三大模块待提交；本机双开烟测待执行 |
+| **M3 2D 世界表现地基** | 相机正交化、渲染后端 2D 化、角色/尸体/任务 2D | 相机全程正交 top-down；WorldBuilder.Use2DBackend；角色圆形+朝向箭头+鬼魂半透明；尸体血迹标记+任务交互光晕；C# 编译通过，双开验证待执行 |
+| **M4 标准局闭环** | 角色分配/节奏/鬼魂/胜负矩阵成品 | 角色分配/证据目标/限时结算/聊天通道/胜负矩阵已纳入 20 条回归测试；胜负桥修正平局不结算、卧底单独胜利、空任务不误判；Unity Test Runner 与双开验证待执行 |
+| **M5 联机小游戏与信息系统** | 13 小游戏接入联机、破坏修复、监控、证据板、嫌疑 | `OnlineMiniGameBridge` 联机协议、13 个离线小游戏工厂映射、破坏修复小游戏入口、`OnlineSecurityCamera` 服务器裁切监控、会议证据板/嫌疑日志均已进入编译面；双开端到端验证待执行 |
+| **M6 2D 港区玩法地图** | 灰盒→布局→多人测试→tile/sprite→替换 | `MapLayoutData`/`GreyboxMapBuilder`/`MapValidator` 与 6 个监控布点已进入编译面；M6.2 多人测试与 M6.3 tile/sprite 替换策略已成文，实际多人测试和 80% 美术替换待执行 |
+| **M7 服务、房间与 UI 成品** | Relay 房间码、断线策略、全 Canvas、2D 地图 UI | C# 编译面 0 error；Relay/Lobby/迁移/地图 UI 编译闭环已修复；真双机 Relay、Host 断线、CanvasMapView 挂载和新手首局验证待执行 |
+| **M8 内容与平衡** | 警署第二张 2D 图、职业收敛、Bot 升级、平衡数据 | C# 编译面 0 error；警署地图数据、职业能力、Bot 升级和对局统计采集已进入编译面；两图完整局、Bot 补位局、20 场数据与 45-55 胜率验证待执行 |
+| **M9 收口系统** | 教程、设置、本地化、音频反馈、可访问性 | C# 编译面 0 error；`TutorialGateway`、设置持久化、本地化同步、色盲模式、音频事件引用和外观系统均进入编译面；教程完整走通、设置重启保留、语言/色盲/黑灯/UI 溢出和双开外观同步待运行时验证 |
+| **M10 封测发行准备** | 构建、日志、测试自动化、发布门槛 | C# 编译面 0 error；`BuildScript`、`LogReporter`、CI 配置模板进入编译面；macOS/Windows 实际构建、干净机联机、日志异常回收、CI 实跑和 72 小时无 P0/P1 待执行 |
 
 ### 3.1 依赖图
 
@@ -503,7 +509,7 @@ M0 真实基线
 #### Task 7.1 Relay 房间码完整链路
 - **描述**: 底层已具备（`OnlineMatchController.cs:1371-1444`）。补完「创建房间→显示房间码→输码加入→大厅→开局」全 Canvas 链路。
 - **验收**: 双机经 Relay 完整跑一局；房间码可复制/输入；错误码有友好提示。
-- **验证**: 真双机（非 loopback）跑通；错误（满员/失效码）有提示。
+- **验证**: 编译通过；真双机（非 loopback）跑通与错误（满员/失效码）提示待执行。
 - **依赖**: M6 完成。
 - **涉及文件**: `OnlineMatchController.cs`(`:1371-1444`)、`UnityServiceBootstrap.cs`、`UI/LobbyController.cs`(321)、`UI/MainMenuController.cs`(537)。
 - **规模**: L。
@@ -512,7 +518,7 @@ M0 真实基线
 #### Task 7.2 断线与 Host 迁移策略
 - **描述**: `HostMigrationManager.cs`(452) 未联调。联机验证心跳/选举/快照恢复；若不稳则降级为「Host 掉线即结算 + 友好提示」。
 - **验收**: Host 掉线后要么成功迁移续局，要么干净结算不卡死；客户端掉线可重连或干净退出。
-- **验证**: 双/三机故意杀 Host 测试；客户端断线测试。
+- **验证**: 编译通过；双/三机故意杀 Host 测试、客户端断线测试待执行。
 - **依赖**: Task 7.1、Task 2.4（快照健壮）。
 - **涉及文件**: `HostMigrationManager.cs`、`OnlineMatchController.cs`、`OnlineSyncManager.cs`。
 - **规模**: L。
@@ -521,7 +527,7 @@ M0 真实基线
 #### Task 7.3 全 Canvas 化（移除 OnGUI）
 - **描述**: `OnlineMatchHud.cs`(2060) 与 `HostMigrationManager` 含 OnGUI。全部迁移到 Canvas/UGUI，统一设计系统。
 - **验收**: 运行时无 OnGUI；HUD/提示/会议/小游戏外壳均 Canvas；适配多分辨率。
-- **验证**: 关掉 OnGUI 仍完整可玩；不同分辨率布局正确。
+- **验证**: 编译通过；关掉 OnGUI 仍完整可玩、不同分辨率布局正确待执行。
 - **依赖**: Task 7.1。
 - **涉及文件**: `OnlineMatchHud.cs`、`HostMigrationManager.cs`、`UI/ThemeManager.cs`(169)、`UI/TransitionEffect.cs`(326)。
 - **规模**: L。
@@ -530,7 +536,7 @@ M0 真实基线
 #### Task 7.4 2D 地图 UI（小地图/大地图）同源
 - **描述**: 小地图与大地图坐标全走 `OnlineMapService`，与世界一致；标记任务点/玩家/尸体/暗线/破坏点。
 - **验收**: 地图 UI 与世界坐标一致；标记按身份过滤（如黑帮看暗线）。
-- **验证**: 双开对照世界与地图位置；身份过滤正确。
+- **验证**: 编译通过；双开对照世界与地图位置、身份过滤正确待执行。
 - **依赖**: Task 7.3、Task 6.3。
 - **涉及文件**: `OnlineMapService.cs`、`World/DistrictMapView.cs`(124)、`OnlineMatchHud.cs`。
 - **规模**: M。
@@ -539,7 +545,7 @@ M0 真实基线
 #### Task 7.5 首局可用性（新手不看文档）
 - **描述**: 整合菜单/大厅/HUD/提示，使新玩家不看文档能完成第一局。
 - **验收**: 无引导文档下，新玩家能创建/加入房间、理解目标、完成任务、参与会议。
-- **验证**: 找未接触者实测第一局可完成。
+- **验证**: 编译通过；未接触者第一局可完成测试待执行。
 - **依赖**: Task 7.1-7.4。
 - **涉及文件**: `MainMenuController.cs`、`LobbyController.cs`、`OnlineMatchHud.cs`、`Tutorial/*`。
 - **规模**: M。
@@ -550,7 +556,7 @@ M0 真实基线
 #### Task 8.1 警署第二张 2D 地图
 - **描述**: 基于 `PoliceStationInteriorBuilder.cs`(1001) 与 `World/PoliceStationMap`(144) 做第二张 2D 警署图（不同节奏/布局）。
 - **验收**: 警署图可联机完整跑；与港区图节奏区分。
-- **验证**: 多人跑通；时长/胜率落在目标区间。
+- **验证**: 编译通过；多人跑通、时长/胜率落在目标区间待执行。
 - **依赖**: M7 完成。
 - **涉及文件**: `PoliceStationInteriorBuilder.cs`、`PoliceStationMap.cs`、`OnlineMapService.cs`、`OnlineWorldBuilder.cs`。
 - **规模**: L。
@@ -559,7 +565,7 @@ M0 真实基线
 #### Task 8.2 职业收敛与平衡
 - **描述**: 收敛职业列表到可平衡的集合（Inspector/Forensics/Tech/Enforcer/Fixer/Undercover/Mole/Driver 等），定义各职业能力与冷却。
 - **验收**: 职业能力明确、互不重叠、可平衡；UI 展示职业说明。
-- **验证**: 多场实测各职业体验；无明显 OP/废柴。
+- **验证**: 编译通过；多场实测各职业体验、无明显 OP/废柴待执行。
 - **依赖**: Task 8.1。
 - **涉及文件**: `OnlineRuleSet.cs`、`OnlineMatchController.cs`、`OnlineMatchHud.cs`。
 - **规模**: M。
@@ -568,7 +574,7 @@ M0 真实基线
 #### Task 8.3 Bot 升级
 - **描述**: 把 `OnlineBotController`（M2 抽出）升级为可填充测试的有用 Bot：会做任务、会移动、基础会议行为，参考 `OpponentAi`(534)。
 - **验收**: Bot 能填满到测试人数并推进对局；不卡死、不暴露作弊视野。
-- **验证**: Bot 填充局可跑到结算；Bot 行为合理。
+- **验证**: 编译通过；Bot 填充局可跑到结算、Bot 行为合理待执行。
 - **依赖**: Task 8.2。
 - **涉及文件**: `Online/Bots/OnlineBotController.cs`、`OpponentAi.cs`（参考）。
 - **规模**: L。
@@ -577,7 +583,7 @@ M0 真实基线
 #### Task 8.4 平衡数据采集与调参
 - **描述**: 采集多场对局数据（时长/胜率/各阵营胜率/任务完成率），调 `OnlineRuleSet` 至 8 人局 10-15 分钟、胜率 45-55%。
 - **验收**: 达成时长与胜率目标；调参有数据支撑。
-- **验证**: ≥20 场数据；胜率/时长分布达标。
+- **验证**: 编译通过；≥20 场数据、胜率/时长分布达标待执行。
 - **依赖**: Task 8.1-8.3。
 - **涉及文件**: `OnlineRuleSet.cs`、新增轻量对局日志。
 - **规模**: M。
@@ -588,7 +594,7 @@ M0 真实基线
 #### Task 9.1 新手引导（教程）
 - **描述**: `Tutorial/*`(1300) 接入新手引导：移动/任务/会议/破坏/暗线/监控的最小教学。
 - **验收**: 新手引导可完成；覆盖核心交互。
-- **验证**: 未接触者跟引导能学会基本操作。
+- **验证**: 编译通过；`TutorialGateway` 8 步运行时教程进入编译面，未接触者跟引导完成测试待执行。
 - **依赖**: M8 完成。
 - **涉及文件**: `Tutorial/*`、`OnlineMatchHud.cs`、`PrototypeBootstrap.cs`。
 - **规模**: M。
@@ -597,7 +603,7 @@ M0 真实基线
 #### Task 9.2 设置持久化
 - **描述**: `UI/Settings*`(SettingsManager 348/Data 293/Helper 473) 收口：音量/画质/按键/语言/可访问性持久化。
 - **验收**: 设置改动持久化且即时生效；重启保留。
-- **验证**: 改设置→重启→保留；各项生效。
+- **验证**: 编译通过；音量/画质/按键/语言/色盲模式持久化进入编译面，改设置→重启→保留和各项实际生效待执行。
 - **依赖**: M8。
 - **涉及文件**: `UI/SettingsManager.cs`、`SettingsData.cs`、`SettingsHelper.cs`。
 - **规模**: M。
@@ -606,7 +612,7 @@ M0 真实基线
 #### Task 9.3 本地化补全
 - **描述**: `Localization.cs`(141) 中英双语补全所有新增 UI/提示文案。
 - **验收**: 中英完整无漏 key；运行时切换语言生效。
-- **验证**: 切语言全 UI 检查无 key 缺失。
+- **验证**: 编译通过；`SettingsManager` 已同步 `Localization.CurrentLanguage`，切语言全 UI 检查无 key 缺失待执行。
 - **依赖**: Task 7.3（UI 定型）。
 - **涉及文件**: `Localization.cs`、全 UI 文案引用点。
 - **规模**: M。
@@ -615,7 +621,7 @@ M0 真实基线
 #### Task 9.4 音频事件反馈
 - **描述**: `Audio/AudioManager.cs`(347) 补关键事件音效（任务完成/破坏/会议/击杀/胜负/UI）。
 - **验收**: 关键事件有音效；音量受设置控制。
-- **验证**: 各事件触发音效正确；静音设置生效。
+- **验证**: 编译通过；关键事件音效调用点进入编译面，各事件触发音效正确和静音设置生效待执行。
 - **依赖**: Task 9.2。
 - **涉及文件**: `AudioManager.cs`、各事件触发点。
 - **规模**: S-M。
@@ -624,7 +630,7 @@ M0 真实基线
 #### Task 9.5 可访问性（色盲/黑灯）
 - **描述**: 阵营/状态不仅靠颜色区分（加图标/形状）；断电（黑灯）态保留必要可读性。
 - **验收**: 色盲模式可玩；黑灯态关键信息仍可辨。
-- **验证**: 色盲模拟器检查；黑灯态走查。
+- **验证**: 编译通过；`ThemeManager.ColorBlindMode` 与设置事件进入编译面，色盲模拟器检查和黑灯态走查待执行。
 - **依赖**: Task 9.2。
 - **涉及文件**: `OnlineMatchHud.cs`、`ThemeManager.cs`、`SabotagePanel.cs`。
 - **规模**: M。
@@ -633,7 +639,7 @@ M0 真实基线
 #### Task 9.6 角色外观系统收口
 - **描述**: `CharacterCustomizer`(637)/`Wardrobe`/`Bean*` 在 2D 下收口：可选外观/颜色，网络同步，会议/世界一致。
 - **验收**: 自定义外观联机一致；不影响辨识阵营所需的中立呈现。
-- **验证**: 双开自定义外观两端一致。
+- **验证**: 编译通过；2D 外观适配进入编译面，双开自定义外观两端一致待执行。
 - **依赖**: Task 3.3。
 - **涉及文件**: `CharacterCustomizer.cs`、`Wardrobe`、`Bean*`、`OnlineMatchController.CharacterAdapters.cs`。
 - **规模**: M。
@@ -644,7 +650,7 @@ M0 真实基线
 #### Task 10.1 构建与分发
 - **描述**: 出 macOS/Windows 可分发构建；签名/打包/版本号。
 - **验收**: 外部包可在干净机器运行联机。
-- **验证**: 干净机器安装运行联机一局。
+- **验证**: 编译通过；`BuildScript` macOS/Windows 构建入口进入编译面，实际构建包和干净机器联机一局待执行。
 - **依赖**: M9 完成。
 - **涉及文件**: 构建配置、`PrototypeBootstrap.cs`、CI。
 - **规模**: M。
@@ -653,7 +659,7 @@ M0 真实基线
 #### Task 10.2 日志与崩溃上报
 - **描述**: 加轻量运行日志与崩溃/异常捕获，便于封测定位。
 - **验收**: 异常有日志落地；可收集封测反馈。
-- **验证**: 故意触发异常有日志；封测可回收。
+- **验证**: 编译通过；`LogReporter` 本地日志落地进入编译面，故意触发异常有日志和封测回收流程待执行。
 - **依赖**: Task 10.1。
 - **涉及文件**: 新增日志模块、`OnlineMatchController.cs` 关键钩子。
 - **规模**: S-M。
@@ -662,7 +668,7 @@ M0 真实基线
 #### Task 10.3 测试自动化与发布门槛
 - **描述**: 把 M1 起累积的 EditMode/PlayMode 测试纳入 CI，定义发布门槛：72 小时封测无 P0/P1。
 - **验收**: CI 全绿才可发布；72 小时无 P0/P1。
-- **验证**: CI 流水线；封测 bug 看板。
+- **验证**: 编译通过；`output/m10_ci_config.md` 已给出 CI 模板和发布门槛，CI 实跑和封测 bug 看板待执行。
 - **依赖**: Task 10.1-10.2。
 - **涉及文件**: CI 配置、`Editor/Tests/*`、`PrototypeSmokeTests.cs`。
 - **规模**: M。
@@ -799,22 +805,22 @@ M0 真实基线
 > 对应 M9，缺这些无法封测发行。
 
 ### 9.1 教程（`Tutorial/*` 1300）
-- 离线沙盒教学：移动/任务/会议/破坏/暗线/监控；可跳过/重看（Task 9.1）。
+- 离线沙盒教学：移动/任务/会议/破坏/暗线/监控；可跳过/重看（Task 9.1）。当前 `TutorialGateway` 已进入编译面，完整运行时走查待执行。
 
 ### 9.2 设置（`SettingsManager` 348/`SettingsData` 293/`SettingsHelper` 473）
-- 音量/画质/按键/语言/可访问性持久化即时生效，重启保留（Task 9.2）。
+- 音量/画质/按键/语言/可访问性持久化即时生效，重启保留（Task 9.2）。当前编译面闭合，重启保留与引擎实际生效待执行。
 
 ### 9.3 本地化（`Localization.cs` 141）
-- 中英全覆盖，运行时切换无缺 key（Task 9.3）。
+- 中英全覆盖，运行时切换无缺 key（Task 9.3）。当前设置语言已同步到 `Localization.CurrentLanguage`，全 UI 走查待执行。
 
 ### 9.4 聊天（`ChatSystem.cs` 281/`ChatMessage.cs` 26）
 - 方案 B：改 NetworkBehaviour 联机文本聊天（Task 1.4），三通道 + 鬼魂频道，纯文本防注入。
 
 ### 9.5 音频（`AudioManager.cs` 347）
-- 关键事件音效，受设置控制（Task 9.4）。
+- 关键事件音效，受设置控制（Task 9.4）。当前关键调用点编译通过，实际音频资源/静音/混音验证待执行。
 
 ### 9.6 角色外观（`CharacterCustomizer` 637/`Wardrobe`/`Bean*`）
-- 2D 下可选外观/颜色，网络同步，会议/世界一致（Task 9.6）；不破坏阵营辨识中立性。
+- 2D 下可选外观/颜色，网络同步，会议/世界一致（Task 9.6）；不破坏阵营辨识中立性。当前编译面闭合，双开一致性待执行。
 
 ### 9.7 语音（`VoiceChatSystem.cs` 1080）
 - 方案 B 下标注「本地占位，不联机」或移除；README 不再承诺近距离语音（Task 1.3）。

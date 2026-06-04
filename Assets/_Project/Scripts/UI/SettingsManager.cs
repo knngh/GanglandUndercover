@@ -1,4 +1,5 @@
 using System;
+using GanglandUndercover.Core;
 using UnityEngine;
 
 namespace GanglandUndercover.UI
@@ -10,7 +11,7 @@ namespace GanglandUndercover.UI
     /// </summary>
     public sealed class SettingsManager : MonoBehaviour
     {
-        // ─── 单例 ───────────────────────────────────────────────
+        // ─── 单例 ───────────────────────────────────────
         public static SettingsManager Instance { get; private set; }
 
         // ─── 配置键常量 ─────────────────────────────────────────
@@ -28,13 +29,14 @@ namespace GanglandUndercover.UI
         private const string KeyLanguage         = PrefKeyPrefix + "Language";
         private const string KeyVoiceMode        = PrefKeyPrefix + "VoiceMode";
         private const string KeyMouseSensitivity = PrefKeyPrefix + "MouseSensitivity";
+        private const string KeyColorBlindMode  = PrefKeyPrefix + "ColorBlindMode";
         private const string KeyBindPrefix       = PrefKeyPrefix + "Key_";
 
         // ─── 运行时数据 ─────────────────────────────────────────
         private SettingsData _current;
         public SettingsData Current => _current;
 
-        // ─── 事件 ───────────────────────────────────────────────
+        // ─── 事件 ───────────────────────────────────────
         /// <summary>音量变更事件（主音量, 音效, 语音聊天, 麦克风灵敏度）</summary>
         public static event Action<float, float, float, float> OnVolumeChanged;
 
@@ -50,7 +52,10 @@ namespace GanglandUndercover.UI
         /// <summary>任意设置变更事件</summary>
         public event Action OnAnySettingChanged;
 
-        // ─── 生命周期 ───────────────────────────────────────────
+        /// <summary>色盲模式变更事件（新模式）</summary>
+        public event Action<int> OnColorBlindModeChanged;
+
+        // ─── 生命周期 ─────────────────────────────────────────
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -90,8 +95,13 @@ namespace GanglandUndercover.UI
             _current.Language         = PlayerPrefs.GetString(KeyLanguage,         _current.Language);
             _current.VoiceMode        = PlayerPrefs.GetInt(KeyVoiceMode,           _current.VoiceMode);
             _current.MouseSensitivity = PlayerPrefs.GetFloat(KeyMouseSensitivity,  _current.MouseSensitivity);
+            _current.ColorBlindMode  = PlayerPrefs.GetInt(KeyColorBlindMode,  _current.ColorBlindMode);
 
             LoadKeyBindings();
+
+            // 同步到 Localization 快捷访问
+            SyncLocalizationLanguage();
+            ThemeManager.ColorBlindMode = _current.ColorBlindMode;
         }
 
         /// <summary>
@@ -164,8 +174,9 @@ namespace GanglandUndercover.UI
             PlayerPrefs.SetInt(KeyVSync,           _current.VSync ? 1 : 0);
 
             PlayerPrefs.SetString(KeyLanguage,         _current.Language);
-            PlayerPrefs.SetInt(KeyVoiceMode,           _current.VoiceMode);
+            PlayerPrefs.SetInt(KeyVoiceMode,        _current.VoiceMode);
             PlayerPrefs.SetFloat(KeyMouseSensitivity,  _current.MouseSensitivity);
+            PlayerPrefs.SetInt(KeyColorBlindMode,  _current.ColorBlindMode);
 
             SaveKeyBindings();
         }
@@ -258,6 +269,7 @@ namespace GanglandUndercover.UI
         {
             _current.Language = lang;
             PlayerPrefs.SetString(KeyLanguage, lang);
+            SyncLocalizationLanguage();
             OnLanguageChanged?.Invoke(lang);
             OnAnySettingChanged?.Invoke();
         }
@@ -287,6 +299,16 @@ namespace GanglandUndercover.UI
             OnAnySettingChanged?.Invoke();
         }
 
+        // ─── 可访问性 ───────────────────────────────────────────────
+        public void SetColorBlindMode(int mode)
+        {
+            _current.ColorBlindMode = mode;
+            PlayerPrefs.SetInt(KeyColorBlindMode, mode);
+            ThemeManager.ColorBlindMode = mode;
+            InvokeColorBlindModeChanged(mode);
+            OnAnySettingChanged?.Invoke();
+        }
+
         // ══════════════════════════════════════════════════════
         // 静态事件触发入口
         // ══════════════════════════════════════════════════════
@@ -306,6 +328,22 @@ namespace GanglandUndercover.UI
                 _current.VoiceChatVolume,
                 _current.MicSensitivity
             );
+        }
+
+        /// <summary>内部调用：色盲模式变更事件触发器</summary>
+        internal static void InvokeColorBlindModeChanged(int mode)
+        {
+            // 更新 ThemeManager 静态属性（已由 SetColorBlindMode 设置）
+            ThemeManager.ColorBlindMode = mode;
+            Instance?.OnColorBlindModeChanged?.Invoke(mode);
+        }
+
+        /// <summary>同步 Language 到 Localization 快捷属性</summary>
+        private void SyncLocalizationLanguage()
+        {
+            Localization.CurrentLanguage = _current.Language == "zh-CN"
+                ? GameLanguage.Chinese
+                : GameLanguage.English;
         }
 
         // ══════════════════════════════════════════════════════

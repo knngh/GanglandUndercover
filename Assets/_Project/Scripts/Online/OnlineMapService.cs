@@ -6,9 +6,35 @@ namespace GanglandUndercover.Online
     /// 联机地图坐标服务：集中管理地图尺寸、坐标转换、出生点、任务点、
     /// 暗线节点、会议座位和房间区域定义等所有地图坐标相关逻辑。
     /// 地图为2D（XY 平面），坐标统一为 Vector3（z 分量恒为 0）。
+    ///
+    /// M8.1: 支持多地图（港区/警署），通过 ActiveMapType 切换。
     /// </summary>
     public sealed class OnlineMapService : MonoBehaviour
     {
+        // ---- 地图类型枚举 ----
+
+        /// <summary>联机地图类型</summary>
+        public enum OnlineMapType
+        {
+            HarbourDistrict,  // 港区（12 房间，默认）
+            PoliceStation,    // 警署（6 房间）
+        }
+
+        [Header("地图类型")]
+        [SerializeField, Tooltip("当前使用的地图类型")]
+        private OnlineMapType activeMapType = OnlineMapType.HarbourDistrict;
+
+        /// <summary>当前活跃的地图类型（运行时可在开局前修改）</summary>
+        public OnlineMapType ActiveMapType
+        {
+            get => activeMapType;
+            set
+            {
+                activeMapType = value;
+                ApplyMapConfig();
+            }
+        }
+
         [Header("地图尺寸（世界坐标）")]
         [SerializeField, Tooltip("地图半宽（世界单位）")]
         private float mapHalfWidth = 24.0f;
@@ -23,14 +49,50 @@ namespace GanglandUndercover.Online
         [SerializeField, Tooltip("设计坐标 Y 轴缩放因子")]
         private float designScaleY = 1.85f;
 
+        [Header("警署地图专用设置")]
+        [SerializeField, Tooltip("警署地图缩放因子（警署比港区小，需更大缩放）")]
+        private float policeStationScale = 3.0f;
+
+        // ---- 运行时配置缓存 ----
+        private float _runtimeScaleX;
+        private float _runtimeScaleY;
+        private float _runtimeHalfWidth;
+        private float _runtimeHalfHeight;
+
+        private void Awake()
+        {
+            ApplyMapConfig();
+        }
+
+        /// <summary>根据当前地图类型应用对应的尺寸和缩放配置</summary>
+        private void ApplyMapConfig()
+        {
+            if (activeMapType == OnlineMapType.PoliceStation)
+            {
+                float psHalfW = Map.PoliceStationMapLayout.DesignHalfWidth;
+                float psHalfH = Map.PoliceStationMapLayout.DesignHalfHeight;
+                _runtimeScaleX = policeStationScale;
+                _runtimeScaleY = policeStationScale;
+                _runtimeHalfWidth = psHalfW * policeStationScale;
+                _runtimeHalfHeight = psHalfH * policeStationScale;
+            }
+            else
+            {
+                _runtimeScaleX = designScaleX;
+                _runtimeScaleY = designScaleY;
+                _runtimeHalfWidth = mapHalfWidth;
+                _runtimeHalfHeight = mapHalfHeight;
+            }
+        }
+
         // ---- 公开属性 ----
 
-        public float MapHalfWidth => mapHalfWidth;
-        public float MapHalfHeight => mapHalfHeight;
-        public float DesignScaleX => designScaleX;
-        public float DesignScaleY => designScaleY;
-        public float DesignMapHalfWidth => mapHalfWidth / designScaleX;
-        public float DesignMapHalfHeight => mapHalfHeight / designScaleY;
+        public float MapHalfWidth => _runtimeHalfWidth;
+        public float MapHalfHeight => _runtimeHalfHeight;
+        public float DesignScaleX => _runtimeScaleX;
+        public float DesignScaleY => _runtimeScaleY;
+        public float DesignMapHalfWidth => _runtimeHalfWidth / _runtimeScaleX;
+        public float DesignMapHalfHeight => _runtimeHalfHeight / _runtimeScaleY;
 
         // ---- 枚举与结构 ----
 
@@ -196,8 +258,16 @@ namespace GanglandUndercover.Online
 
         // ---- 地图区域定义（房间） ----
 
-        /// <summary>获取所有12个港区房间/区域定义（设计坐标）</summary>
+        /// <summary>获取所有房间/区域定义（设计坐标），根据 ActiveMapType 返回对应地图的房间</summary>
         public ShipRoomSpec[] ShipRooms()
+        {
+            if (activeMapType == OnlineMapType.PoliceStation)
+                return PoliceStationRooms();
+            return HarbourDistrictRooms();
+        }
+
+        /// <summary>港区（Harbour District）12 个房间定义（设计坐标）</summary>
+        public ShipRoomSpec[] HarbourDistrictRooms()
         {
             return new[]
             {
@@ -213,6 +283,77 @@ namespace GanglandUndercover.Online
                 new ShipRoomSpec("证物库", "证物冷藏", new Vector3(-8.6f, -5.05f, 0f), new Vector3(3.35f, 1.98f, 0.16f), new Color(0.2f, 0.16f, 0.27f, 1f), MapEntrance.East),
                 new ShipRoomSpec("后巷排档", "黑市排档", new Vector3(5.6f, -1.55f, 0f), new Vector3(3.55f, 2.14f, 0.16f), new Color(0.25f, 0.14f, 0.09f, 1f), MapEntrance.West),
                 new ShipRoomSpec("地下诊所", "地下诊疗", new Vector3(6.15f, -5.05f, 0f), new Vector3(3.45f, 1.98f, 0.16f), new Color(0.13f, 0.25f, 0.2f, 1f), MapEntrance.North)
+            };
+        }
+
+        /// <summary>警署（Police Station）6 个房间定义（设计坐标）</summary>
+        public ShipRoomSpec[] PoliceStationRooms()
+        {
+            return new[]
+            {
+                new ShipRoomSpec("大厅",       "Lobby",      new Vector3(0f,   0f,   0f),  new Vector3(3.2f, 2.4f, 0.16f), new Color(0.18f, 0.22f, 0.32f, 1f), MapEntrance.South),
+                new ShipRoomSpec("审讯室",     "IntRoom",    new Vector3(-3.2f, 1.6f, 0f),  new Vector3(2.4f, 1.8f, 0.16f), new Color(0.28f, 0.18f, 0.18f, 1f), MapEntrance.East),
+                new ShipRoomSpec("证物室",     "Evidence",   new Vector3(-3.0f, -1.8f, 0f), new Vector3(2.6f, 1.8f, 0.16f), new Color(0.14f, 0.22f, 0.16f, 1f), MapEntrance.East),
+                new ShipRoomSpec("监控室",     "Armory",     new Vector3(3.1f, -1.6f, 0f),  new Vector3(2.2f, 1.6f, 0.16f), new Color(0.22f, 0.20f, 0.14f, 1f), MapEntrance.West),
+                new ShipRoomSpec("拘留室",     "Cells",      new Vector3(-0.8f, 2.4f, 0f),  new Vector3(2.0f, 1.8f, 0.16f), new Color(0.16f, 0.16f, 0.22f, 1f), MapEntrance.South),
+                new ShipRoomSpec("简报室",     "Briefing",   new Vector3(2.8f, 1.5f, 0f),   new Vector3(2.4f, 1.8f, 0.16f), new Color(0.20f, 0.24f, 0.30f, 1f), MapEntrance.West),
+            };
+        }
+
+        // ══════════════════════════════════════════════════════
+        // M6.1 监控摄像头布点
+        // ══════════════════════════════════════════════════════
+
+        /// <summary>监控摄像头区域定义</summary>
+        public readonly struct SurveillanceZoneSpec
+        {
+            public SurveillanceZoneSpec(string label, Vector3 center, Vector3 size, int roomIndex)
+            {
+                Label = label;
+                Center = center;
+                Size = size;
+                RoomIndex = roomIndex;
+            }
+
+            public readonly string Label;
+            public readonly Vector3 Center;   // 设计坐标
+            public readonly Vector3 Size;     // 设计坐标
+            public readonly int RoomIndex;    // -1 = 走廊/公共区域
+        }
+
+        /// <summary>
+        /// 获取所有监控摄像头布点（设计坐标），根据 ActiveMapType 返回对应地图的监控配置。
+        /// </summary>
+        public SurveillanceZoneSpec[] SurveillanceZones()
+        {
+            if (activeMapType == OnlineMapType.PoliceStation)
+                return PoliceStationSurveillanceZones();
+            return HarbourDistrictSurveillanceZones();
+        }
+
+        /// <summary>港区 6 个监控摄像头布点（设计坐标）</summary>
+        public SurveillanceZoneSpec[] HarbourDistrictSurveillanceZones()
+        {
+            return new[]
+            {
+                new SurveillanceZoneSpec("监控室主机",          new Vector3(-9.35f, 1.85f, 0f),  new Vector3(3.5f, 2.2f, 0f),   2),   // 监控室
+                new SurveillanceZoneSpec("西码头公共走廊",       new Vector3(-7.0f, 3.6f, 0f),   new Vector3(3.0f, 2.5f, 0f),   -1),  // 货柜场-海关走廊
+                new SurveillanceZoneSpec("夜市情报街",           new Vector3(-1.0f, 2.75f, 0f),  new Vector3(5.0f, 2.5f, 0f),   4),   // 夜市主街
+                new SurveillanceZoneSpec("金融楼大厅",           new Vector3(4.75f, 2.75f, 0f),  new Vector3(4.0f, 2.5f, 0f),   5),   // 金融楼
+                new SurveillanceZoneSpec("指挥广场中枢",         new Vector3(0f, -3.8f, 0f),     new Vector3(5.5f, 2.5f, 0f),   -1),  // 广场+会议区
+                new SurveillanceZoneSpec("后巷暗角",             new Vector3(5.6f, -1.55f, 0f),  new Vector3(4.0f, 2.5f, 0f),   10),  // 后巷排档
+            };
+        }
+
+        /// <summary>警署 4 个监控摄像头布点（设计坐标）</summary>
+        public SurveillanceZoneSpec[] PoliceStationSurveillanceZones()
+        {
+            return new[]
+            {
+                new SurveillanceZoneSpec("大厅监控",     new Vector3(0f,   0f,   0f),   new Vector3(4.0f, 3.0f, 0f), 0),  // 大厅（房间0）
+                new SurveillanceZoneSpec("审讯室监控",   new Vector3(-3.2f, 1.6f, 0f),  new Vector3(2.8f, 2.2f, 0f), 1),  // 审讯室（房间1）
+                new SurveillanceZoneSpec("证物室监控",   new Vector3(-3.0f, -1.8f, 0f), new Vector3(3.0f, 2.2f, 0f), 2),  // 证物室（房间2）
+                new SurveillanceZoneSpec("监控室监控",   new Vector3(3.1f, -1.6f, 0f),  new Vector3(2.6f, 2.0f, 0f), 3),  // 监控室（房间3）
             };
         }
     }

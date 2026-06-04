@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text;
+using GanglandUndercover.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -946,17 +947,17 @@ namespace GanglandUndercover.Online
                 + "\n任务: " + controller.LocalObjectiveSummary
                 + "\n技能 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s | 击倒 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s";
             footerText.text = controller.Status
-                + " | WASD 移动 | E 互动 | Q 击倒 | R 报案/紧急 | F 技能 | M 大地图 | I 案情板";
+                + " | " + Localization.T("hud.compact.hint");
 
-            meetingTitleText.text = "九龙港城会议 | " + (controller.Phase == OnlineMatchPhase.Meeting ? "讨论" : "投票")
+            meetingTitleText.text = Localization.T("meeting.title") + " | " + (controller.Phase == OnlineMatchPhase.Meeting ? Localization.T("meeting.discuss") : Localization.T("meeting.vote"))
                 + " " + Mathf.CeilToInt(controller.PhaseTimer) + "s";
-            meetingBodyText.text = "会议原因: " + controller.LastMeetingReason
-                + "\n证据墙: " + controller.MeetingEvidenceDigest
-                + "\n票型: " + controller.VoteTallySummary
-                + "\n语音: " + controller.VoiceHudLine
-                + "\n上轮结论: " + controller.LastVoteOutcome;
+            meetingBodyText.text = Localization.T("meeting.reason") + controller.LastMeetingReason
+                + "\n" + Localization.T("meeting.evidence") + controller.MeetingEvidenceDigest
+                + "\n" + Localization.T("meeting.tally") + controller.VoteTallySummary
+                + "\n" + Localization.T("meeting.voice") + controller.VoiceHudLine
+                + "\n" + Localization.T("meeting.outcome") + controller.LastVoteOutcome;
 
-            resultTitleText.text = "行动结算";
+            resultTitleText.text = Localization.T("result.title");
             resultBodyText.text = controller.ResultSummary + "\n\n" + controller.ResultRosterLine + "\n\n" + controller.MatchPressureSummary;
 
             taskTitleText.text = "现场任务 | " + controller.ActiveTaskNameText;
@@ -967,13 +968,13 @@ namespace GanglandUndercover.Online
                 + "\n" + controller.ActiveTaskFooterText;
             RefreshTaskMiniGameBoard();
             taskFeedbackText.text = controller.ActiveTaskFeedbackTimerValue > 0f
-                ? controller.ActiveTaskFeedbackPositiveValue ? "校验通过" : "输入不匹配"
-                : "按顺序校验，再按住扫描推进现场结果";
+                ? controller.ActiveTaskFeedbackPositiveValue ? Localization.T("minigame.feedback.pass") : Localization.T("minigame.feedback.fail")
+                : Localization.T("minigame.feedback.hint");
             taskFeedbackText.color = controller.ActiveTaskFeedbackTimerValue > 0f
                 ? controller.ActiveTaskFeedbackPositiveValue ? GreenAccent : RedAccent
                 : MutedTextColor;
 
-            mapTitleText.text = "九龙港区战术地图 | " + controller.MatchTimeText + " | 证据 " + controller.EvidenceScore + "/" + controller.EvidenceTarget;
+            mapTitleText.text = Localization.T("map.title") + " | " + controller.MatchTimeText + " | 证据 " + controller.EvidenceScore + "/" + controller.EvidenceTarget;
         }
 
         private void RefreshProgressBars()
@@ -993,13 +994,13 @@ namespace GanglandUndercover.Online
         private string BuildCompactActionBar()
         {
             bool actionPlayable = controller.Phase == OnlineMatchPhase.Action && controller.LocalAlive;
-            string interact = actionPlayable ? "[E] 查证" : "[E] -";
+            string interact = actionPlayable ? Localization.T("action.interact.ready") : Localization.T("action.interact.na");
             string kill = actionPlayable && controller.LocalRole == OnlineRole.Gang
-                ? "[Q] 击倒 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s"
-                : "[Q] -";
-            string report = actionPlayable ? "[R] 报案" : "[R] -";
-            string ability = actionPlayable ? "[F] 技能 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s" : "[F] -";
-            return interact + "    " + kill + "    " + report + "    " + ability + "    [M] 地图    [I] 案情";
+                ? Localization.T("action.kill.ready") + " " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s"
+                : Localization.T("action.kill.na");
+            string report = actionPlayable ? Localization.T("action.report.ready") : Localization.T("action.report.na");
+            string ability = actionPlayable ? Localization.T("action.ability.ready") + " " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s" : Localization.T("action.ability.na");
+            return interact + "    " + kill + "    " + report + "    " + ability + "    " + Localization.T("action.map") + "    " + Localization.T("action.intel");
         }
 
         private string BuildCenterTitle()

@@ -157,6 +157,66 @@ namespace GanglandUndercover.UI
         public static Color WithAlpha(Color c, float a) =>
             new Color(c.r, c.g, c.b, Mathf.Clamp01(a));
 
+        // ══════════════════════════════════════════════════════
+        // 色盲模式（M9.5 可访问性）
+        // ══════════════════════════════════════════════════════
+
+        /// <summary>当前色盲模式（0=关,1=红绿色盲,2=蓝黄色盲,3=全色盲）</summary>
+        public static int ColorBlindMode { get; set; } = 0;
+
+        /// <summary>色盲安全阵营色 — 不用颜色区分，加图标后缀</summary>
+        public static Color GetFactionColorSafe(Faction faction) => ColorBlindMode switch
+        {
+            0 => GetFactionColor(faction),
+            1 => faction switch
+            {
+                Faction.Gang       => Hex("#a6a6a6"),   // 红绿色盲：Gang → 灰红
+                Faction.Undercover => Hex("#4a4adf"),   // 蓝紫
+                Faction.Police     => Hex("#bfbf40"),   // 黄绿
+                Faction.Mole       => Hex("#40bfbf"),   // 青
+                _                  => TextMuted
+            },
+            2 => faction switch
+            {
+                Faction.Gang       => Hex("#c7c744"),   // 蓝黄色盲：Gang → 黄绿
+                Faction.Undercover => Hex("#7644c7"),   // 紫
+                Faction.Police     => Hex("#44c776"),   // 绿青
+                Faction.Mole       => Hex("#c7444a"),   // 红
+                _                  => TextMuted
+            },
+            _ => new Color(0.65f, 0.65f, 0.65f, 1f)  // 全色盲：全部灰度
+        };
+
+        /// <summary>获取阵营图标后缀（色盲模式下追加到显示名后面）</summary>
+        public static string GetFactionIconSuffix(Faction faction) => ColorBlindMode switch
+        {
+            0 => string.Empty,
+            1 or 2 => faction switch
+            {
+                Faction.Gang       => " ●",   // 圆点
+                Faction.Undercover => " ▲",   // 方块
+                Faction.Police     => " ▲",   // 三角
+                Faction.Mole       => " ◆",   // 菱形
+                _                    => " ○"
+            },
+            _ => faction switch
+            {
+                Faction.Gang       => " G",
+                Faction.Undercover => " U",
+                Faction.Police     => " P",
+                Faction.Mole       => " M",
+                _                    => " ?"
+            }
+        };
+
+        /// <summary>色盲安全投票条颜色（嫌疑值条不用纯红/纯绿）</summary>
+        public static Color GetSusicionBarColor(float suspicionNormalized) => ColorBlindMode switch
+        {
+            0 => Color.Lerp(SafeGreen, DangerRed, suspicionNormalized),
+            1 or 2 => Color.Lerp(Hex("#4a9a40"), Hex("#a69a40"), suspicionNormalized),  // 绿→黄
+            _ => new Color(0.3f + suspicionNormalized * 0.5f, 0.3f, 0.3f, 1f)  // 灰度
+        };
+
         private static Color Hex(string hex)
         {
             if (hex.StartsWith("#")) hex = hex.Substring(1);
