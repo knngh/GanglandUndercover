@@ -125,9 +125,16 @@ namespace GanglandUndercover.Online
             if (string.IsNullOrEmpty(input))
                 return input;
 
-            // 去除 < > 标签（防 XSS）
+            // 先整段移除危险元素及其内部内容（script/style 等），再去除其余 < > 标签（防 XSS）
             string sanitized = System.Text.RegularExpressions.Regex.Replace(
-                input, @"<[^>]*>", string.Empty);
+                input,
+                @"<(script|style|iframe|object|embed)\b[^>]*>.*?</\1\s*>",
+                string.Empty,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+
+            // 去除剩余的成对/单个标签，保留其包裹的可见文本
+            sanitized = System.Text.RegularExpressions.Regex.Replace(
+                sanitized, @"<[^>]*>", string.Empty);
 
             if (sanitized.Length > MaxMessageLength)
                 sanitized = sanitized.Substring(0, MaxMessageLength);

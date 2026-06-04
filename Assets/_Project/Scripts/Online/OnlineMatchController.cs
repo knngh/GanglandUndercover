@@ -536,7 +536,8 @@ namespace GanglandUndercover.Online
             _cameraRig.SetSubject(localClientId);
             _cameraRig.ResetConfiguration();
             ConfigureMainCamera();
-            return Camera.main != null && Camera.main.orthographic && Mathf.Abs(Camera.main.orthographicSize - OnlineCameraRig.ActionSize) < 0.5f;
+            // 停电状态下相机会缩到 BlackoutSize（而非 ActionSize），这才是停电镜头配置成功的证据。
+            return Camera.main != null && Camera.main.orthographic && Mathf.Abs(Camera.main.orthographicSize - OnlineCameraRig.BlackoutSize) < 0.5f;
         }
 
         public void EditorRefreshWorldVisualsForSmokeTest()
@@ -738,7 +739,11 @@ namespace GanglandUndercover.Online
             proximityVoiceEnabled = ruleSet.ProximityVoiceEnabled;
             roomMinPlayers = ruleSet.DefaultRoomMinPlayers;
             roomMaxPlayers = ruleSet.DefaultRoomMaxPlayers;
-            taskService.EvidenceTarget = ruleSet.ScaledEvidenceTarget(players.Count);
+            // lobby/未入座阶段用默认证据目标；按人数缩放只在确实有玩家后进行，
+            // 否则 0 人会被缩放成下限值，破坏 10-20 分钟局时设计。
+            taskService.EvidenceTarget = players.Count > 0
+                ? ruleSet.ScaledEvidenceTarget(players.Count)
+                : ruleSet.DefaultEvidenceTarget;
         }
 
         private void EnsureCoreServices()
@@ -7465,12 +7470,10 @@ namespace GanglandUndercover.Online
             EnsureCoreServices();
 
             tasks.Clear();
-            // M4.2: 任务数量按人数缩放（非Gang人数 × tasksPerNonGangPlayer）
-            RoleDistribution dist = ruleSet.GetRoleDistribution(players.Count);
-            int desiredCount = ruleSet.TotalTaskCount(players.Count, dist.gang);
-            int taskLimit = Mathf.Clamp(desiredCount, 8, 28);
-
-            for (int id = 0; id < taskLimit; id++)
+            // 大地图固定任务站点始终铺满（关卡内容，与人数无关）。
+            // 人数缩放（TotalTaskCount = 非Gang人数 × tasksPerNonGangPlayer）作用于
+            // 每位玩家需完成的任务配额/证据目标，而不是地图上存在的站点数量。
+            for (int id = 0; id < OnlineMapService.TaskStationCount; id++)
             {
                 tasks.Add(new OnlineTaskState(id, TaskNameFor(id), mapService.TaskPositionFor(id), 0, TaskRequiredProgress(id), false, false));
             }

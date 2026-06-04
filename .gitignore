@@ -27,3 +27,8 @@ mono_crash*.json
 # Third-party 3D art assets (downgraded to concept reference, project going 2D)
 Assets/_Project/Art/ThirdParty/
 Assets/_Project/Resources/AssetStore/
+
+# Batchmode 验证产物（测试结果 / 日志），不入仓库
+/test-results.xml
+/unity-smoke.log
+/unity-tests.log

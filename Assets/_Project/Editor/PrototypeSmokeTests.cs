@@ -631,7 +631,9 @@ namespace GanglandUndercover.Editor
                 throw new InvalidOperationException("Smoke test failed: tactical map hotkey path is not exposed.");
             }
 
-            if (!controller.EditorIsWalkableForSmokeTest(new Vector3(0f, -0.65f, 0f)))
+            // 会议集合点用设计坐标 (0,-0.65) 表达，IsWalkable 在世界坐标系工作，先缩放。
+            Vector3 meetingSpawnWorld = controller.MapService.ScaleMapPosition(new Vector3(0f, -0.65f, 0f));
+            if (!controller.EditorIsWalkableForSmokeTest(meetingSpawnWorld))
             {
                 throw new InvalidOperationException("Smoke test failed: online meeting spawn ring is blocked.");
             }

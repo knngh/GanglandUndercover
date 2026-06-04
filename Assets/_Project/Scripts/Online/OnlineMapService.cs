@@ -58,15 +58,30 @@ namespace GanglandUndercover.Online
         private float _runtimeScaleY;
         private float _runtimeHalfWidth;
         private float _runtimeHalfHeight;
+        private bool _configApplied;
 
         private void Awake()
         {
             ApplyMapConfig();
         }
 
+        /// <summary>
+        /// 确保运行时尺寸/缩放缓存已计算。
+        /// Awake 只在 Play 模式触发；当组件经 AddComponent 在编辑器/批处理下创建时不会调用，
+        /// 因此公开访问器须惰性兜底，避免 MapHalfWidth 等返回 0。
+        /// </summary>
+        private void EnsureConfig()
+        {
+            if (!_configApplied)
+            {
+                ApplyMapConfig();
+            }
+        }
+
         /// <summary>根据当前地图类型应用对应的尺寸和缩放配置</summary>
         private void ApplyMapConfig()
         {
+            _configApplied = true;
             if (activeMapType == OnlineMapType.PoliceStation)
             {
                 float psHalfW = Map.PoliceStationMapLayout.DesignHalfWidth;
@@ -87,12 +102,12 @@ namespace GanglandUndercover.Online
 
         // ---- 公开属性 ----
 
-        public float MapHalfWidth => _runtimeHalfWidth;
-        public float MapHalfHeight => _runtimeHalfHeight;
-        public float DesignScaleX => _runtimeScaleX;
-        public float DesignScaleY => _runtimeScaleY;
-        public float DesignMapHalfWidth => _runtimeHalfWidth / _runtimeScaleX;
-        public float DesignMapHalfHeight => _runtimeHalfHeight / _runtimeScaleY;
+        public float MapHalfWidth { get { EnsureConfig(); return _runtimeHalfWidth; } }
+        public float MapHalfHeight { get { EnsureConfig(); return _runtimeHalfHeight; } }
+        public float DesignScaleX { get { EnsureConfig(); return _runtimeScaleX; } }
+        public float DesignScaleY { get { EnsureConfig(); return _runtimeScaleY; } }
+        public float DesignMapHalfWidth { get { EnsureConfig(); return _runtimeHalfWidth / _runtimeScaleX; } }
+        public float DesignMapHalfHeight { get { EnsureConfig(); return _runtimeHalfHeight / _runtimeScaleY; } }
 
         // ---- 枚举与结构 ----
 
@@ -179,6 +194,9 @@ namespace GanglandUndercover.Online
         }
 
         // ---- 任务点 ----
+
+        /// <summary>大地图固定任务站点总数（与 TaskPositionFor 的预设点位数一致）。</summary>
+        public const int TaskStationCount = 28;
 
         /// <summary>根据任务ID获取任务点世界坐标（28个预设位置，默认返回原点）</summary>
         public Vector3 TaskPositionFor(int id)

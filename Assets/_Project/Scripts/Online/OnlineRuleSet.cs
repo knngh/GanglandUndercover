@@ -138,8 +138,8 @@ namespace GanglandUndercover.Online
         [Header("时间限制")]
         [Tooltip("比赛最短目标时间（秒）。M4 收紧至 600s（10min）。")]
         public float MatchTargetMinSeconds = 600f;
-        [Tooltip("比赛硬性上限时间（秒）。M4 收紧至 900s（15min）。")]
-        public float MatchHardLimitSeconds = 900f;
+        [Tooltip("比赛硬性上限时间（秒）。10-20 分钟局时设计的上限，1200s（20min）。")]
+        public float MatchHardLimitSeconds = 1200f;
 
         [Header("AI")]
         [Tooltip("AI 行动延迟（秒），联机模式。")]

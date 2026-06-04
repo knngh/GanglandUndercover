@@ -108,6 +108,13 @@ namespace GanglandUndercover.Online
         {
             ruleSet = ruleSetRef;
             mapService = mapServiceRef;
+
+            // 尚未设定证据目标时，初始化为规则集默认值（保证 lobby 阶段即有合理的 10-20 分钟局时目标，
+            // 不覆盖快照恢复或开局缩放后的值）。
+            if (evidenceTarget <= 0)
+            {
+                evidenceTarget = ruleSet != null ? ruleSet.DefaultEvidenceTarget : 44;
+            }
         }
 
         // ====== 公开 API：任务状态管理 ======

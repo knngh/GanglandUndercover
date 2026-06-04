@@ -184,8 +184,10 @@ namespace GanglandUndercover.Online
             Color bodyColor = PlayerAccentColor(state);
 
             // --- Body circle ---
-            // Use circleSprite for round, soften color slightly for readability
-            GameObject body = new GameObject("2DChar_" + state.Profession);
+            // Use circleSprite for round, soften color slightly for readability。
+            // 命名前缀沿用 "FreeCharacterAdapter"：2D 主路径下它就是每位玩家的角色适配层，
+            // 让 FreeCharacterAdapterCount 计数对 2D 后端同样成立。
+            GameObject body = new GameObject("FreeCharacterAdapter 2D " + state.Profession);
             SpriteRenderer bodyRenderer = body.AddComponent<SpriteRenderer>();
             bodyRenderer.sprite = worldBuilder.CircleSprite;
             bodyRenderer.color = new Color(bodyColor.r * 0.85f, bodyColor.g * 0.85f, bodyColor.b * 0.85f, 1f);
