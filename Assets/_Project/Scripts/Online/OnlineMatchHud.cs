@@ -16,9 +16,6 @@ namespace GanglandUndercover.Online
             Services
         }
 
-        private const float DesignScaleX = 2f;
-        private const float DesignScaleY = 1.85f;
-
         private static readonly Color BackdropColor = new Color(0.015f, 0.019f, 0.021f, 0.18f);
         private static readonly Color DockColor = new Color(0.035f, 0.045f, 0.048f, 0.88f);
         private static readonly Color PanelColor = new Color(0.055f, 0.066f, 0.068f, 0.92f);
@@ -130,6 +127,7 @@ namespace GanglandUndercover.Online
         private Button reportButton;
         private Button killButton;
         private Button abilityButton;
+        private Button ventButton;
 
         private Transform voteButtonRoot;
 
@@ -520,6 +518,7 @@ namespace GanglandUndercover.Online
             killButton = CreateButton("Q 击倒", actionRowB, 42f, () => controller.RequestAction(OnlineActionType.Kill));
             abilityButton = CreateButton("F 技能", actionRowB, 42f, () => controller.RequestAction(OnlineActionType.Ability));
             Transform actionRowC = CreateButtonRow(action, 42f);
+            ventButton = CreateButton("V 通风管", actionRowC, 42f, () => controller.RequestAction(OnlineActionType.Vent));
             mapButton = CreateButton("M 大地图", actionRowC, 42f, () => controller.ToggleTacticalMap());
             intelButton = CreateButton("I 案情板", actionRowC, 42f, () => controller.ToggleIntelBoard());
 
@@ -1256,13 +1255,13 @@ namespace GanglandUndercover.Online
 
         private void BuildStaticMapLayer()
         {
-            CreateMapRoute("Main Spine", new Vector3(0f, -0.18f * DesignScaleY, 0f), new Vector3(15.5f * DesignScaleX, 1.2f * DesignScaleY, 0f), new Color(0.22f, 0.26f, 0.27f, 0.95f));
-            CreateMapRoute("North Spine", new Vector3(0f, 3.65f * DesignScaleY, 0f), new Vector3(16.4f * DesignScaleX, 1.04f * DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
-            CreateMapRoute("South Spine", new Vector3(0.12f * DesignScaleX, -3.9f * DesignScaleY, 0f), new Vector3(15.4f * DesignScaleX, 1.04f * DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
-            CreateMapRoute("West Spine", new Vector3(-6.85f * DesignScaleX, 0.15f * DesignScaleY, 0f), new Vector3(1.08f * DesignScaleX, 8.35f * DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
-            CreateMapRoute("East Spine", new Vector3(7.05f * DesignScaleX, 0.08f * DesignScaleY, 0f), new Vector3(1.08f * DesignScaleX, 8.18f * DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
-            CreateMapRoute("Center North", new Vector3(0f, 1.85f * DesignScaleY, 0f), new Vector3(1.08f * DesignScaleX, 3.15f * DesignScaleY, 0f), new Color(0.2f, 0.24f, 0.25f, 0.92f));
-            CreateMapRoute("Center South", new Vector3(0f, -2.35f * DesignScaleY, 0f), new Vector3(1.08f * DesignScaleX, 3.05f * DesignScaleY, 0f), new Color(0.2f, 0.24f, 0.25f, 0.92f));
+            CreateMapRoute("Main Spine", new Vector3(0f, -0.18f * controller.MapService.DesignScaleY, 0f), new Vector3(15.5f * controller.MapService.DesignScaleX, 1.2f * controller.MapService.DesignScaleY, 0f), new Color(0.22f, 0.26f, 0.27f, 0.95f));
+            CreateMapRoute("North Spine", new Vector3(0f, 3.65f * controller.MapService.DesignScaleY, 0f), new Vector3(16.4f * controller.MapService.DesignScaleX, 1.04f * controller.MapService.DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
+            CreateMapRoute("South Spine", new Vector3(0.12f * controller.MapService.DesignScaleX, -3.9f * controller.MapService.DesignScaleY, 0f), new Vector3(15.4f * controller.MapService.DesignScaleX, 1.04f * controller.MapService.DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
+            CreateMapRoute("West Spine", new Vector3(-6.85f * controller.MapService.DesignScaleX, 0.15f * controller.MapService.DesignScaleY, 0f), new Vector3(1.08f * controller.MapService.DesignScaleX, 8.35f * controller.MapService.DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
+            CreateMapRoute("East Spine", new Vector3(7.05f * controller.MapService.DesignScaleX, 0.08f * controller.MapService.DesignScaleY, 0f), new Vector3(1.08f * controller.MapService.DesignScaleX, 8.18f * controller.MapService.DesignScaleY, 0f), new Color(0.18f, 0.22f, 0.24f, 0.92f));
+            CreateMapRoute("Center North", new Vector3(0f, 1.85f * controller.MapService.DesignScaleY, 0f), new Vector3(1.08f * controller.MapService.DesignScaleX, 3.15f * controller.MapService.DesignScaleY, 0f), new Color(0.2f, 0.24f, 0.25f, 0.92f));
+            CreateMapRoute("Center South", new Vector3(0f, -2.35f * controller.MapService.DesignScaleY, 0f), new Vector3(1.08f * controller.MapService.DesignScaleX, 3.05f * controller.MapService.DesignScaleY, 0f), new Color(0.2f, 0.24f, 0.25f, 0.92f));
             CreateVerticalSliceStaticMapLayer();
         }
 
@@ -1320,18 +1319,18 @@ namespace GanglandUndercover.Online
 
         private static Vector3 ScaleDesignPoint(Vector3 designPoint)
         {
-            return new Vector3(designPoint.x * DesignScaleX, designPoint.y * DesignScaleY, designPoint.z);
+            return controller.MapService.ScaleMapPosition(designPoint);
         }
 
         private static Vector3 ScaleDesignSize(Vector3 designSize)
         {
-            return new Vector3(designSize.x * DesignScaleX, designSize.y * DesignScaleY, designSize.z);
+            return controller.MapService.ScaleMapSize(designSize);
         }
 
         private Vector2 WorldToMapAnchor(Vector3 worldPosition)
         {
-            float x = Mathf.InverseLerp(-controller.MapHalfWidthValue, controller.MapHalfWidthValue, worldPosition.x);
-            float y = Mathf.InverseLerp(-controller.MapHalfHeightValue, controller.MapHalfHeightValue, worldPosition.y);
+            float x = Mathf.InverseLerp(-controller.MapService.MapHalfWidth, controller.MapService.MapHalfWidth, worldPosition.x);
+            float y = Mathf.InverseLerp(-controller.MapService.MapHalfHeight, controller.MapService.MapHalfHeight, worldPosition.y);
             return new Vector2(x, y);
         }
 

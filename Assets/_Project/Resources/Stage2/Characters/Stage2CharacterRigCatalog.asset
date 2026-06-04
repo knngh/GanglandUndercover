@@ -1,0 +1,57 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 0}
+  m_Name: Stage2CharacterRigCatalog
+  m_EditorClassIdentifier: Assembly-CSharp:GanglandUndercover.Online:StageTwoCharacterRigCatalog
+  Poses:
+  - State: 0
+    BodyYOffset: -0.08
+    HeadYOffset: 0.2
+    BodyZRotation: 0
+    LeftArmZRotation: 12
+    RightArmZRotation: -12
+  - State: 1
+    BodyYOffset: -0.03
+    HeadYOffset: 0.23
+    BodyZRotation: -5
+    LeftArmZRotation: 22
+    RightArmZRotation: -22
+  - State: 2
+    BodyYOffset: -0.04
+    HeadYOffset: 0.22
+    BodyZRotation: -4
+    LeftArmZRotation: 4
+    RightArmZRotation: -46
+  - State: 3
+    BodyYOffset: -0.22
+    HeadYOffset: -0.18
+    BodyZRotation: 82
+    LeftArmZRotation: 74
+    RightArmZRotation: 100
+  - State: 4
+    BodyYOffset: -0.06
+    HeadYOffset: 0.26
+    BodyZRotation: 0
+    LeftArmZRotation: -24
+    RightArmZRotation: -62
+  - State: 5
+    BodyYOffset: -0.12
+    HeadYOffset: 0.2
+    BodyZRotation: 0
+    LeftArmZRotation: 8
+    RightArmZRotation: -8
+  - State: 6
+    BodyYOffset: -0.1
+    HeadYOffset: 0.22
+    BodyZRotation: 0
+    LeftArmZRotation: -18
+    RightArmZRotation: -36

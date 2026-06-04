@@ -17,6 +17,8 @@ Full production plan:
 
 The prototype builds the large online harbor city map, task stations, characters, props, neon lights, generated sound cues, AI fill, opening briefing, meeting flow, and HUD at runtime. If the menu script does not compile because your Unity version is older, create an empty scene manually, add an empty GameObject named `PrototypeBootstrap`, attach `Assets/_Project/Scripts/Gameplay/PrototypeBootstrap.cs`, then press Play.
 
+An offline practice mode is available as a single-player sandbox with AI bots for quick prototyping and learning basic controls. This offline mode is **not** part of the 2D production track — it stays on the legacy 3D render path and is intended as a testing/tutorial sandbox only.
+
 Chinese setup notes are in `Assets/_Project/Docs/UnitySetup.zh-CN.md`.
 
 ## Current Playable Loop

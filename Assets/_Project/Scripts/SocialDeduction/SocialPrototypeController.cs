@@ -3,6 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using GanglandUndercover.Core;
+using GanglandUndercover.Gameplay;
+using GanglandUndercover.UI;
+using GanglandUndercover.Audio;
+using GanglandUndercover.World;
+using GanglandUndercover.SocialDeduction.MiniGames;
+using GanglandUndercover.Online;
 using UnityEngine;
 
 namespace GanglandUndercover.SocialDeduction
@@ -20,6 +26,7 @@ namespace GanglandUndercover.SocialDeduction
         private const float BotInteractRange = 0.85f;
         private const float BotTaskCooldownSeconds = 4.5f;
         private const float FootprintIntervalSeconds = 1.05f;
+        private const float AudioFootstepIntervalSeconds = 0.4f;
         private const float FootprintLifetimeSeconds = 13f;
         private const float RouteMemorySeconds = 45f;
         private const int MaxRouteEntriesPerCharacter = 5;
@@ -53,10 +60,15 @@ namespace GanglandUndercover.SocialDeduction
 
         private SocialCharacter player;
         private EmergencyButton emergencyButton;
+        private VentSystem ventSystem;
+        private EnvironmentManager environmentManager;
+        private CriticalTaskSystem criticalTaskSystem;
+        private SecurityCamera securityCamera;
         private TaskStation activeTaskChallenge;
         private float playerKillCooldown;
         private float aiKillCooldown;
         private float blackoutTimer;
+        private float audioFootstepTimer;
         private float roundTimer;
         private float surveillancePulseTimer;
         private int meetingsCalled;
@@ -74,10 +86,27 @@ namespace GanglandUndercover.SocialDeduction
         private string taskChallengeTitle = string.Empty;
         private string taskChallengeBody = string.Empty;
         private string latestSurveillanceIntel = string.Empty;
+        private MiniGameBase activeMiniGame;
+
+        // --- 离线聊天系统 ---
+        private readonly List<ChatMessage> offlineChatMessages = new List<ChatMessage>();
+        private string offlineChatInput = string.Empty;
+        private bool offlineChatInputActive;
+        private Vector2 offlineChatScroll;
+        private float offlineChatMessageTimer;
+        private int offlineChatMessageIndex;
+        private bool offlineChatRoundComplete;
+        private ChatSystem offlineChatSystem;
+
+        // --- 回合制策略层 ---
+        private GameController turnController;
+        private GameObject turnHudObject;
+        private GameObject turnMapObject;
 
         public event Action Changed;
 
         public GameLanguage Language { get; private set; } = GameLanguage.Chinese;
+        public MapType CurrentMapType { get; private set; } = MapType.GanglandDistrict;
         public bool HasStarted { get; private set; }
         public bool IsRoleRevealVisible { get; private set; }
         public bool IsMeeting { get; private set; }
@@ -107,7 +136,7 @@ namespace GanglandUndercover.SocialDeduction
         public int FalseLeadCount => falseLeadCount;
         public int WitnessStatementCount => witnessStatementCount;
         public int ChaseCount => chaseCount;
-        public bool IsTaskChallengeVisible => activeTaskChallenge != null;
+        public bool IsTaskChallengeVisible => activeTaskChallenge != null || activeMiniGame != null;
         public string TaskChallengeTitle => taskChallengeTitle;
         public string TaskChallengeBody => taskChallengeBody;
         public IReadOnlyList<string> TaskChallengeOptions => taskChallengeOptions;
@@ -123,15 +152,65 @@ namespace GanglandUndercover.SocialDeduction
         public string GoalBrief => BuildGoalBrief();
         public int ActiveFootprintCount => footprintTrails.Count;
 
+        /// <summary>
+        /// 由 Bootstrap 控制：false 时 Awake 不自动启动游戏。
+        /// </summary>
+        public bool AutoStartOnAwake { get; set; } = true;
+
         private void Awake()
         {
             BuildHud();
-            StartGame(SocialRole.Undercover);
+            InitTurnController();
+            InitTurnHud();
+
+            if (AutoStartOnAwake)
+            {
+                StartGame(SocialRole.Undercover);
+            }
+        }
+
+        /// <summary>
+        /// Bootstrap 入口：由 PrototypeBootstrap 在 Offline 模式下调用。
+        /// </summary>
+        public void StartOfflineMode(SocialRole role)
+        {
+            if (HasStarted)
+            {
+                return;
+            }
+
+            StartGame(role);
+        }
+
+        /// <summary>
+        /// 设置当前地图类型。必须在 StartGame 前调用。
+        /// </summary>
+        public void SetMapType(MapType mapType)
+        {
+            if (HasStarted)
+            {
+                Debug.LogWarning("[SocialPrototypeController] 游戏已开始，地图类型不可更改。");
+                return;
+            }
+
+            CurrentMapType = mapType;
         }
 
         private void OnDestroy()
         {
             ClearWorld();
+
+            if (turnMapObject != null)
+            {
+                DestroyGenerated(turnMapObject);
+                turnMapObject = null;
+            }
+
+            if (turnHudObject != null)
+            {
+                DestroyGenerated(turnHudObject);
+                turnHudObject = null;
+            }
 
             if (hudObject != null)
             {
@@ -142,9 +221,17 @@ namespace GanglandUndercover.SocialDeduction
 
         private void Update()
         {
-            if (activeTaskChallenge != null)
+            if (activeTaskChallenge != null || activeMiniGame != null)
             {
-                HandleTaskChallengeInput();
+                if (activeMiniGame == null)
+                {
+                    HandleTaskChallengeInput();
+                }
+                else if (Input.GetKeyDown(KeyCode.Escape))
+                {
+                    // Esc 取消小游戏
+                    CancelMiniGame();
+                }
                 FollowCamera();
                 return;
             }
@@ -169,7 +256,11 @@ namespace GanglandUndercover.SocialDeduction
 
             TryBotTaskActions();
             TryAiGangKill();
+            TickVentSystem();
+            TickSecurityCamera();
+            TickCriticalTaskSystem();
             HandleInput();
+            UpdateOfflineChat();
             FollowCamera();
         }
 
@@ -215,10 +306,12 @@ namespace GanglandUndercover.SocialDeduction
 
             BuildWorld();
             LastEvent = role == SocialRole.Gang
-                ? "你是黑帮线人。伪装巡逻、制造断电、阻止专案组收网。"
+                ? "你是黑帮成员。伪装巡逻、制造断电、阻止专案组收网。"
                 : role == SocialRole.Undercover
                     ? "你是潜伏探员。完成取证任务，报告倒下的人，别暴露路线。"
-                    : "你是专案警员。完成取证任务，报告尸体，找出黑帮线人。";
+                    : role == SocialRole.Mole
+                        ? "你是黑帮线人。伪装为警方技侦，暗中收集卧底情报。"
+                        : "你是专案警员。完成取证任务，报告尸体，找出黑帮线人。";
             Changed?.Invoke();
         }
 
@@ -234,7 +327,9 @@ namespace GanglandUndercover.SocialDeduction
                 ? "行动开始。靠近目标按 Q，E 破坏，F 伪造证词，C 反侦察。"
                 : PlayerRole == SocialRole.Undercover
                     ? "行动开始。E 取证，F 接头传证，C 调监控；小心暴露值。"
-                    : "行动开始。E 取证，F 封锁追捕，C 调监控，发现尸体按 R。";
+                    : PlayerRole == SocialRole.Mole
+                        ? "行动开始。E 跟踪调查，F 潜入档案，C 秘密接头；保持伪装。"
+                        : "行动开始。E 取证，F 封锁追捕，C 调监控，发现尸体按 R。";
             AddCaseLog("开局", RoleName(PlayerRole) + " 进入港区。");
             Changed?.Invoke();
         }
@@ -351,6 +446,12 @@ namespace GanglandUndercover.SocialDeduction
                     blackoutTimer = 0f;
                     LastEvent = "断电结束，视野恢复。";
                     shouldNotify = true;
+
+                    // 通知 EnvironmentManager 恢复灯光
+                    if (environmentManager != null)
+                    {
+                        environmentManager.SetBlackout(false);
+                    }
                 }
             }
 
@@ -392,6 +493,21 @@ namespace GanglandUndercover.SocialDeduction
             }
 
             player.transform.position = ClampToMap(player.transform.position + direction * MoveSpeed * Time.deltaTime);
+
+            // Audio footstep (0.4s interval, spatialized)
+            if (direction.sqrMagnitude > 0.01f)
+            {
+                audioFootstepTimer -= Time.deltaTime;
+                if (audioFootstepTimer <= 0f)
+                {
+                    audioFootstepTimer = AudioFootstepIntervalSeconds;
+                    AudioManager.Instance?.PlaySFXAtPoint(SoundEffect.Footstep, player.transform.position);
+                }
+            }
+            else
+            {
+                audioFootstepTimer = 0f;
+            }
         }
 
         private void MoveBots()
@@ -763,6 +879,15 @@ namespace GanglandUndercover.SocialDeduction
         {
             if (Input.GetKeyDown(KeyCode.E))
             {
+                // 查看监控中 → E 退出
+                if (securityCamera != null && securityCamera.IsViewing)
+                {
+                    securityCamera.DeactivateViewing();
+                    LastEvent = "退出监控查看。";
+                    Changed?.Invoke();
+                    return;
+                }
+
                 TryInteract();
             }
 
@@ -784,6 +909,48 @@ namespace GanglandUndercover.SocialDeduction
             if (Input.GetKeyDown(KeyCode.C))
             {
                 TrySurveillanceAction();
+            }
+
+            if (Input.GetKeyDown(KeyCode.V))
+            {
+                // 监控站优先：如果玩家在监控站附近 → 查看摄像头
+                if (securityCamera != null && securityCamera.IsPlayerNearMonitor(player.transform.position))
+                {
+                    if (securityCamera.IsViewing)
+                    {
+                        string result = securityCamera.CycleNextView();
+                        LastEvent = result;
+                        Changed?.Invoke();
+                    }
+                    else
+                    {
+                        string result = securityCamera.ActivateViewing();
+                        LastEvent = result;
+                        Changed?.Invoke();
+                    }
+                    return;
+                }
+
+                // 否则走通风管
+                TryVentAction();
+            }
+        }
+
+        private void TickSecurityCamera()
+        {
+            if (securityCamera == null) return;
+            if (!HasStarted || IsMeeting || IsGameOver) return;
+
+            // 检测各摄像头的 Impostor 视野
+            securityCamera.TickDetection(characters);
+
+            // 如果玩家离开监控站范围 → 自动退出查看
+            if (securityCamera.IsViewing && player != null && player.IsAlive)
+            {
+                if (!securityCamera.IsPlayerNearMonitor(player.transform.position))
+                {
+                    securityCamera.DeactivateViewing();
+                }
             }
         }
 
@@ -835,7 +1002,7 @@ namespace GanglandUndercover.SocialDeduction
 
         private void TryPlayerKill()
         {
-            if (PlayerRole != SocialRole.Gang)
+            if (PlayerRole != SocialRole.Gang && PlayerRole != SocialRole.Mole)
             {
                 LastEvent = "只有黑帮可以击倒目标。";
                 Changed?.Invoke();
@@ -888,6 +1055,7 @@ namespace GanglandUndercover.SocialDeduction
             bodies.Remove(body);
             string victimName = body.Victim.CharacterName;
             DestroyGenerated(body.gameObject);
+            AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
             StartMeeting("发现 " + victimName + " 的尸体。");
         }
 
@@ -907,10 +1075,150 @@ namespace GanglandUndercover.SocialDeduction
             }
         }
 
+        // ──────────────────────────────────────────────
+        //  离线聊天系统
+        // ──────────────────────────────────────────────
+
+        private void UpdateOfflineChat()
+        {
+            if (!IsMeeting || offlineChatSystem == null) return;
+
+            // AI 自动发送预设消息（模拟多人讨论）
+            offlineChatMessageTimer -= Time.deltaTime;
+            if (offlineChatMessageTimer <= 0f && !offlineChatRoundComplete)
+            {
+                SendNextAiChatMessage();
+                offlineChatMessageTimer = 3.5f + UnityEngine.Random.Range(-0.5f, 0.5f);
+            }
+        }
+
+        /// <summary>
+        /// 发送下一条 AI 预设消息。
+        /// </summary>
+        private void SendNextAiChatMessage()
+        {
+            if (offlineChatSystem == null) return;
+
+            string[] chinesePool =
+            {
+                "我觉得我们应该查一下监控录像，看看谁的路线有问题。",
+                "有人看到可疑人物在货柜码头附近吗？",
+                "我注意到昨晚夜市巷有异常活动。",
+                "证物库那边好像被翻动过，有人承认吗？",
+                "专案办公室的情报显示黑帮有内应。",
+                "我昨天在主街看到有人鬼鬼祟祟的。",
+                "地下诊所的登记记录对不上，谁去过那里？",
+                "我建议先查一下每个人的任务完成情况。",
+                "侦探日志里提到货柜码头有异常交易记录。",
+                "证据链断了几条，说明有人在干扰调查方向。",
+            };
+
+            string[] englishPool =
+            {
+                "I think we should check the surveillance footage — someone's route looks off.",
+                "Has anyone seen anything unusual near the Dockyard?",
+                "I noticed some strange activity around the Night Market last night.",
+                "The Evidence Warehouse looks tampered with. Anyone want to admit it?",
+                "Intel from the Police Precinct suggests there's a mole in the gang.",
+                "I saw someone acting shady on Main Street yesterday.",
+                "The underground clinic's records don't add up. Who's been there?",
+                "I suggest we check everyone's task completion first.",
+                "The detective log mentions unusual transactions at the Dockyard.",
+                "Several evidence chains are broken — someone is interfering with the investigation.",
+            };
+
+            string[] pool = Language == GameLanguage.Chinese ? chinesePool : englishPool;
+
+            int index = offlineChatMessageIndex;
+            string content;
+
+            if (index >= pool.Length)
+            {
+                content = pool[UnityEngine.Random.Range(0, pool.Length)];
+            }
+            else
+            {
+                content = pool[index];
+            }
+
+            offlineChatMessageIndex++;
+
+            // 从存活角色中选一个非玩家发言人
+            SocialCharacter speaker = null;
+            foreach (SocialCharacter character in characters)
+            {
+                if (!character.IsAlive || character.IsPlayer) continue;
+                speaker = character;
+                break;
+            }
+
+            if (speaker == null) return;
+
+            Faction speakerFaction = GetFaction(speaker.Role);
+            offlineChatSystem.ReceiveMessage(
+                speaker.CharacterName,
+                speaker.CharacterName,
+                content,
+                false,
+                speakerFaction);
+        }
+
+        /// <summary>
+        /// 离线聊天发送回调（玩家输入发送）。
+        /// </summary>
+        private void OnOfflineChatSend(string content)
+        {
+            if (!IsMeeting || offlineChatSystem == null || player == null) return;
+
+            Faction faction = GetFaction(PlayerRole);
+            offlineChatSystem.ReceiveMessage(
+                "local",
+                player.CharacterName,
+                content,
+                false,
+                faction);
+        }
+
+        /// <summary>
+        /// 离线模式聊天 GUI 渲染 —— 使用 ChatSystem 绘制聊天面板。
+        /// </summary>
+        private void OnGUI()
+        {
+            if (!IsMeeting || offlineChatSystem == null) return;
+
+            float chatWidth = Screen.width * 0.27f;
+            float chatHeight = Screen.height * 0.34f;
+            Rect chatArea = new Rect(
+                Screen.width - chatWidth - 18f,
+                Screen.height * 0.62f,
+                chatWidth,
+                chatHeight);
+
+            offlineChatSystem.ProcessInputKeys();
+            offlineChatSystem.DrawChatPanel(chatArea, GUI.skin);
+        }
+
         private void StartTaskChallenge(TaskStation task, bool sabotage)
         {
             activeTaskChallenge = task;
             activeTaskIsSabotage = sabotage;
+
+            // 尝试启动 MiniGame（优先于文本多选）
+            Type miniGameType = PickMiniGameType(task.TaskName);
+            if (miniGameType != null)
+            {
+                GameObject miniGameObj = new GameObject("MiniGame_" + task.TaskName);
+                activeMiniGame = (MiniGameBase)miniGameObj.AddComponent(miniGameType);
+                activeMiniGame.OnComplete += OnMiniGameComplete;
+                activeMiniGame.OnCancel += OnMiniGameCancel;
+                activeMiniGame.Show();
+
+                LastEvent = "正在处理：" + task.TaskName + "（Esc 取消）。";
+                Changed?.Invoke();
+                return;
+            }
+
+            // 回退到文本多选
             activeTaskCorrectOption = UnityEngine.Random.Range(0, 3);
             taskChallengeOptions.Clear();
 
@@ -987,6 +1295,10 @@ namespace GanglandUndercover.SocialDeduction
             {
                 task.Work();
                 int gain = task.IsCompleted ? 3 : 2;
+                if (task.IsCompleted)
+                {
+                    AudioManager.Instance?.PlaySFX(SoundEffect.TaskComplete);
+                }
                 evidenceScore = Mathf.Min(EvidenceTarget, evidenceScore + gain);
                 witnessStatementCount += task.TaskName.Contains("监控") ? 0 : 1;
                 gangHeat = Mathf.Min(MaxGangHeat, gangHeat + 4);
@@ -1026,6 +1338,7 @@ namespace GanglandUndercover.SocialDeduction
         {
             task.Sabotage();
             TriggerBlackout();
+            AudioManager.Instance?.PlaySFX(SoundEffect.Sabotage);
 
             if (success)
             {
@@ -1046,6 +1359,177 @@ namespace GanglandUndercover.SocialDeduction
 
             CheckVictory();
         }
+
+        // ────────────── MiniGame 集成 ──────────────
+
+        /// <summary>
+        /// 根据任务名称分配合适的小游戏类型。
+        /// </summary>
+        private static System.Type PickMiniGameType(string taskName)
+        {
+            // ── 警察局地图任务映射 ──
+            MiniGameType? policeType = PoliceStationTasks.GetMiniGameType(taskName);
+            if (policeType.HasValue)
+            {
+                switch (policeType.Value)
+                {
+                    case MiniGameType.SortTask:            return typeof(SortTask);
+                    case MiniGameType.ScanTask:            return typeof(ScanTask);
+                    case MiniGameType.TapTask:             return typeof(TapTask);
+                    case MiniGameType.KeypadTask:          return typeof(KeypadTask);
+                    case MiniGameType.EvidenceArchiveTask: return typeof(EvidenceArchiveTask);
+                    default: return typeof(SortTask);
+                }
+            }
+
+            // ── 连线类 ──
+            if (taskName.Contains("货柜") || taskName.Contains("电闸"))
+            {
+                return typeof(WireTask); // 连线：连接货柜封条 / 修复电路
+            }
+
+            // ── 记忆类 ──
+            if (taskName.Contains("监控"))
+            {
+                return typeof(MemoryTask); // 记忆：记住摄像头画面特征
+            }
+
+            // ── 刷卡/扫描类 ──
+            if (taskName.Contains("证物") || taskName.Contains("档案"))
+            {
+                return typeof(SwipeCardTask); // 刷卡：扫描证物 / 上传档案
+            }
+
+            // ── 密码键盘类 ──
+            if (taskName.Contains("密码") || taskName.Contains("保险箱") || taskName.Contains("门禁"))
+            {
+                return typeof(KeypadTask); // 数字键盘：输入4位密码
+            }
+
+            // ── 分类排序类 ──
+            if (taskName.Contains("分类") || taskName.Contains("垃圾") || taskName.Contains("归档") || taskName.Contains("整理"))
+            {
+                return typeof(SortTask); // 拖拽分类：将物品拖入正确槽位
+            }
+
+            // ── 扫描类 ──
+            if (taskName.Contains("扫描") || taskName.Contains("体检") || taskName.Contains("化验") || taskName.Contains("MedBay"))
+            {
+                return typeof(ScanTask); // 圆形扫描：在绿色区域停止
+            }
+
+            // ── 快速点击类 ──
+            if (taskName.Contains("点击") || taskName.Contains("反应") || taskName.Contains("射击") || taskName.Contains("校准"))
+            {
+                return typeof(TapTask); // 快速点击：限时点击全部目标
+            }
+
+            // ── 新增3种小游戏映射 ──
+            // 航向校准
+            if (taskName.Contains("航向") || taskName.Contains("校准") || taskName.Contains("校准仪"))
+            {
+                return typeof(CalibrateTask); // 十字准星校准
+            }
+
+            // 清理陨石
+            if (taskName.Contains("陨石") || taskName.Contains("太空") || taskName.Contains("碎片"))
+            {
+                return typeof(AsteroidTask); // 点击击碎陨石
+            }
+
+            // 下载数据
+            if (taskName.Contains("下载") || taskName.Contains("上传") || taskName.Contains("数据"))
+            {
+                return typeof(DownloadTask); // 进度条+信号干扰修复
+            }
+
+            // 默认随机一种（含新增类型）
+            int hash = Mathf.Abs(taskName.GetHashCode()) % 10;
+            switch (hash)
+            {
+                case 0: return typeof(WireTask);
+                case 1: return typeof(SwipeCardTask);
+                case 2: return typeof(MemoryTask);
+                case 3: return typeof(KeypadTask);
+                case 4: return typeof(SortTask);
+                case 5: return typeof(ScanTask);
+                case 6: return typeof(TapTask);
+                case 7: return typeof(CalibrateTask);
+                case 8: return typeof(AsteroidTask);
+                case 9: return typeof(DownloadTask);
+                default: return typeof(WireTask);
+            }
+        }
+
+        private void OnMiniGameComplete(MiniGameBase miniGame)
+        {
+            if (activeTaskChallenge == null) return;
+
+            TaskStation task = activeTaskChallenge;
+            bool sabotage = activeTaskIsSabotage;
+            CleanupMiniGame();
+
+            if (sabotage)
+            {
+                ResolveSabotageChallenge(task, true);
+            }
+            else
+            {
+                ResolveEvidenceChallenge(task, true);
+            }
+
+            Changed?.Invoke();
+        }
+
+        private void OnMiniGameCancel(MiniGameBase miniGame)
+        {
+            if (activeTaskChallenge == null) return;
+
+            TaskStation task = activeTaskChallenge;
+            bool sabotage = activeTaskIsSabotage;
+            CleanupMiniGame();
+
+            if (sabotage)
+            {
+                ResolveSabotageChallenge(task, false);
+            }
+            else
+            {
+                ResolveEvidenceChallenge(task, false);
+            }
+
+            Changed?.Invoke();
+        }
+
+        private void CancelMiniGame()
+        {
+            if (activeMiniGame != null)
+            {
+                activeMiniGame.OnComplete -= OnMiniGameComplete;
+                activeMiniGame.OnCancel -= OnMiniGameCancel;
+                activeMiniGame.Hide();
+                Destroy(activeMiniGame.gameObject);
+                activeMiniGame = null;
+                activeTaskChallenge = null;
+                activeTaskIsSabotage = false;
+                taskChallengeTitle = string.Empty;
+                taskChallengeBody = string.Empty;
+                LastEvent = "任务已取消。";
+            }
+        }
+
+        private void CleanupMiniGame()
+        {
+            if (activeMiniGame == null) return;
+
+            activeMiniGame.OnComplete -= OnMiniGameComplete;
+            activeMiniGame.OnCancel -= OnMiniGameCancel;
+            activeMiniGame.Hide();
+            Destroy(activeMiniGame.gameObject);
+            activeMiniGame = null;
+        }
+
+        // ──────────────── 角色动作 ────────────────
 
         private void TryRoleAction()
         {
@@ -1146,12 +1630,33 @@ namespace GanglandUndercover.SocialDeduction
             LastEvent = reason + " 选择一个怀疑对象投票。";
             meetingsCalled++;
             AddCaseLog("会议", reason);
+
+            // 初始化离线聊天
+            offlineChatMessages.Clear();
+            offlineChatInput = string.Empty;
+            offlineChatInputActive = false;
+            offlineChatScroll = Vector2.zero;
+            offlineChatMessageTimer = 2.5f;
+            offlineChatMessageIndex = 0;
+            offlineChatRoundComplete = false;
+
+            // 初始化跨模式ChatSystem
+            offlineChatSystem = new ChatSystem(OnOfflineChatSend);
+            offlineChatSystem.CurrentPhase = OnlineMatchPhase.Meeting;
+            offlineChatSystem.CanSend = player != null && player.IsAlive;
+            offlineChatSystem.IsAlive = player != null && player.IsAlive;
+            offlineChatSystem.LocalFaction = GetFaction(PlayerRole);
+
+            // AI 在会议开始时发送开场消息
+            SendNextAiChatMessage();
+
             Changed?.Invoke();
         }
 
         private void KillCharacter(SocialCharacter target)
         {
             target.Kill();
+            AudioManager.Instance?.PlaySFX(SoundEffect.Kill);
 
             GameObject bodyObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
             bodyObject.name = target.CharacterName + " Body";
@@ -1170,13 +1675,39 @@ namespace GanglandUndercover.SocialDeduction
 
             if (target.IsPlayer)
             {
-                FinishGame("黑帮胜利：你被击倒，港区证据链中断。");
+                // 检查是否仍有友方存活（卧底+警察=友方）
+                SocialRole playerRole = PlayerRole;
+                bool hasAliveTeammate = characters.Any(c =>
+                    c.IsAlive && c != target && IsSameFaction(c.Role, playerRole));
+                
+                if (hasAliveTeammate)
+                {
+                    // 进入鬼魂模式 — 可继续做任务帮助队友
+                    GhostMode ghost = target.GetComponent<GhostMode>();
+                    if (ghost == null) ghost = target.gameObject.AddComponent<GhostMode>();
+                    ghost.EnterGhostMode();
+                    ghost.CanDoTasks = true;
+                    ghost.CanReportBody = false;
+                    ghost.GhostCanCallMeeting = false;
+                    AddCaseLog("事件", $"{target.CharacterName} 被淘汰，进入鬼魂模式，可继续帮助队友。");
+                    AddCaseLog("提示", "按 Tab 查看剩余队友状态。");
+                }
+                else
+                {
+                    FinishGame("黑帮胜利：你被击倒，港区证据链中断。");
+                }
             }
         }
 
         private void TriggerBlackout()
         {
             blackoutTimer = BlackoutDurationSeconds;
+
+            // 通知 EnvironmentManager 切换灯光
+            if (environmentManager != null)
+            {
+                environmentManager.SetBlackout(true);
+            }
         }
 
         private string BuildClue(SocialCharacter victim)
@@ -1455,6 +1986,8 @@ namespace GanglandUndercover.SocialDeduction
                     return "你的身份：黑帮线人";
                 case SocialRole.Undercover:
                     return "你的身份：潜伏探员";
+                case SocialRole.Mole:
+                    return "你的身份：黑帮线人（潜伏警方）";
                 default:
                     return "你的身份：专案警员";
             }
@@ -1468,6 +2001,8 @@ namespace GanglandUndercover.SocialDeduction
                     return "目标：破坏证据、制造断电、击倒专案组成员，并在会议中隐藏身份。";
                 case SocialRole.Undercover:
                     return "目标：完成取证任务，利用路线线索投出黑帮，同时保持潜伏。";
+                case SocialRole.Mole:
+                    return "目标：混入警方内部，暗中收集卧底情报，掩护黑帮成员，误导警方搜查方向。";
                 default:
                     return "目标：完成证据链，报告尸体，在会议中投出黑帮线人。";
             }
@@ -1481,6 +2016,8 @@ namespace GanglandUndercover.SocialDeduction
                     return "黑帮";
                 case SocialRole.Undercover:
                     return "卧底";
+                case SocialRole.Mole:
+                    return "线人";
                 default:
                     return "警察";
             }
@@ -1570,7 +2107,9 @@ namespace GanglandUndercover.SocialDeduction
                 .OrderBy(character => Vector3.Distance(player.transform.position, character.transform.position))
                 .FirstOrDefault();
 
-            if (PlayerRole == SocialRole.Gang && target != null)
+            bool isHostileRole = PlayerRole == SocialRole.Gang || PlayerRole == SocialRole.Mole;
+
+            if (isHostileRole && target != null)
             {
                 return playerKillCooldown <= 0f
                     ? "Q 击倒：" + target.CharacterName
@@ -1581,7 +2120,7 @@ namespace GanglandUndercover.SocialDeduction
 
             if (task != null)
             {
-                if (PlayerRole == SocialRole.Gang)
+                if (isHostileRole)
                 {
                     return "E 破坏：" + task.TaskName;
                 }
@@ -1598,6 +2137,23 @@ namespace GanglandUndercover.SocialDeduction
                     : "E 召开紧急会议";
             }
 
+            // 监控站提示
+            if (securityCamera != null && securityCamera.IsPlayerNearMonitor(player.transform.position))
+            {
+                if (securityCamera.IsViewing)
+                {
+                    return "V 切换摄像头 | E 退出";
+                }
+                return "V 查看监控摄像头";
+            }
+
+            // 通风管提示
+            string ventPrompt = BuildVentPrompt();
+            if (!string.IsNullOrEmpty(ventPrompt))
+            {
+                return ventPrompt;
+            }
+
             return "靠近蓝色任务点取证，红色按钮开会，发现尸体按 R。";
         }
 
@@ -1608,13 +2164,29 @@ namespace GanglandUndercover.SocialDeduction
                 return;
             }
 
+            // 查看监控时，镜头锁定在监控站位置
+            if (securityCamera != null && securityCamera.IsViewing)
+            {
+                Vector3 monitorPos = securityCamera.MonitorStationPosition;
+                Vector3 desiredPos = new Vector3(monitorPos.x, monitorPos.y - CameraFollowDistance, -CameraFollowHeight);
+                Camera.main.transform.position = Vector3.Lerp(
+                    Camera.main.transform.position,
+                    desiredPos,
+                    Time.deltaTime * 4f);
+                Camera.main.transform.LookAt(new Vector3(monitorPos.x, monitorPos.y, CameraTargetZ));
+                Camera.main.orthographicSize = Mathf.Lerp(Camera.main.orthographicSize, 6.85f, Time.deltaTime * 4f);
+                Camera.main.nearClipPlane = 0.01f;
+                Camera.main.farClipPlane = 100f;
+                return;
+            }
+
             Vector3 position = player.transform.position;
             Vector3 target = new Vector3(position.x, position.y, CameraTargetZ);
-            Vector3 desired = new Vector3(position.x, position.y - CameraFollowDistance, -CameraFollowHeight);
+            Vector3 desiredCam = new Vector3(position.x, position.y - CameraFollowDistance, -CameraFollowHeight);
 
             Camera.main.transform.position = Vector3.Lerp(
                 Camera.main.transform.position,
-                desired,
+                desiredCam,
                 Time.deltaTime * 4f);
             Camera.main.transform.LookAt(target);
             Camera.main.orthographicSize = Mathf.Lerp(Camera.main.orthographicSize, IsBlackout ? 4.15f : 6.85f, Time.deltaTime * 4f);
@@ -1650,7 +2222,22 @@ namespace GanglandUndercover.SocialDeduction
 
         private void BuildWorld()
         {
+            if (CurrentMapType == MapType.PoliceStation)
+            {
+                BuildPoliceStationWorld();
+                return;
+            }
+
+            // 默认：九龙港区地图
             ConfigureSceneLighting();
+            SetupEnvironment();
+
+            // 初始化灯光天气与装饰系统
+            if (environmentManager != null)
+            {
+                environmentManager.InitializeAllAtmosphereSystems(transform);
+            }
+
             CreateFloor();
             CreateZone("货柜码头", new Vector3(-3.25f, 1.85f, 0f), new Vector2(2.9f, 2.0f));
             CreateZone("夜市巷", new Vector3(0f, 2.05f, 0f), new Vector2(2.7f, 1.9f));
@@ -1668,6 +2255,13 @@ namespace GanglandUndercover.SocialDeduction
             CreateRoom("地下诊所", new Vector3(2.65f, -2f, FloorZ + 0.06f), new Vector3(2.45f, 1.55f, 0.22f), new Color(0.13f, 0.22f, 0.19f, 1f));
             CreateHarborProps();
             CreateWalls();
+            CreateCeilings();
+
+            // ─── 程序化建筑生成（v3）───
+            if (environmentManager != null)
+            {
+                environmentManager.BuildDistrict(transform, generatedObjects);
+            }
             CreateTask("查封货柜", new Vector3(-4f, 1.8f, 0f));
             CreateTask("调取监控", new Vector3(0.1f, 2.6f, 0f));
             CreateTask("修复电闸", new Vector3(3.9f, 1.2f, 0f));
@@ -1678,7 +2272,367 @@ namespace GanglandUndercover.SocialDeduction
             CreateSurveillanceNode("夜市闭路电视", new Vector3(0f, 2.1f, 0f), 1.85f);
             CreateSurveillanceNode("警署路口镜头", new Vector3(3.25f, 1.2f, 0f), 2.0f);
             CreateSurveillanceNode("后巷门禁", new Vector3(0f, -1.8f, 0f), 1.75f);
+            CreateVents();
+            CreateSecuritySystems();
             CreateCharacters();
+            InitTurnMap();
+            InitCriticalTaskSystem();
+        }
+
+        // ─── 警察局地图构建 ──────────────────────────
+
+        private void BuildPoliceStationWorld()
+        {
+            ConfigureSceneLighting();
+            SetupEnvironment();
+
+            // 初始化灯光天气与装饰系统
+            if (environmentManager != null)
+            {
+                environmentManager.InitializeAllAtmosphereSystems(transform);
+            }
+
+            CreateFloor();
+
+            // 6 个区域：大厅 / 审讯室 / 证物室 / 武器库 / 拘留室 / 简报室
+            CreateZone("大厅",   PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Lobby),        PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Lobby));
+            CreateZone("审讯室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Interrogation), PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Interrogation));
+            CreateZone("证物室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Evidence),      PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Evidence));
+            CreateZone("武器库", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Armory),        PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Armory));
+            CreateZone("拘留室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Cells),         PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Cells));
+            CreateZone("简报室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Briefing),      PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Briefing));
+
+            // 走廊（大厅延伸区域）
+            CreateZone("警局走廊", new Vector3(0f, -1.2f, 0f), new Vector2(7.0f, 0.8f));
+
+            // 区域房间渲染
+            foreach (PoliceStationMap.Area area in System.Enum.GetValues(typeof(PoliceStationMap.Area)))
+            {
+                Vector3 center = PoliceStationMap.GetAreaCenter(area);
+                Vector2 size = PoliceStationMap.GetAreaSize(area);
+                Color color = PoliceStationMap.GetAreaColor(area);
+                CreateRoom(PoliceStationMap.GetAreaName(area), new Vector3(center.x, center.y, FloorZ + 0.06f),
+                    new Vector3(size.x - 0.3f, size.y - 0.3f, 0.22f), color);
+            }
+
+            // 走廊标线
+            CreateLane("走廊通道", new Vector3(0f, -1.2f, FloorZ), new Vector3(6.8f, 0.58f, 0.12f));
+
+            // 墙壁
+            CreateWalls();
+
+            // 天花板
+            CreateCeilings();
+
+            // ── 任务站 ──────────────────────────────────────
+            CreateTask("整理档案", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Lobby));
+            CreateTask("审讯记录", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Interrogation));
+            CreateTask("证据归档", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Evidence));
+            CreateTask("武器清点", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Armory));
+            CreateTask("调取监控", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Briefing));
+
+            // ── 紧急按钮 ──────────────────────────────────
+            CreateEmergencyButton(PoliceStationMap.EmergencyButtonPosition);
+
+            // ── 监控节点 ──────────────────────────────────
+            var surveillanceCfgs = PoliceStationMap.GetSurveillanceConfigs();
+            foreach (var cfg in surveillanceCfgs)
+            {
+                CreateSurveillanceNode(cfg.name, cfg.position, cfg.radius);
+            }
+
+            // ── 通风管 ──────────────────────────────────
+            CreatePoliceStationVents();
+
+            // ── 安保系统 ──────────────────────────────────
+            CreateSecuritySystems();
+
+            // ── 角色 ──────────────────────────────────
+            CreateCharacters();
+
+            // ── 回合制地图 ─────────────────────────────
+            InitTurnMap();
+
+            InitCriticalTaskSystem();
+        }
+
+        private void CreatePoliceStationVents()
+        {
+            ventSystem = gameObject.AddComponent<VentSystem>();
+            ventSystem.Bind(
+                onTeleport: pos =>
+                {
+                    if (player != null)
+                    {
+                        player.transform.position = new Vector3(pos.x, pos.y, CharacterZ);
+                    }
+                },
+                getPlayerPosition: () => player != null ? player.transform.position : Vector3.zero,
+                isPlayerGang: () => PlayerRole == SocialRole.Gang || PlayerRole == SocialRole.Mole,
+                isPlayerAlive: () => player != null && player.IsAlive,
+                onSetBlackoutAlpha: alpha => { }
+            );
+
+            var configs = PoliceStationMap.VentConfigs;
+            List<VentNode> ventNodes = new List<VentNode>();
+
+            for (int i = 0; i < configs.Length; i++)
+            {
+                ventNodes.Add(new VentNode(configs[i].name, configs[i].position, configs[i].connections));
+            }
+
+            ventSystem.BuildVisuals(ventNodes, FloorZ);
+        }
+
+        // ─── 紧急任务系统 ─────────────────────────────
+
+        private void InitCriticalTaskSystem()
+        {
+            criticalTaskSystem = gameObject.AddComponent<CriticalTaskSystem>();
+            criticalTaskSystem.OnCriticalTaskStarted += HandleCriticalTaskStarted;
+            criticalTaskSystem.OnCriticalTaskCompleted += HandleCriticalTaskCompleted;
+            criticalTaskSystem.OnCriticalTaskFailed += HandleCriticalTaskFailed;
+            Debug.Log("[SocialPrototypeController] 紧急任务系统已初始化。");
+        }
+
+        private void HandleCriticalTaskStarted(CriticalTaskType type)
+        {
+            // 暂停 AI 操作，所有玩家必须参与修复
+            if (turnController != null)
+            {
+                turnController.PauseAI();
+            }
+            Debug.Log($"[SocialPrototypeController] 紧急任务开始: {type}，AI 已暂停。");
+        }
+
+        private void HandleCriticalTaskCompleted(CriticalTaskType type)
+        {
+            // 恢复 AI 操作
+            if (turnController != null)
+            {
+                turnController.ResumeAI();
+            }
+            Debug.Log($"[SocialPrototypeController] 紧急任务完成: {type}，AI 已恢复。");
+        }
+
+        private void HandleCriticalTaskFailed(CriticalTaskType type)
+        {
+            // 紧急任务失败 → 对应阵营自动失败
+            if (turnController != null)
+            {
+                turnController.ResumeAI();
+            }
+
+            // 根据任务类型触发对应阵营失败
+            // O2 失败 → 所有玩家死亡（黑帮胜利）
+            // Reactor 失败 → 所有玩家死亡（黑帮胜利）
+            // 这里触发游戏结束逻辑
+            Debug.Log($"[SocialPrototypeController] 紧急任务失败: {type}，触发游戏结束。");
+            TriggerGameOverForCriticalFailure(type);
+        }
+
+        private void TriggerGameOverForCriticalFailure(CriticalTaskType type)
+        {
+            // 紧急任务失败 → 黑帮胜利（所有警察/平民死亡）
+            // 这里可以调用 VictoryEvaluator 或直接结束游戏
+            Debug.Log($"[SocialPrototypeController] 紧急任务 {type} 失败，黑帮获胜！");
+            // TODO: 调用 Game Over 逻辑
+        }
+
+        private void TickCriticalTaskSystem()
+        {
+            if (criticalTaskSystem != null && criticalTaskSystem.State == CriticalTaskState.Active)
+            {
+                // O2：空格键连点修复
+                if (criticalTaskSystem.ActiveType == CriticalTaskType.O2)
+                {
+                    if (Input.GetKeyDown(KeyCode.Space))
+                    {
+                        criticalTaskSystem.ClickO2Repair(0.08f);
+                    }
+                }
+
+                // Reactor：Q 按钮A、E 按钮B（需要同时按住 0.6s，重复3次）
+                if (criticalTaskSystem.ActiveType == CriticalTaskType.Reactor)
+                {
+                    criticalTaskSystem.HoldReactorButtonA(Input.GetKey(KeyCode.Q));
+                    criticalTaskSystem.HoldReactorButtonB(Input.GetKey(KeyCode.E));
+                }
+            }
+        }
+
+        /// <summary>公共方法：由 SabotagePanel / 破坏系统触发紧急任务。</summary>
+        public void TriggerCriticalTask(CriticalTaskType type)
+        {
+            if (criticalTaskSystem == null)
+            {
+                Debug.LogError("[SocialPrototypeController] CriticalTaskSystem 未初始化！");
+                return;
+            }
+
+            criticalTaskSystem.Trigger(type);
+        }
+
+        /// <summary>获取当前紧急任务系统（供 UI 读取状态）。</summary>
+        public CriticalTaskSystem GetCriticalTaskSystem() => criticalTaskSystem;
+
+        // ──────────────────────────────────────────────
+        //  通风管系统（Among Us Vent System）
+        // ──────────────────────────────────────────────
+
+        private void CreateVents()
+        {
+            ventSystem = gameObject.AddComponent<VentSystem>();
+            ventSystem.Bind(
+                onTeleport: pos =>
+                {
+                    if (player != null)
+                    {
+                        player.transform.position = new Vector3(pos.x, pos.y, CharacterZ);
+                    }
+                },
+                getPlayerPosition: () => player != null ? player.transform.position : Vector3.zero,
+                isPlayerGang: () => PlayerRole == SocialRole.Gang || PlayerRole == SocialRole.Mole,
+                isPlayerAlive: () => player != null && player.IsAlive,
+                onSetBlackoutAlpha: alpha => { /* 单机版暂不实现黑屏闪烁，预留接口 */ }
+            );
+
+            // 6 个通风管节点，按区域分布，拓扑连接参考 Among Us 逻辑
+            List<VentNode> ventNodes = new List<VentNode>
+            {
+                // 0: 货柜码头 ↔ 夜市巷 / 证物库
+                new VentNode("码头通风管", new Vector3(-3.55f, 1.48f, 0f), 1, 3),
+                // 1: 夜市巷 ↔ 货柜码头 / 专案办公室 / 主街
+                new VentNode("夜市通风管", new Vector3(0.25f, 2.4f, 0f), 0, 2, 5),
+                // 2: 专案办公室 ↔ 夜市巷 / 地下诊所
+                new VentNode("办公室通风管", new Vector3(3.55f, 0.85f, 0f), 1, 4),
+                // 3: 证物库 ↔ 货柜码头 / 地下诊所 / 主街
+                new VentNode("证物库通风管", new Vector3(-2.5f, -2.35f, 0f), 0, 4, 5),
+                // 4: 地下诊所 ↔ 专案办公室 / 证物库
+                new VentNode("诊所通风管", new Vector3(2.35f, -2.45f, 0f), 2, 3),
+                // 5: 主街 ↔ 夜市巷 / 证物库
+                new VentNode("主街通风管", new Vector3(0.5f, -0.25f, 0f), 1, 3)
+            };
+
+            ventSystem.BuildVisuals(ventNodes, FloorZ);
+        }
+
+        private void TickVentSystem()
+        {
+            if (ventSystem == null) return;
+            if (player == null || !player.IsAlive) return;
+            if (!HasStarted || IsMeeting || IsGameOver) return;
+            if (activeTaskChallenge != null || activeMiniGame != null) return;
+
+            ventSystem.Tick();
+        }
+
+        private void TryVentAction()
+        {
+            if (ventSystem == null || player == null || !player.IsAlive) return;
+            if (PlayerRole != SocialRole.Gang && PlayerRole != SocialRole.Mole)
+            {
+                LastEvent = "只有黑帮可以使用通风管。";
+                Changed?.Invoke();
+                return;
+            }
+
+            // 玩家已在通风管中 → 弹目的地选择
+            if (ventSystem.IsInVent || ventSystem.CurrentVentIndex.HasValue)
+            {
+                ShowVentDestinationMenu();
+                return;
+            }
+
+            // 玩家在通风管附近 → 进入
+            if (ventSystem.TryEnterVent())
+            {
+                player.isInsideVent = true;
+                LastEvent = "进入通风管...按下 V 选择目的地，或再次按 V 退出。";
+                Changed?.Invoke();
+                return;
+            }
+
+            // 不在任何通风管附近
+            LastEvent = "附近没有通风管。";
+            Changed?.Invoke();
+        }
+
+        private void ShowVentDestinationMenu()
+        {
+            if (ventSystem == null) return;
+
+            int? currentIdx = ventSystem.CurrentVentIndex;
+            if (!currentIdx.HasValue) return;
+
+            IReadOnlyList<int> dests = ventSystem.AvailableDestinations;
+            if (dests.Count == 0)
+            {
+                LastEvent = "该通风管没有连接其他节点。";
+                Changed?.Invoke();
+                return;
+            }
+
+            // 只有一个目标 → 直接瞬移
+            if (dests.Count == 1)
+            {
+                TravelVent(dests[0]);
+                return;
+            }
+
+            // 多个目标 → 循环选择（简化处理：每次按 V 依次选择）
+            // 复杂交互机在 Update 中通过数字键 1-9 选择
+            // 简化实现：显示提示后，使用回调下一次 V 来选择
+            // 这里采用自动选择最近非当前节点的方式
+            TravelVent(dests[0]);
+        }
+
+        private void TravelVent(int targetIndex)
+        {
+            if (ventSystem == null || player == null) return;
+            if (ventSystem.CooldownRemaining > 0f)
+            {
+                LastEvent = "通风管冷却中：" + Mathf.CeilToInt(ventSystem.CooldownRemaining) + "s";
+                Changed?.Invoke();
+                return;
+            }
+
+            string destinationName = ventSystem.GetNodeName(targetIndex);
+            ventSystem.TravelTo(targetIndex);
+            player.isInsideVent = false;
+            LastEvent = "通过通风管抵达：" + destinationName + "。";
+            Changed?.Invoke();
+        }
+
+        private string BuildVentPrompt()
+        {
+            if (ventSystem == null || player == null || !player.IsAlive) return string.Empty;
+            if (PlayerRole != SocialRole.Gang && PlayerRole != SocialRole.Mole) return string.Empty;
+
+            if (ventSystem.IsInTransition) return "通风管传送中...";
+
+            if (ventSystem.IsInVent || ventSystem.CurrentVentIndex.HasValue)
+            {
+                string destList = "";
+                IReadOnlyList<int> dests = ventSystem.AvailableDestinations;
+                for (int i = 0; i < dests.Count; i++)
+                {
+                    destList += ventSystem.GetNodeName(dests[i]);
+                    if (i < dests.Count - 1) destList += " / ";
+                }
+
+                return "V 传送到：" + destList + " (再按 V 退出)";
+            }
+
+            int? nearestIdx = ventSystem.GetNearestVentIndex();
+            if (nearestIdx.HasValue)
+            {
+                return ventSystem.CooldownRemaining > 0f
+                    ? "V 通风管 冷却：" + Mathf.CeilToInt(ventSystem.CooldownRemaining) + "s"
+                    : "V 使用通风管 → " + ventSystem.GetNodeName(nearestIdx.Value);
+            }
+
+            return string.Empty;
         }
 
         private void ConfigureSceneLighting()
@@ -1842,36 +2796,165 @@ namespace GanglandUndercover.SocialDeduction
 
         private void CreateCharacters()
         {
-            player = CreateCharacter("你", PlayerRole, true, new Vector3(-3.2f, -0.8f, 0f));
+            Vector3 playerSpawn = CurrentMapType == MapType.PoliceStation
+                ? new Vector3(0f, 0.2f, 0f) // 警察局大厅
+                : new Vector3(-3.2f, -0.8f, 0f); // 港区
 
+            player = CreateCharacter("你", PlayerRole, true, playerSpawn);
+
+            if (CurrentMapType == MapType.PoliceStation)
+            {
+                BuildPoliceStationCharacters();
+            }
+            else
+            {
+                BuildGanglandCharacters();
+            }
+        }
+
+        /// <summary>
+        /// 警察局角色分配：更多 Police + Mole，更少 Gang + Undercover。
+        /// 2 Police、1 Undercover、1 Mole，共 4 个 Bot。
+        /// </summary>
+        private void BuildPoliceStationCharacters()
+        {
             List<SocialRole> botRoles = new List<SocialRole>
             {
-                SocialRole.Police,
-                SocialRole.Police,
-                SocialRole.Undercover,
-                SocialRole.Gang
+                SocialRole.Police,     // 警长张
+                SocialRole.Police,     // 巡警王
+                SocialRole.Undercover, // 卧底李
+                SocialRole.Mole        // 线人赵（伪装警察）
+            };
+
+            // 若玩家已选了某个角色，调整 Bot 以保持平衡
+            if (PlayerRole == SocialRole.Police)
+            {
+                botRoles[0] = SocialRole.Mole;
+            }
+            else if (PlayerRole == SocialRole.Mole)
+            {
+                botRoles[3] = SocialRole.Police;
+            }
+            else if (PlayerRole == SocialRole.Undercover)
+            {
+                botRoles[2] = SocialRole.Gang;
+            }
+
+            CreateCharacter("警长张", botRoles[0], false, new Vector3(1.2f, 0.6f, 0f));
+            CreateCharacter("巡警王", botRoles[1], false, new Vector3(-1.4f, -0.6f, 0f));
+            CreateCharacter("卧底李", botRoles[2], false, new Vector3(-2.8f, 1.4f, 0f));
+            CreateCharacter("线人赵", botRoles[3], false, new Vector3(2.6f, 1.2f, 0f));
+        }
+
+        /// <summary>
+        /// 九龙港区角色分配：Police + Undercover + Gang + Mole，各 1 个。
+        /// </summary>
+        private void BuildGanglandCharacters()
+        {
+            List<SocialRole> botRoles = new List<SocialRole>
+            {
+                SocialRole.Police,     // 巡警陈 — 表面警察
+                SocialRole.Undercover, // 线人林 — 伪装为黑帮的警察卧底
+                SocialRole.Gang,       // 疤脸 — 表面黑帮
+                SocialRole.Mole        // 技侦周 — 伪装为警察的黑帮线人
             };
 
             if (PlayerRole == SocialRole.Gang)
+            {
+                botRoles[2] = SocialRole.Police;
+            }
+            else if (PlayerRole == SocialRole.Mole)
             {
                 botRoles[3] = SocialRole.Police;
             }
 
             CreateCharacter("巡警陈", botRoles[0], false, new Vector3(-1.6f, 1.1f, 0f));
-            CreateCharacter("技侦周", botRoles[1], false, new Vector3(1.6f, 1.2f, 0f));
-            CreateCharacter("线人林", botRoles[2], false, new Vector3(2.3f, -1.3f, 0f));
-            CreateCharacter("疤脸", botRoles[3], false, new Vector3(-2.2f, -1.7f, 0f));
+            CreateCharacter("线人林", botRoles[1], false, new Vector3(2.3f, -1.3f, 0f));
+            CreateCharacter("疤脸",   botRoles[2], false, new Vector3(-2.2f, -1.7f, 0f));
+            CreateCharacter("技侦周", botRoles[3], false, new Vector3(1.6f, 1.2f, 0f));
+        }
+
+        private static string GetPrefabPathForRole(SocialRole role, bool isPlayer)
+        {
+            switch (role)
+            {
+                case SocialRole.Police:
+                    return "AssetStore/DenysAlmaral/CityPeople/Prefabs/professions/police_Female_A";
+                case SocialRole.Undercover:
+                    return "AssetStore/DenysAlmaral/CityPeople/Prefabs/city/casual_Male_G";
+                case SocialRole.Gang:
+                    return "AssetStore/DenysAlmaral/CityPeople/Prefabs/downtown/casual_Male_K";
+                case SocialRole.Mole:
+                    return "AssetStore/DenysAlmaral/CityPeople/Prefabs/professions/police_Female_A";
+                default:
+                    return "AssetStore/Synty/PolygonStarter/Prefabs/Characters/SM_Chr_Male_01";
+            }
+        }
+
+        /// <summary>
+        /// Task-Name → AssetStore/Synty/PolygonGeneric 道具资源路径映射。
+        /// </summary>
+        private static string GetTaskPropPath(string taskName)
+        {
+            switch (taskName)
+            {
+                case "查封货柜":
+                    return "AssetStore/Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Crate_02";
+                case "调取监控":
+                    return "AssetStore/Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Screen_01";
+                case "修复电闸":
+                    return "AssetStore/Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Switch_01";
+                case "扫描证物":
+                    return "AssetStore/Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Papers_03";
+                case "上传档案":
+                    return "AssetStore/Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Keypad_01";
+                default:
+                    return null;
+            }
         }
 
         private SocialCharacter CreateCharacter(string characterName, SocialRole role, bool isPlayer, Vector3 position)
         {
-            GameObject characterObject = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            characterObject.name = characterName;
-            generatedObjects.Add(characterObject);
-            characterObject.transform.position = new Vector3(position.x, position.y, CharacterZ);
-            characterObject.transform.localScale = new Vector3(0.42f, 0.42f, 0.82f);
-            characterObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            string prefabPath = GetPrefabPathForRole(role, isPlayer);
+            GameObject prefab = Resources.Load<GameObject>(prefabPath);
+            GameObject characterObject;
 
+            Color roleColor = role == SocialRole.Gang ? new Color(0.72f, 0.22f, 0.16f, 1f)
+                : role == SocialRole.Undercover ? new Color(0.72f, 0.22f, 0.16f, 1f)
+                : role == SocialRole.Mole ? new Color(0.22f, 0.36f, 0.72f, 1f)
+                : new Color(0.22f, 0.36f, 0.72f, 1f);
+
+            if (prefab != null)
+            {
+                // --- 预制体路径 ---
+                characterObject = Instantiate(prefab);
+                characterObject.name = characterName;
+                generatedObjects.Add(characterObject);
+                characterObject.transform.position = new Vector3(position.x, position.y, CharacterZ);
+                characterObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+
+                // 根据 Bounds 自适应缩放（参考 FitCharacterAdapterToPlayer 逻辑）
+                FitCharacterToMap(characterObject);
+
+                // 角色着色：通过 Tint 方式保留原始材质纹理
+                TintCharacterModel(characterObject, roleColor);
+
+                // 配置 Animator：挂载 GanglandCharacter.controller
+                ConfigureCharacterAnimator(characterObject);
+            }
+            else
+            {
+                // --- 回退胶囊体 ---
+                characterObject = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                characterObject.name = characterName;
+                generatedObjects.Add(characterObject);
+                characterObject.transform.position = new Vector3(position.x, position.y, CharacterZ);
+                characterObject.transform.localScale = new Vector3(0.42f, 0.42f, 0.82f);
+                characterObject.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                SetColor(characterObject, roleColor);
+            }
+
+            // --- 阴影 ---
             GameObject shadow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             shadow.name = characterName + " Shadow";
             generatedObjects.Add(shadow);
@@ -1881,23 +2964,154 @@ namespace GanglandUndercover.SocialDeduction
             shadow.transform.localScale = new Vector3(0.74f, 0.035f, 0.48f);
             SetColor(shadow, new Color(0f, 0f, 0f, 0.32f));
 
+            // --- 标签 ---
             TextMesh label = CreateWorldLabel(characterObject.transform, new Vector3(0f, 0.86f, -0.32f), 0.13f);
             label.text = characterName;
 
+            // --- SocialCharacter 组件绑定 ---
             SocialCharacter character = characterObject.AddComponent<SocialCharacter>();
-            character.Bind(characterName, role, isPlayer);
+            if (prefab != null)
+            {
+                character.BindForPrefab(characterName, role, isPlayer);
+            }
+            else
+            {
+                character.Bind(characterName, role, isPlayer);
+            }
+
             characters.Add(character);
             return character;
         }
 
+        /// <summary>
+        /// 根据角色模型 Bounds 自适应缩放（参照 OnlineMatchController.FitCharacterAdapterToPlayer 逻辑）。
+        /// </summary>
+        private static void FitCharacterToMap(GameObject model)
+        {
+            model.transform.localScale = Vector3.one;
+
+            Renderer[] allRenderers = model.GetComponentsInChildren<Renderer>(true);
+            if (allRenderers == null || allRenderers.Length == 0)
+            {
+                model.transform.localScale = new Vector3(0.42f, 0.42f, 0.82f);
+                return;
+            }
+
+            Bounds combined = allRenderers[0].bounds;
+            for (int i = 1; i < allRenderers.Length; i++)
+            {
+                combined.Encapsulate(allRenderers[i].bounds);
+            }
+
+            float largest = Mathf.Max(combined.size.x, combined.size.y, combined.size.z);
+            float factor = largest > 0.001f ? 0.82f / largest : 0.18f;
+            float clamped = Mathf.Clamp(factor, 0.04f, 0.32f);
+            model.transform.localScale = Vector3.one * clamped;
+        }
+
+        /// <summary>
+        /// Tint 着色：将现有材质颜色向 roleColor 方向混合，保留原始纹理/贴图。
+        /// 参照 OnlineMatchController.TintCharacterAdapter 逻辑精简版。
+        /// </summary>
+        private static void TintCharacterModel(GameObject model, Color roleColor)
+        {
+            Renderer[] allRenderers = model.GetComponentsInChildren<Renderer>(true);
+            if (allRenderers == null)
+            {
+                return;
+            }
+
+            foreach (Renderer renderer in allRenderers)
+            {
+                Material material = renderer.material;
+                if (material == null)
+                {
+                    continue;
+                }
+
+                Color current = material.color;
+                Color tinted = Color.Lerp(current, roleColor, 0.28f);
+                material.color = new Color(tinted.r, tinted.g, tinted.b, current.a);
+            }
+        }
+
+        /// <summary>
+        /// 为角色 GameObject 配置 Animator 并挂载 GanglandCharacter.controller。
+        /// </summary>
+        private void ConfigureCharacterAnimator(GameObject characterObject)
+        {
+            Animator animator = characterObject.GetComponentInChildren<Animator>();
+            if (animator == null)
+            {
+                animator = characterObject.AddComponent<Animator>();
+            }
+
+            RuntimeAnimatorController controller = LoadGanglandCharacterController();
+            if (controller != null)
+            {
+                animator.runtimeAnimatorController = controller;
+                animator.applyRootMotion = false;
+                animator.cullingMode = AnimatorCullingMode.CullUpdateTransforms;
+            }
+
+            SocialCharacter character = characterObject.GetComponent<SocialCharacter>();
+            if (character != null)
+            {
+                character.BindAnimator(animator);
+            }
+        }
+
+        /// <summary>
+        /// 加载 GanglandCharacter.controller（通过 GUID: 1f860609e221b48e6a101a78e9c6f70e）。
+        /// Editor 下走 AssetDatabase.GUIDToAssetPath，运行时通过 Resources 回退。
+        /// </summary>
+        private static RuntimeAnimatorController LoadGanglandCharacterController()
+        {
+            const string controllerGuid = "1f860609e221b48e6a101a78e9c6f70e";
+
+#if UNITY_EDITOR
+            string assetPath = UnityEditor.AssetDatabase.GUIDToAssetPath(controllerGuid);
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                RuntimeAnimatorController controller =
+                    UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(assetPath);
+                if (controller != null)
+                {
+                    return controller;
+                }
+            }
+#endif
+            // Runtime 回退：尝试 Resources 路径
+            return Resources.Load<RuntimeAnimatorController>("Art/Animators/GanglandCharacter");
+        }
+
         private void CreateTask(string taskName, Vector3 position)
         {
+            // --- 基础任务站方块（保留作为交互底板）---
             GameObject taskObject = GameObject.CreatePrimitive(PrimitiveType.Cube);
             taskObject.name = taskName;
             generatedObjects.Add(taskObject);
             taskObject.transform.position = new Vector3(position.x, position.y, CharacterZ + 0.1f);
             taskObject.transform.localScale = new Vector3(0.82f, 0.62f, 0.42f);
 
+            // --- 3D 道具模型 ---
+            string propPath = GetTaskPropPath(taskName);
+            if (!string.IsNullOrEmpty(propPath))
+            {
+                GameObject propPrefab = Resources.Load<GameObject>(propPath);
+                if (propPrefab != null)
+                {
+                    GameObject propModel = Instantiate(propPrefab);
+                    propModel.name = taskName + " Prop";
+                    generatedObjects.Add(propModel);
+                    propModel.transform.SetParent(taskObject.transform, false);
+                    propModel.transform.localPosition = new Vector3(0f, 0f, -0.65f);
+                    propModel.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
+                    propModel.transform.localScale = Vector3.one * 0.52f;
+                }
+            }
+
+            // --- 屏幕指示器 ---
             GameObject screen = GameObject.CreatePrimitive(PrimitiveType.Cube);
             screen.name = taskName + " Screen";
             generatedObjects.Add(screen);
@@ -1978,6 +3192,7 @@ namespace GanglandUndercover.SocialDeduction
 
         private void CreateRoom(string roomName, Vector3 position, Vector3 scale, Color color)
         {
+            // --- 基础方块（保留作为底板）---
             GameObject room = GameObject.CreatePrimitive(PrimitiveType.Cube);
             room.name = roomName;
             generatedObjects.Add(room);
@@ -1985,14 +3200,31 @@ namespace GanglandUndercover.SocialDeduction
             room.transform.localScale = scale;
             SetColor(room, color);
 
+            // --- 尝试加载 AssetStore 墙面装饰 ---
+            string wallPrefabPath = "AssetStore/Synty/PolygonGeneric/Prefabs/Base/SM_Bld_Base_Wall_Half_02";
+            GameObject wallPrefab = Resources.Load<GameObject>(wallPrefabPath);
+            if (wallPrefab != null)
+            {
+                // 北墙装饰
+                PlaceRoomDecor(room.transform, wallPrefab, roomName + " North Wall", new Vector3(0f, 0.52f, -0.72f), new Vector3(1f, 0.85f, 0.35f));
+                // 南墙装饰
+                PlaceRoomDecor(room.transform, wallPrefab, roomName + " South Wall", new Vector3(0f, -0.52f, -0.72f), new Vector3(1f, 0.85f, 0.35f));
+            }
+
             TextMesh label = CreateWorldLabel(room.transform, new Vector3(0f, 0f, LabelZ), 0.12f);
             label.text = roomName;
             label.color = new Color(0.86f, 0.82f, 0.68f, 1f);
+        }
 
-            CreateRoomTrim(room.transform, roomName + " North Trim", new Vector3(0f, 0.52f, -0.72f), new Vector3(1f, 0.05f / Mathf.Max(0.01f, scale.y), 0.58f / Mathf.Max(0.01f, scale.z)));
-            CreateRoomTrim(room.transform, roomName + " South Trim", new Vector3(0f, -0.52f, -0.72f), new Vector3(1f, 0.05f / Mathf.Max(0.01f, scale.y), 0.58f / Mathf.Max(0.01f, scale.z)));
-            CreateRoomTrim(room.transform, roomName + " West Trim", new Vector3(-0.52f, 0f, -0.72f), new Vector3(0.05f / Mathf.Max(0.01f, scale.x), 1f, 0.58f / Mathf.Max(0.01f, scale.z)));
-            CreateRoomTrim(room.transform, roomName + " East Trim", new Vector3(0.52f, 0f, -0.72f), new Vector3(0.05f / Mathf.Max(0.01f, scale.x), 1f, 0.58f / Mathf.Max(0.01f, scale.z)));
+        private void PlaceRoomDecor(Transform parent, GameObject prefab, string name, Vector3 localPosition, Vector3 localScale)
+        {
+            GameObject decor = Instantiate(prefab);
+            decor.name = name;
+            generatedObjects.Add(decor);
+            decor.transform.SetParent(parent, false);
+            decor.transform.localPosition = localPosition;
+            decor.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
+            decor.transform.localScale = localScale;
         }
 
         private void CreateRoomTrim(Transform parent, string trimName, Vector3 localPosition, Vector3 localScale)
@@ -2032,6 +3264,84 @@ namespace GanglandUndercover.SocialDeduction
             CreateWall("South Wall", new Vector3(0f, -3.55f, 0f), new Vector3(10.4f, 0.18f, 0.35f));
             CreateWall("West Wall", new Vector3(-5.1f, 0f, 0f), new Vector3(0.18f, 7.2f, 0.35f));
             CreateWall("East Wall", new Vector3(5.1f, 0f, 0f), new Vector3(0.18f, 7.2f, 0.35f));
+        }
+
+        // ──────────────────────────────────────────────
+        //  环境管理（EnvironmentManager）
+        // ──────────────────────────────────────────────
+
+        private void SetupEnvironment()
+        {
+            if (environmentManager != null) return;
+
+            GameObject envObj = new GameObject("Environment Manager");
+            generatedObjects.Add(envObj);
+            environmentManager = envObj.AddComponent<EnvironmentManager>();
+
+            // 设置雾效
+            environmentManager.SetupFog();
+
+            // 创建区域氛围灯光（暖/冷/红）
+            environmentManager.CreateZoneAreaLights(transform, generatedObjects);
+        }
+
+        // ──────────────────────────────────────────────
+        //  天花板 / 屋顶
+        // ──────────────────────────────────────────────
+
+        private void CreateCeilings()
+        {
+            // 为 5 个房间添加天花板（Synty SM_Bld_Base_Ceiling_01）
+            string ceilingPrefabPath = "AssetStore/Synty/PolygonGeneric/Prefabs/Base/SM_Bld_Base_Ceiling_01";
+            GameObject ceilingPrefab = Resources.Load<GameObject>(ceilingPrefabPath);
+
+            var roomConfigs = new List<(string name, Vector3 center, Vector2 size)>
+            {
+                ("货柜码头", new Vector3(-3.25f, 1.85f, 0f), new Vector2(2.55f, 1.8f)),
+                ("夜市巷",   new Vector3(0f, 2.05f, 0f),     new Vector2(2.35f, 1.55f)),
+                ("专案办公室", new Vector3(3.25f, 1.25f, 0f), new Vector2(2.2f, 1.8f)),
+                ("证物库",   new Vector3(-2.8f, -1.9f, 0f),  new Vector2(2.35f, 1.55f)),
+                ("地下诊所", new Vector3(2.65f, -2f, 0f),    new Vector2(2.45f, 1.55f)),
+            };
+
+            foreach (var cfg in roomConfigs)
+            {
+                if (ceilingPrefab != null)
+                {
+                    GameObject ceiling = Instantiate(ceilingPrefab);
+                    ceiling.name = cfg.name + " Ceiling";
+                    generatedObjects.Add(ceiling);
+                    ceiling.transform.position = new Vector3(cfg.center.x, cfg.center.y, FloorZ + 0.38f);
+                    ceiling.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
+                    float scaleX = cfg.size.x / 2.5f; // 标准 prefab 约 2.5 单位宽
+                    float scaleY = cfg.size.y / 2.5f;
+                    ceiling.transform.localScale = new Vector3(scaleX, scaleY, 1f);
+                }
+                else
+                {
+                    // 回退：简单 Plane
+                    GameObject plane = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    plane.name = cfg.name + " Ceiling (Fallback)";
+                    generatedObjects.Add(plane);
+                    plane.transform.position = new Vector3(cfg.center.x, cfg.center.y, FloorZ + 0.38f);
+                    plane.transform.localScale = new Vector3(cfg.size.x, cfg.size.y, 0.06f);
+                    SetColor(plane, new Color(0.18f, 0.16f, 0.14f, 1f));
+                }
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        //  监控摄像头系统（SecurityCamera）
+        // ──────────────────────────────────────────────
+
+        private void CreateSecuritySystems()
+        {
+            if (securityCamera != null) return;
+
+            GameObject secObj = new GameObject("Security Camera System");
+            generatedObjects.Add(secObj);
+            securityCamera = secObj.AddComponent<SecurityCamera>();
+            securityCamera.Initialize(this, generatedObjects);
         }
 
         private void CreateWall(string wallName, Vector3 position, Vector3 scale)
@@ -2103,6 +3413,27 @@ namespace GanglandUndercover.SocialDeduction
             emergencyButton = null;
             activeTaskChallenge = null;
             currentPrimarySuspect = null;
+            CleanupMiniGame();
+
+            if (ventSystem != null)
+            {
+                ventSystem.ClearVisuals();
+                DestroyGenerated(ventSystem);
+                ventSystem = null;
+            }
+
+            if (securityCamera != null)
+            {
+                securityCamera.Cleanup();
+                DestroyGenerated(securityCamera);
+                securityCamera = null;
+            }
+
+            if (environmentManager != null)
+            {
+                DestroyGenerated(environmentManager);
+                environmentManager = null;
+            }
         }
 
         private static void DestroyGenerated(GameObject generated)
@@ -2140,6 +3471,272 @@ namespace GanglandUndercover.SocialDeduction
                 Mathf.Clamp(position.x, -4.55f, 4.55f),
                 Mathf.Clamp(position.y, -3.05f, 3.05f),
                 position.z);
+        }
+
+        // ──────────────────────────────────────────────
+        //  回合制策略层桥接
+        // ──────────────────────────────────────────────
+
+        private void InitTurnController()
+        {
+            turnController = new GameController();
+            turnController.Changed += OnTurnStateChanged;
+        }
+
+        private void InitTurnHud()
+        {
+            if (turnHudObject != null)
+            {
+                DestroyGenerated(turnHudObject);
+            }
+
+            turnHudObject = new GameObject("Turn Prototype HUD");
+            PrototypeHud hud = turnHudObject.AddComponent<PrototypeHud>();
+            hud.Bind(turnController);
+        }
+
+        private void InitTurnMap()
+        {
+            if (turnMapObject != null)
+            {
+                DestroyGenerated(turnMapObject);
+            }
+
+            turnMapObject = new GameObject("District Map View");
+            DistrictMapView mapView = turnMapObject.AddComponent<DistrictMapView>();
+            mapView.Bind(turnController);
+        }
+
+        private void OnTurnStateChanged()
+        {
+            GameState state = turnController.State;
+
+            if (state.Phase == GamePhase.PlayerTurn)
+            {
+                IsMeeting = false;
+                string factionName = state.PlayerFaction == Faction.Gang ? "黑帮" :
+                    state.PlayerFaction == Faction.Undercover ? "卧底" : "警察";
+                LastEvent = "第" + state.Day + "天 " + factionName + " 回合 —— 选择区域执行行动。";
+            }
+            else if (state.Phase == GamePhase.AiTurn)
+            {
+                IsMeeting = false;
+                LastEvent = "对手行动中...";
+            }
+            else if (state.Phase == GamePhase.Meeting)
+            {
+                // 会议阶段：自动执行 AI 投票并同步淘汰
+                if (turnController.ShouldHoldMeeting)
+                {
+                    turnController.RunMeeting();
+                    SyncTurnElimination();
+
+                    // RunMeeting 可能触发 GameOver
+                    if (turnController.State.Phase == GamePhase.GameOver)
+                    {
+                        IsGameOver = true;
+                        LastEvent = turnController.State.Result;
+                        Changed?.Invoke();
+                        return;
+                    }
+                }
+                // RunMeeting 内部已调用 AdvanceToNextDay → Changed，无需再触发
+                return;
+            }
+            else if (state.Phase == GamePhase.GameOver)
+            {
+                IsGameOver = true;
+                LastEvent = state.Result;
+            }
+
+            Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// 根据当前选中角色执行回合动作：移动到目标区域并生效。
+        /// </summary>
+        public void ExecuteTurnAction(SocialCharacter character, DistrictType districtType, PlayerAction action)
+        {
+            if (turnController == null || character == null || !character.IsAlive) return;
+
+            GameState state = turnController.State;
+            if (state.Phase != GamePhase.PlayerTurn) return;
+
+            DistrictState district = state.GetDistrict(districtType);
+            turnController.SelectDistrict(districtType);
+
+            // 3D 角色移动到区域
+            Vector3 worldPos = GetDistrictWorldPosition(districtType);
+            character.transform.position = new Vector3(worldPos.x, worldPos.y, CharacterZ);
+            LastEvent = character.CharacterName + " 前往 " + district.DisplayName + "。";
+
+            // 执行策略动作
+            turnController.RunPlayerAction(districtType, action);
+
+            Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// 回合制会议：从存活角色中投票。
+        /// 通过 GameController.ForceMeeting() 触发官方会议流程。
+        /// </summary>
+        public void StartTurnMeeting()
+        {
+            if (turnController == null) return;
+
+            // 强制触发会议（绕过天数额定检查）
+            turnController.ForceMeeting();
+
+            IsMeeting = true;
+            LastEvent = "紧急会议开始 —— 选择一个怀疑对象投票。";
+            Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// 会议投票（玩家手动投票）。
+        /// 将投票同步到 GameController 并淘汰目标。
+        /// </summary>
+        public void CastTurnVote(SocialCharacter target)
+        {
+            if (!IsMeeting || target == null || !target.IsAlive) return;
+
+            // 通过 GameController 走官方会议投票流程（双向渗透模型）
+            if (turnController != null && turnController.State.Phase == GamePhase.Meeting)
+            {
+                turnController.PlayerCastVote(target.Role);
+            }
+
+            target.Kill();
+            IsMeeting = false;
+            RemoveBodiesFor(target);
+
+            string outcome = target.CharacterName + " 被投出局，身份是：" + RoleName(target.Role) + "。";
+            LastEvent = outcome;
+            AddCaseLog("会议投票", outcome);
+
+            if (target.IsPlayer)
+            {
+                FinishGame(PlayerRole == SocialRole.Gang
+                    ? "警方胜利：你的黑帮身份被投出局。"
+                    : "行动失败：你被投出局，港区收网失去关键执行人。");
+                Changed?.Invoke();
+                return;
+            }
+
+            CheckVictory();
+            Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// 跳过投票。
+        /// </summary>
+        public void SkipTurnVote()
+        {
+            IsMeeting = false;
+            LastEvent = "会议无结果，继续行动。";
+            AddCaseLog("会议投票", "跳过投票。");
+            Changed?.Invoke();
+        }
+
+        /// <summary>
+        /// 同步回合制淘汰结果到实时 3D 世界：按 SocialRole 逐个处理淘汰角色。
+        /// （双向渗透模型：会议投票淘汰单个角色而非整个阵营）
+        /// </summary>
+        private void SyncTurnElimination()
+        {
+            GameState state = turnController.State;
+
+            foreach (SocialCharacter character in characters)
+            {
+                if (!character.IsAlive) continue;
+
+                bool shouldEliminate = false;
+                switch (character.Role)
+                {
+                    case SocialRole.Gang when state.GangEliminated: shouldEliminate = true; break;
+                    case SocialRole.Police when state.PoliceEliminated: shouldEliminate = true; break;
+                    case SocialRole.Undercover when state.UndercoverEliminated: shouldEliminate = true; break;
+                    case SocialRole.Mole when state.MoleEliminated: shouldEliminate = true; break;
+                }
+
+                if (!shouldEliminate) continue;
+
+                character.Kill();
+                RemoveBodiesFor(character);
+                string roleLabel = RoleName(character.Role);
+                LastEvent = character.CharacterName + "（" + roleLabel + "）在会议中被淘汰。";
+                AddCaseLog("会议投票", character.CharacterName + " 被投出局，身份：" + roleLabel + "。");
+
+                if (character.IsPlayer)
+                {
+                    bool isPlayerGangSide = PlayerRole == SocialRole.Gang || PlayerRole == SocialRole.Mole;
+                    FinishGame(isPlayerGangSide
+                        ? "警方胜利：你的黑帮身份在会议中被投出局。"
+                        : "行动失败：你在会议中被淘汰，港区行动失去关键执行人。");
+                    return;
+                }
+
+                break;
+            }
+
+            CheckVictory();
+        }
+
+        /// <summary>
+        /// 区域名 → DistrictType。
+        /// </summary>
+        private static DistrictType GetDistrictForZone(string zoneName)
+        {
+            switch (zoneName)
+            {
+                case "货柜码头": return DistrictType.Dockyard;
+                case "夜市巷": return DistrictType.NightMarket;
+                case "专案办公室": return DistrictType.PolicePrecinct;
+                case "证物库": return DistrictType.WarehouseRow;
+                case "地下诊所": return DistrictType.Clinic;
+                case "主街": return DistrictType.TenementBlock;
+                default: return DistrictType.Dockyard;
+            }
+        }
+
+        /// <summary>
+        /// DistrictType → 3D 世界坐标。
+        /// </summary>
+        private static Vector3 GetDistrictWorldPosition(DistrictType type)
+        {
+            switch (type)
+            {
+                case DistrictType.Dockyard: return new Vector3(-3.25f, 1.85f, 0f);
+                case DistrictType.WarehouseRow: return new Vector3(-2.8f, -1.9f, 0f);
+                case DistrictType.NightMarket: return new Vector3(0f, 2.05f, 0f);
+                case DistrictType.PolicePrecinct: return new Vector3(3.25f, 1.25f, 0f);
+                case DistrictType.Clinic: return new Vector3(2.65f, -2f, 0f);
+                case DistrictType.TenementBlock: return new Vector3(0f, 0.05f, 0f);
+                default: return Vector3.zero;
+            }
+        }
+
+        private static Faction GetFactionForRole(SocialRole role)
+        {
+            switch (role)
+            {
+                case SocialRole.Gang: return Faction.Gang;
+                case SocialRole.Police: return Faction.Police;
+                case SocialRole.Undercover: return Faction.Undercover;
+                case SocialRole.Mole: return Faction.Gang;
+                default: return Faction.Police;
+            }
+        }
+
+        private static SocialRole GetRoleForFaction(Faction faction)
+        {
+            switch (faction)
+            {
+                case Faction.Gang: return SocialRole.Gang;
+                case Faction.Police: return SocialRole.Police;
+                case Faction.Undercover: return SocialRole.Undercover;
+                default: return SocialRole.Police;
+            }
         }
 
         private sealed class FootprintTrail : MonoBehaviour
@@ -2223,6 +3820,29 @@ namespace GanglandUndercover.SocialDeduction
             public string NodeName { get; }
             public Vector3 Position { get; }
             public float Radius { get; }
+        }
+
+        // ─── 阵营判断辅助 ──────────────────────────────
+
+        /// <summary>判断两个角色是否属于同一阵营（卧底+警察为友方，黑帮为敌方）。</summary>
+        private static bool IsSameFaction(SocialRole a, SocialRole b)
+        {
+            Faction fa = GetFaction(a);
+            Faction fb = GetFaction(b);
+            return fa == fb;
+        }
+
+        /// <summary>将 SocialRole 映射到 Faction。</summary>
+        private static Faction GetFaction(SocialRole role)
+        {
+            return role switch
+            {
+                SocialRole.Gang       => Faction.Gang,
+                SocialRole.Undercover => Faction.Undercover,
+                SocialRole.Police     => Faction.Police,
+                SocialRole.Mole       => Faction.Gang,
+                _                    => Faction.None,
+            };
         }
     }
 }

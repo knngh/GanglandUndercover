@@ -4,6 +4,8 @@ namespace GanglandUndercover.Core
     {
         Gang,
         Police,
-        Undercover
+        Undercover,
+        Mole,
+        None
     }
 }

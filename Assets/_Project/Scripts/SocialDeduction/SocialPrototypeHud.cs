@@ -182,6 +182,7 @@ namespace GanglandUndercover.SocialDeduction
                 AddButton(T("卧底", "Undercover"), () => controller.StartGame(SocialRole.Undercover), 42f);
                 AddButton(T("警察", "Police"), () => controller.StartGame(SocialRole.Police), 42f);
                 AddButton(T("黑帮", "Gang"), () => controller.StartGame(SocialRole.Gang), 42f);
+                AddButton(T("线人", "Mole"), () => controller.StartGame(SocialRole.Mole), 42f);
                 AddButton(LanguageLabel(), controller.ToggleLanguage, 46f);
                 return;
             }
@@ -192,6 +193,7 @@ namespace GanglandUndercover.SocialDeduction
                 AddButton(T("卧底开局", "Undercover Run"), () => controller.StartGame(SocialRole.Undercover), 42f);
                 AddButton(T("警察开局", "Police Run"), () => controller.StartGame(SocialRole.Police), 42f);
                 AddButton(T("黑帮开局", "Gang Run"), () => controller.StartGame(SocialRole.Gang), 42f);
+                AddButton(T("线人开局", "Mole Run"), () => controller.StartGame(SocialRole.Mole), 42f);
                 AddButton(LanguageLabel(), controller.ToggleLanguage, 42f);
                 return;
             }
@@ -227,6 +229,7 @@ namespace GanglandUndercover.SocialDeduction
             AddButton(T("卧底开局", "Undercover Run"), () => controller.StartGame(SocialRole.Undercover), 46f);
             AddButton(T("警察开局", "Police Run"), () => controller.StartGame(SocialRole.Police), 46f);
             AddButton(T("黑帮开局", "Gang Run"), () => controller.StartGame(SocialRole.Gang), 46f);
+            AddButton(T("线人开局", "Mole Run"), () => controller.StartGame(SocialRole.Mole), 46f);
             AddButton(LanguageLabel(), controller.ToggleLanguage, 46f);
         }
 
@@ -314,7 +317,7 @@ namespace GanglandUndercover.SocialDeduction
 
         private string BuildGameInfo()
         {
-            string killText = controller.PlayerRole == SocialRole.Gang
+            string killText = (controller.PlayerRole == SocialRole.Gang || controller.PlayerRole == SocialRole.Mole)
                 ? T("Q 击倒", "Q Kill") + " " + Mathf.CeilToInt(controller.PlayerKillCooldown) + "s"
                 : T("Q 不可用", "Q Disabled");
 
@@ -397,6 +400,8 @@ namespace GanglandUndercover.SocialDeduction
                     return T("黑帮", "Gang");
                 case SocialRole.Undercover:
                     return T("卧底", "Undercover");
+                case SocialRole.Mole:
+                    return T("线人", "Mole");
                 default:
                     return T("警察", "Police");
             }

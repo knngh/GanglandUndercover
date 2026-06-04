@@ -1,0 +1,12 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1108 &11080000
+AnimatorOverrideController:
+  serializedVersion: 3
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: GanglandCharacter_Override
+  m_RuntimeAnimatorController: {fileID: 9100000, guid: 1f860609e221b48e6a101a78e9c6f70e, type: 2}
+  m_Clips: []

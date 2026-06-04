@@ -5,6 +5,7 @@ namespace GanglandUndercover.Online
         Unassigned,
         Police,
         Undercover,
-        Gang
+        Gang,
+        Mole
     }
 }

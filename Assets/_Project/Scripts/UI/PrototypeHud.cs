@@ -1,323 +1,535 @@
-using System.Collections.Generic;
 using GanglandUndercover.Core;
 using GanglandUndercover.Gameplay;
+using GanglandUndercover.SocialDeduction;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace GanglandUndercover.UI
 {
+    /// <summary>
+    /// 游戏内 HUD — Among Us 太空主题 v2。
+    /// 左上角：角色头像框（阵营色边框） + 状态指示器。
+    /// 右上角：证据/情报进度条 + 回合计数。
+    /// 底部：任务列表卡片式布局，完成项打勾划线。
+    /// 行动按钮（通风管/击杀/Sabotage）统一霓虹风格。
+    /// </summary>
     public sealed class PrototypeHud : MonoBehaviour
     {
-        private readonly List<Button> districtButtons = new List<Button>();
-        private readonly List<Button> actionButtons = new List<Button>();
+        // ─── 主题色 ────────────────────────────────────────────
+        private static Color BgDark        => ThemeManager.BackgroundDark;
+        private static Color PanelBg       => ThemeManager.PanelBackground;
+        private static Color UndercoverBlue=> ThemeManager.UndercoverBlue;
+        private static Color DangerRed     => ThemeManager.DangerRed;
+        private static Color PoliceGray    => ThemeManager.PoliceGray;
+        private static Color MoleTeal      => ThemeManager.MoleTeal;
+        private static Color NeonCyan      => ThemeManager.NeonCyan;
+        private static Color TitleGold     => ThemeManager.TitleGold;
+        private static Color TextPrimary   => ThemeManager.TextPrimary;
+        private static Color TextMuted     => ThemeManager.TextMuted;
+        private static Color SafeGreen     => ThemeManager.SafeGreen;
 
-        private GameController controller;
-        private Text headerText;
-        private Text statsText;
-        private Text logText;
-        private Text roleIntroText;
-        private Text languageButtonText;
-        private Transform districtList;
-        private Transform actionList;
-        private GameObject rolePanel;
-        private GameObject gamePanel;
+        private GameController _controller;
+        private Canvas _canvas;
 
-        public void Bind(GameController gameController)
+        // UI 元素引用
+        private Text _roleAvatarIcon;
+        private Image _roleAvatarFrame;
+        private Text _playerNameText;
+        private Text _factionText;
+        private Text _statusIndicator;
+        private Text _dayText;
+        private Text _evidenceText;
+        private Image _evidenceBarFill;
+        private Text _intelText;
+        private Image _intelBarFill;
+        private GameObject _taskListRoot;
+        private RectTransform _taskListContent;
+        private Text _infoText;
+
+        public void Bind(GameController controller)
         {
-            controller = gameController;
-            controller.Changed += Rebuild;
+            _controller = controller;
+            _controller.Changed += Refresh;
             BuildLayout();
-            Rebuild();
+            Refresh();
         }
 
         private void OnDestroy()
         {
-            if (controller != null)
-            {
-                controller.Changed -= Rebuild;
-            }
+            if (_controller != null)
+                _controller.Changed -= Refresh;
         }
 
+        // ══════════════════════════════════════════════════════
+        // 布局构建
+        // ══════════════════════════════════════════════════════
         private void BuildLayout()
         {
-            Canvas canvas = gameObject.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-
-            CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1280f, 720f);
-
+            _canvas = gameObject.AddComponent<Canvas>();
+            _canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            var cs = gameObject.AddComponent<CanvasScaler>();
+            cs.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            cs.referenceResolution = new Vector2(1920f, 1080f);
             gameObject.AddComponent<GraphicRaycaster>();
 
-            GameObject root = CreatePanel("Root", transform, new Color(0.08f, 0.08f, 0.07f, 0f));
-            Stretch(root.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            // ── 顶部栏 ───────────────────────────────────────
+            var topBar = Panel("TopBar", transform, ThemeManager.WithAlpha(BgDark, 0.88f));
+            Stretch(topBar, new Vector2(0f, 0.92f), Vector2.one, Vector2.zero, Vector2.zero);
 
-            headerText = CreateText("Header", root.transform, 28, TextAnchor.MiddleCenter);
-            Stretch(headerText.GetComponent<RectTransform>(), new Vector2(0f, 0.88f), Vector2.one, new Vector2(16f, 0f), new Vector2(-16f, -8f));
+            BuildAvatar(topBar.transform);
+            BuildCenterInfo(topBar.transform);
+            BuildRightPanel(topBar.transform);
 
-            rolePanel = CreatePanel("RolePanel", root.transform, new Color(0.13f, 0.12f, 0.1f, 1f));
-            Stretch(rolePanel.GetComponent<RectTransform>(), new Vector2(0.25f, 0.24f), new Vector2(0.75f, 0.82f), Vector2.zero, Vector2.zero);
+            // ── 底部行动栏 ──────────────────────────────────
+            var bottomBar = Panel("BottomBar", transform, ThemeManager.WithAlpha(BgDark, 0.88f));
+            Stretch(bottomBar, Vector2.zero, new Vector2(1f, 0.08f), Vector2.zero, Vector2.zero);
 
-            VerticalLayoutGroup roleLayout = rolePanel.AddComponent<VerticalLayoutGroup>();
-            roleLayout.padding = new RectOffset(24, 24, 24, 24);
-            roleLayout.spacing = 16;
+            // 顶部亮线
+            var topLine = Panel("BottomLine", bottomBar.transform, NeonCyan);
+            Stretch(topLine, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -2f), Vector2.zero);
 
-            roleIntroText = CreateText("RoleIntro", rolePanel.transform, 20, TextAnchor.MiddleCenter);
-            roleIntroText.gameObject.AddComponent<LayoutElement>().preferredHeight = 56;
+            BuildActionButtons(bottomBar.transform);
 
-            CreateRoleButton(Faction.Gang);
-            CreateRoleButton(Faction.Police);
-            CreateRoleButton(Faction.Undercover);
+            // ── 左侧信息面板 ────────────────────────────────
+            var sidePanel = Panel("SidePanel", transform, ThemeManager.WithAlpha(PanelBg, 0.9f));
+            Stretch(sidePanel, new Vector2(0.01f, 0.09f), new Vector2(0.19f, 0.91f), Vector2.zero, Vector2.zero);
 
-            gamePanel = CreatePanel("GamePanel", root.transform, new Color(0.11f, 0.11f, 0.1f, 1f));
-            Stretch(gamePanel.GetComponent<RectTransform>(), new Vector2(0.04f, 0.06f), new Vector2(0.96f, 0.86f), Vector2.zero, Vector2.zero);
-            gamePanel.GetComponent<Image>().color = new Color(0.11f, 0.11f, 0.1f, 0f);
+            // 边框
+            var sFrame = Panel("SideFrame", sidePanel.transform, NeonCyan);
+            Stretch(sFrame, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-2f, 0f), Vector2.zero);
 
-            districtList = CreateColumn("Districts", gamePanel.transform, new Vector2(0f, 0.1f), new Vector2(0.28f, 1f));
-            actionList = CreateColumn("Actions", gamePanel.transform, new Vector2(0.72f, 0.42f), new Vector2(1f, 1f));
+            BuildTaskList(sidePanel.transform);
 
-            statsText = CreateText("Stats", gamePanel.transform, 16, TextAnchor.UpperLeft);
-            Stretch(statsText.GetComponent<RectTransform>(), new Vector2(0.72f, 0.12f), new Vector2(1f, 0.4f), new Vector2(8f, 8f), new Vector2(-8f, -8f));
+            // ── 右侧信息面板 ────────────────────────────────
+            var rightPanel = Panel("RightPanel", transform, ThemeManager.WithAlpha(PanelBg, 0.9f));
+            Stretch(rightPanel, new Vector2(0.81f, 0.09f), new Vector2(0.99f, 0.91f), Vector2.zero, Vector2.zero);
 
-            logText = CreateText("Log", gamePanel.transform, 15, TextAnchor.UpperLeft);
-            Stretch(logText.GetComponent<RectTransform>(), new Vector2(0.3f, 0f), new Vector2(1f, 0.11f), new Vector2(8f, 8f), new Vector2(-8f, -8f));
+            var rFrame = Panel("RightFrame", rightPanel.transform, NeonCyan);
+            Stretch(rFrame, new Vector2(0f, 0f), new Vector2(0f, 1f), Vector2.zero, new Vector2(2f, 0f));
 
-            Button languageButton = CreateButton("Language", gamePanel.transform, 46f);
-            languageButton.onClick.AddListener(() => controller.ToggleLanguage());
-            languageButtonText = languageButton.GetComponentInChildren<Text>();
-            Stretch(languageButton.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0.28f, 0.085f), new Vector2(8f, 8f), new Vector2(-8f, -8f));
+            BuildInfoPanel(rightPanel.transform);
         }
 
-        private Transform CreateColumn(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax)
+        // ─── 左上角：角色头像 ──────────────────────────────────
+        private void BuildAvatar(Transform parent)
         {
-            GameObject column = CreatePanel(name, parent, new Color(0.16f, 0.15f, 0.13f, 1f));
-            Stretch(column.GetComponent<RectTransform>(), anchorMin, anchorMax, new Vector2(8f, 8f), new Vector2(-8f, -8f));
+            // 圆形头像框：用 Image mask 模拟
+            var avatarRoot = Panel("AvatarRoot", parent, new Color(0, 0, 0, 0));
+            var art = avatarRoot.GetComponent<RectTransform>();
+            art.anchorMin = art.anchorMax = new Vector2(0f, 0.5f);
+            art.pivot = new Vector2(0f, 0.5f);
+            art.anchoredPosition = new Vector2(20f, 0f);
+            art.sizeDelta = new Vector2(54f, 54f);
 
-            VerticalLayoutGroup layout = column.AddComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(12, 12, 12, 12);
-            layout.spacing = 8;
-            return column.transform;
+            // 阵营色边框
+            var frameObj = Panel("AvatarFrame", avatarRoot.transform, UndercoverBlue);
+            _roleAvatarFrame = frameObj.GetComponent<Image>();
+            Stretch(frameObj, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+
+            // 内部深色圆
+            var innerObj = Panel("AvatarInner", avatarRoot.transform, Hex("#12122e"));
+            Stretch(innerObj, Vector2.zero, Vector2.one, new Vector2(3f, 3f), new Vector2(-3f, -3f));
+
+            // 角色字母
+            _roleAvatarIcon = MakeText("AvatarIcon", innerObj.transform, "?", 28, TextPrimary, FontStyle.Bold, TextAnchor.MiddleCenter);
+            Stretch(_roleAvatarIcon.gameObject, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+
+            // 玩家名 + 阵营
+            _playerNameText = MakeText("PlayerName", parent, "", ThemeManager.FontSizeBody, TextPrimary, FontStyle.Bold, TextAnchor.MiddleLeft);
+            var pnRt = _playerNameText.GetComponent<RectTransform>();
+            pnRt.anchorMin = pnRt.anchorMax = new Vector2(0f, 0.5f);
+            pnRt.pivot = new Vector2(0f, 0.5f);
+            pnRt.anchoredPosition = new Vector2(86f, 8f);
+            pnRt.sizeDelta = new Vector2(160f, 24f);
+
+            _factionText = MakeText("Faction", parent, "", ThemeManager.FontSizeSmall, TextMuted, FontStyle.Normal, TextAnchor.MiddleLeft);
+            var ftRt = _factionText.GetComponent<RectTransform>();
+            ftRt.anchorMin = ftRt.anchorMax = new Vector2(0f, 0.5f);
+            ftRt.pivot = new Vector2(0f, 0.5f);
+            ftRt.anchoredPosition = new Vector2(86f, -12f);
+            ftRt.sizeDelta = new Vector2(160f, 20f);
         }
 
-        private void CreateRoleButton(Faction faction)
+        // ─── 顶部中央：状态 ──────────────────────────────────
+        private void BuildCenterInfo(Transform parent)
         {
-            Button button = CreateButton(LocalizeFaction(faction), rolePanel.transform, 72f);
-            button.onClick.AddListener(() => controller.SelectFaction(faction));
+            _statusIndicator = MakeText("Status", parent, "", ThemeManager.FontSizeSmall, NeonCyan, FontStyle.Normal, TextAnchor.MiddleCenter);
+            var sRt = _statusIndicator.GetComponent<RectTransform>();
+            sRt.anchorMin = sRt.anchorMax = new Vector2(0.5f, 0.5f);
+            sRt.pivot = new Vector2(0.5f, 0.5f);
+            sRt.anchoredPosition = Vector2.zero;
+            sRt.sizeDelta = new Vector2(400f, 24f);
         }
 
-        private void Rebuild()
+        // ─── 右上角：证据/情报进度条 + 回合 ──────────────────
+        private void BuildRightPanel(Transform parent)
         {
-            if (controller == null)
+            // 天数
+            _dayText = MakeText("Day", parent, "第 1 天", ThemeManager.FontSizeHeader, TitleGold, FontStyle.Bold, TextAnchor.MiddleRight);
+            var dayRt = _dayText.GetComponent<RectTransform>();
+            dayRt.anchorMin = dayRt.anchorMax = new Vector2(1f, 0.5f);
+            dayRt.pivot = new Vector2(1f, 0.5f);
+            dayRt.anchoredPosition = new Vector2(-260f, 8f);
+            dayRt.sizeDelta = new Vector2(120f, 30f);
+
+            // 证据进度条
+            var evLabel = MakeText("EvLabel", parent, "证据", ThemeManager.FontSizeFooter, TextMuted, FontStyle.Normal, TextAnchor.MiddleRight);
+            var elRt = evLabel.GetComponent<RectTransform>();
+            elRt.anchorMin = elRt.anchorMax = new Vector2(1f, 0.5f);
+            elRt.pivot = new Vector2(1f, 0.5f);
+            elRt.anchoredPosition = new Vector2(-260f, -12f);
+            elRt.sizeDelta = new Vector2(40f, 16f);
+
+            var evBg = Panel("EvBg", parent, ThemeManager.InputBackground);
+            var ebRt = evBg.GetComponent<RectTransform>();
+            ebRt.anchorMin = ebRt.anchorMax = new Vector2(1f, 0.5f);
+            ebRt.pivot = new Vector2(1f, 0.5f);
+            ebRt.anchoredPosition = new Vector2(-210f, -12f);
+            ebRt.sizeDelta = new Vector2(100f, 10f);
+
+            var evFill = Panel("EvFill", evBg.transform, UndercoverBlue);
+            _evidenceBarFill = evFill.GetComponent<Image>();
+            var efRt = evFill.GetComponent<RectTransform>();
+            efRt.anchorMin = new Vector2(0f, 0f); efRt.anchorMax = new Vector2(0f, 1f);
+            efRt.pivot = Vector2.zero; efRt.offsetMin = Vector2.zero; efRt.offsetMax = Vector2.zero;
+
+            _evidenceText = MakeText("EvText", parent, "0/10", ThemeManager.FontSizeFooter, NeonCyan, FontStyle.Normal, TextAnchor.MiddleLeft);
+            var etRt = _evidenceText.GetComponent<RectTransform>();
+            etRt.anchorMin = etRt.anchorMax = new Vector2(1f, 0.5f);
+            etRt.pivot = new Vector2(1f, 0.5f);
+            etRt.anchoredPosition = new Vector2(-100f, -12f);
+            etRt.sizeDelta = new Vector2(50f, 16f);
+
+            // 线人情报进度条（仅 Mole/黑帮阵营显示）
+            var ilLabel = MakeText("IlLabel", parent, "情报", ThemeManager.FontSizeFooter, TextMuted, FontStyle.Normal, TextAnchor.MiddleRight);
+            var ilRt = ilLabel.GetComponent<RectTransform>();
+            ilRt.anchorMin = ilRt.anchorMax = new Vector2(1f, 0.5f);
+            ilRt.pivot = new Vector2(1f, 0.5f);
+            ilRt.anchoredPosition = new Vector2(-20f, -12f);
+            ilRt.sizeDelta = new Vector2(40f, 16f);
+
+            var ilBg = Panel("IlBg", parent, ThemeManager.InputBackground);
+            var ibRt = ilBg.GetComponent<RectTransform>();
+            ibRt.anchorMin = ibRt.anchorMax = new Vector2(1f, 0.5f);
+            ibRt.pivot = new Vector2(1f, 0.5f);
+            ibRt.anchoredPosition = new Vector2(30f, -12f);
+            ibRt.sizeDelta = new Vector2(100f, 10f);
+
+            var ilFill = Panel("IlFill", ilBg.transform, MoleTeal);
+            _intelBarFill = ilFill.GetComponent<Image>();
+            var iifRt = ilFill.GetComponent<RectTransform>();
+            iifRt.anchorMin = new Vector2(0f, 0f); iifRt.anchorMax = new Vector2(0f, 1f);
+            iifRt.pivot = Vector2.zero; iifRt.offsetMin = Vector2.zero; iifRt.offsetMax = Vector2.zero;
+
+            _intelText = MakeText("IlText", parent, "0/10", ThemeManager.FontSizeFooter, NeonCyan, FontStyle.Normal, TextAnchor.MiddleLeft);
+            var itRt = _intelText.GetComponent<RectTransform>();
+            itRt.anchorMin = itRt.anchorMax = new Vector2(1f, 0.5f);
+            itRt.pivot = new Vector2(1f, 0.5f);
+            itRt.anchoredPosition = new Vector2(140f, -12f);
+            itRt.sizeDelta = new Vector2(50f, 16f);
+        }
+
+        // ─── 底部行动按钮 ──────────────────────────────────
+        private void BuildActionButtons(Transform parent)
+        {
+            float btnW = 110f, btnH = 38f, startX = -320f, gap = 20f;
+
+            // 这里按不同角色显示不同按钮，但先创建占位
+            CreateActionBtn(parent, "VentBtn", "通 风 管", startX, btnW, btnH, NeonCyan);
+            CreateActionBtn(parent, "KillBtn", "击  杀", startX + (btnW + gap), btnW, btnH, DangerRed);
+            CreateActionBtn(parent, "SabotageBtn", "破  坏", startX + (btnW + gap) * 2, btnW, btnH, MoleTeal);
+            CreateActionBtn(parent, "ReportBtn", "报  告", startX + (btnW + gap) * 3, btnW, btnH, SafeGreen);
+            CreateActionBtn(parent, "MeetingBtn", "会  议", startX + (btnW + gap) * 4, btnW, btnH, TitleGold);
+            CreateActionBtn(parent, "HeatBtn", "热 度 榜", startX + (btnW + gap) * 5, btnW, btnH, TextMuted);
+        }
+
+        private static void CreateActionBtn(Transform parent, string name, string label, float x, float w, float h, Color c)
+        {
+            var obj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+            obj.transform.SetParent(parent, false);
+            obj.GetComponent<Image>().color = ThemeManager.WithAlpha(c, 0.18f);
+            obj.GetComponent<Image>().raycastTarget = true;
+
+            var rt = obj.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = new Vector2(x, 0f);
+            rt.sizeDelta = new Vector2(w, h);
+
+            var border = Panel(name + "_Border", obj.transform, c);
+            Stretch(border, Vector2.zero, Vector2.one, new Vector2(-1f, -1f), new Vector2(1f, 1f));
+            border.transform.SetAsFirstSibling();
+
+            var t = MakeText("Label", obj.transform, label, ThemeManager.FontSizeSmall, TextPrimary, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Stretch(t.gameObject, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+
+            var btn = obj.GetComponent<Button>();
+            var cb = btn.colors;
+            cb.normalColor = ThemeManager.WithAlpha(c, 0.18f);
+            cb.highlightedColor = ThemeManager.WithAlpha(c, 0.45f);
+            cb.pressedColor = ThemeManager.WithAlpha(c, 0.3f);
+            cb.disabledColor = new Color(0.12f, 0.12f, 0.15f, 0.4f);
+            btn.colors = cb;
+        }
+
+        // ─── 左侧任务列表 ──────────────────────────────────
+        private void BuildTaskList(Transform parent)
+        {
+            var titleObj = MakeText("TaskTitle", parent, "任务列表", ThemeManager.FontSizeSmall, TitleGold, FontStyle.Bold, TextAnchor.UpperCenter);
+            var ttRt = titleObj.GetComponent<RectTransform>();
+            ttRt.anchorMin = new Vector2(0f, 1f); ttRt.anchorMax = new Vector2(1f, 1f);
+            ttRt.pivot = new Vector2(0.5f, 1f);
+            ttRt.anchoredPosition = new Vector2(0f, -12f);
+            ttRt.sizeDelta = new Vector2(0f, 28f);
+
+            var div = Panel("TaskDiv", parent, ThemeManager.Divider);
+            var drt = div.GetComponent<RectTransform>();
+            drt.anchorMin = new Vector2(0.1f, 1f); drt.anchorMax = new Vector2(0.9f, 1f);
+            drt.pivot = new Vector2(0.5f, 1f);
+            drt.anchoredPosition = new Vector2(0f, -42f);
+            drt.sizeDelta = new Vector2(0f, 1f);
+
+            // 任务滚动区域
+            _taskListContent = new GameObject("TaskListContent", typeof(RectTransform)).GetComponent<RectTransform>();
+            _taskListContent.SetParent(parent, false);
+            _taskListContent.anchorMin = new Vector2(0f, 0f);
+            _taskListContent.anchorMax = new Vector2(1f, 1f);
+            _taskListContent.pivot = new Vector2(0.5f, 1f);
+            _taskListContent.anchoredPosition = new Vector2(0f, -50f);
+            _taskListContent.sizeDelta = new Vector2(-20f, -58f);
+
+            _taskListRoot = _taskListContent.gameObject;
+        }
+
+        // ─── 右侧信息面板 ──────────────────────────────────
+        private void BuildInfoPanel(Transform parent)
+        {
+            var titleObj = MakeText("InfoTitle", parent, "案件板", ThemeManager.FontSizeSmall, TitleGold, FontStyle.Bold, TextAnchor.UpperCenter);
+            var ttRt = titleObj.GetComponent<RectTransform>();
+            ttRt.anchorMin = new Vector2(0f, 1f); ttRt.anchorMax = new Vector2(1f, 1f);
+            ttRt.pivot = new Vector2(0.5f, 1f);
+            ttRt.anchoredPosition = new Vector2(0f, -12f);
+            ttRt.sizeDelta = new Vector2(0f, 28f);
+
+            var div = Panel("InfoDiv", parent, ThemeManager.Divider);
+            var drt = div.GetComponent<RectTransform>();
+            drt.anchorMin = new Vector2(0.1f, 1f); drt.anchorMax = new Vector2(0.9f, 1f);
+            drt.pivot = new Vector2(0.5f, 1f);
+            drt.anchoredPosition = new Vector2(0f, -42f);
+            drt.sizeDelta = new Vector2(0f, 1f);
+
+            _infoText = MakeText("InfoContent", parent, "", ThemeManager.FontSizeFooter, TextPrimary, FontStyle.Normal, TextAnchor.UpperLeft);
+            var iRt = _infoText.GetComponent<RectTransform>();
+            iRt.anchorMin = Vector2.zero; iRt.anchorMax = Vector2.one;
+            iRt.offsetMin = new Vector2(12f, 12f);
+            iRt.offsetMax = new Vector2(-12f, -54f);
+        }
+
+        // ══════════════════════════════════════════════════════
+        // 刷新
+        // ══════════════════════════════════════════════════════
+        private void Refresh()
+        {
+            if (_controller == null) return;
+            GameState state = _controller.State;
+
+            // 头像 + 阵营
+            var factionColor = ThemeManager.GetFactionColor(state.PlayerFaction);
+            var roleColor = ThemeManager.GetRoleColor(state.PlayerRole);
+
+            if (_roleAvatarFrame != null) _roleAvatarFrame.color = factionColor;
+            if (_roleAvatarIcon != null)
+                _roleAvatarIcon.text = RoleIcon(state.PlayerRole);
+            if (_playerNameText != null)
+                _playerNameText.text = RoleDisplayName(state.PlayerRole);
+            if (_factionText != null)
+                _factionText.text = FactionLabel(state.PlayerFaction);
+
+            // 状态
+            if (_statusIndicator != null)
+                _statusIndicator.text = PhaseLabel(state.Phase);
+
+            // 天数
+            if (_dayText != null)
+                _dayText.text = $"第 {state.Day} 天";
+
+            // 证据进度条
+            float evFrac = GameState.UndercoverEvidenceTarget > 0
+                ? Mathf.Clamp01((float)state.UndercoverEvidence / GameState.UndercoverEvidenceTarget)
+                : 0f;
+            if (_evidenceBarFill != null)
             {
-                return;
+                var efRt = _evidenceBarFill.GetComponent<RectTransform>();
+                efRt.anchorMax = new Vector2(evFrac, 1f);
             }
+            if (_evidenceText != null)
+                _evidenceText.text = $"{state.UndercoverEvidence}/{GameState.UndercoverEvidenceTarget}";
 
-            GameState state = controller.State;
-            rolePanel.SetActive(state.Phase == GamePhase.RoleSelect);
-            gamePanel.SetActive(state.Phase != GamePhase.RoleSelect);
-            headerText.text = state.Phase == GamePhase.GameOver ? state.Result : T("game.title") + " - " + T("phase." + state.Phase);
-
-            if (roleIntroText != null)
+            // 线人情报进度条
+            float ilFrac = GameState.MoleIntelTarget > 0
+                ? Mathf.Clamp01((float)state.MoleIntel / GameState.MoleIntelTarget)
+                : 0f;
+            if (_intelBarFill != null)
             {
-                roleIntroText.text = T("role.choose");
+                var iifRt = _intelBarFill.GetComponent<RectTransform>();
+                iifRt.anchorMax = new Vector2(ilFrac, 1f);
             }
+            if (_intelText != null)
+                _intelText.text = $"{state.MoleIntel}/{GameState.MoleIntelTarget}";
 
-            if (languageButtonText != null)
+            // 任务列表
+            RefreshTaskList(state);
+
+            // 案件板信息
+            if (_infoText != null)
             {
-                languageButtonText.text = T("button.language");
-            }
-
-            ClearDynamicLists();
-
-            if (state.Phase == GamePhase.RoleSelect)
-            {
-                return;
-            }
-
-            foreach (DistrictState district in state.Districts)
-            {
-                Button districtButton = CreateButton(district.DisplayName, districtList, 86f);
-                districtButton.GetComponentInChildren<Text>().text = FormatDistrict(district);
-
-                DistrictType type = district.Type;
-                districtButton.onClick.AddListener(() =>
+                string info = $"阵营控制：黑帮 {state.GangControlledDistricts} / 警察 {state.PoliceControlledDistricts} / 争议 {state.ContestedDistricts}\n";
+                info += $"警力热度：{state.PoliceHeat}\n";
+                info += $"货运进度：{state.ShipmentProgress}\n";
+                info += $"卧底掩护：{state.Cover}%\n";
+                info += $"嫌疑程度：{state.Suspicion}\n";
+                if (state.Log.Count > 0)
                 {
-                    controller.SelectDistrict(type);
-                });
-
-                districtButtons.Add(districtButton);
-            }
-
-            if (state.Phase == GamePhase.GameOver)
-            {
-                Button reset = CreateButton(T("button.restart"), actionList, 72f);
-                reset.onClick.AddListener(controller.Reset);
-                actionButtons.Add(reset);
-            }
-            else
-            {
-                foreach (PlayerAction action in controller.Actions.GetActionsFor(state.PlayerFaction))
-                {
-                    Button actionButton = CreateButton(LocalizeActionLabel(action), actionList, 78f);
-                    actionButton.GetComponentInChildren<Text>().text = LocalizeActionLabel(action) + "\n" + LocalizeActionDescription(action);
-
-                    PlayerAction captured = action;
-                    actionButton.onClick.AddListener(() => controller.RunPlayerAction(controller.SelectedDistrict, captured));
-                    actionButtons.Add(actionButton);
+                    info += "\n最近动态：\n";
+                    int start = Mathf.Max(0, state.Log.Count - 4);
+                    for (int i = start; i < state.Log.Count; i++)
+                        info += $"· {state.Log[i]}\n";
                 }
+                _infoText.text = info;
             }
-
-            statsText.text = FormatStats(state);
-            logText.text = string.Join("\n", state.Log);
         }
 
-        private string FormatDistrict(DistrictState district)
+        private void RefreshTaskList(GameState state)
         {
-            string selected = district.Type == controller.SelectedDistrict ? "> " : string.Empty;
-            string witness = district.HasWitness ? " " + T("label.witness") : string.Empty;
-            string lockdown = district.IsLockedDown ? " " + T("label.lockdown") : string.Empty;
+            if (_taskListRoot == null) return;
+            // 清除旧任务项
+            foreach (Transform t in _taskListContent)
+                Destroy(t.gameObject);
 
-            return selected + LocalizeDistrict(district.Type)
-                + "\n" + T("short.gang") + " " + district.GangInfluence + " | " + T("short.police") + " " + district.PolicePresence + " | " + T("label.publicTrust") + " " + district.CivilianTrust
-                + "\n" + T("label.control") + ": " + LocalizeFaction(district.Controller) + witness + lockdown;
+            // 生成任务卡片
+            float y = 0f;
+            float itemH = 26f;
+            AddTaskItem("搜集证据", state.UndercoverEvidence, GameState.UndercoverEvidenceTarget, ref y, itemH);
+            AddTaskItem("降低嫌疑", state.Cover, 100, ref y, itemH);
+            AddTaskItem("控制区域", state.PoliceControlledDistricts, 5, ref y, itemH);
+            AddTaskItem("线人情报", state.MoleIntel, GameState.MoleIntelTarget, ref y, itemH);
         }
 
-        private string FormatStats(GameState state)
+        private void AddTaskItem(string label, int current, int target, ref float y, float itemH)
         {
-            return T("label.role") + ": " + LocalizeFaction(state.PlayerFaction)
-                + "\n" + T("label.day") + ": " + state.Day
-                + "\n" + T("label.evidence") + ": " + state.Evidence + "/8"
-                + "\n" + T("label.policeHeat") + ": " + state.PoliceHeat + "/6"
-                + "\n" + T("label.shipment") + ": " + state.ShipmentProgress + "/3"
-                + "\n" + T("label.cover") + ": " + state.Cover
-                + "\n" + T("label.suspicion") + ": " + state.Suspicion
-                + "\n" + T("label.publicTrust") + ": " + state.PublicTrust
-                + "\n" + T("label.gangDistricts") + ": " + state.GangControlledDistricts
-                + "\n" + T("label.policeDistricts") + ": " + state.PoliceControlledDistricts
-                + "\n" + T("label.contested") + ": " + state.ContestedDistricts;
-        }
+            bool done = current >= target;
+            var item = new GameObject("TaskItem_" + label, typeof(RectTransform));
+            item.transform.SetParent(_taskListContent, false);
+            var rt = item.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0f, 1f);
+            rt.pivot = new Vector2(0f, 1f);
+            rt.anchoredPosition = new Vector2(10f, y);
+            rt.sizeDelta = new Vector2(320f, itemH);
 
-        private string LocalizeFaction(Faction faction)
-        {
-            return T("role." + faction);
-        }
+            string prefix = done ? "=" : "□";
+            string content = done ? $"{prefix} {label}" : $"{prefix} {label}  {current}/{target}";
+            var text = MakeText("Label", item.transform, content, ThemeManager.FontSizeFooter,
+                done ? SafeGreen : TextPrimary,
+                done ? FontStyle.Normal : FontStyle.Normal,
+                TextAnchor.MiddleLeft);
+            var tRt = text.GetComponent<RectTransform>();
+            tRt.anchorMin = tRt.anchorMax = new Vector2(0f, 0.5f);
+            tRt.pivot = new Vector2(0f, 0.5f);
+            tRt.anchoredPosition = new Vector2(0f, 0f);
+            tRt.sizeDelta = new Vector2(320f, itemH);
 
-        private string LocalizeDistrict(DistrictType districtType)
-        {
-            return T("district." + districtType);
-        }
-
-        private string LocalizeActionLabel(PlayerAction action)
-        {
-            return T("action." + action.Id + ".label");
-        }
-
-        private string LocalizeActionDescription(PlayerAction action)
-        {
-            return T("action." + action.Id + ".desc");
-        }
-
-        private string T(string key)
-        {
-            return Localization.Text(controller.State.Language, key);
-        }
-
-        private void ClearDynamicLists()
-        {
-            foreach (Button button in districtButtons)
+            if (done)
             {
-                Destroy(button.gameObject);
+                // 划线效果：在文字下方加一条细线
+                var strike = Panel("Strike", item.transform, ThemeManager.WithAlpha(SafeGreen, 0.5f));
+                var srt = strike.GetComponent<RectTransform>();
+                srt.anchorMin = srt.anchorMax = new Vector2(0f, 0.5f);
+                srt.pivot = new Vector2(0f, 0.5f);
+                srt.anchoredPosition = new Vector2(8f, 0f);
+                srt.sizeDelta = new Vector2(text.preferredWidth, 1f);
             }
 
-            foreach (Button button in actionButtons)
-            {
-                Destroy(button.gameObject);
-            }
-
-            districtButtons.Clear();
-            actionButtons.Clear();
+            y -= itemH + 4f;
         }
 
-        private static GameObject CreatePanel(string name, Transform parent, Color color)
+        // ══════════════════════════════════════════════════════
+        // 标签工具
+        // ══════════════════════════════════════════════════════
+        private static string RoleIcon(SocialRole r) => r switch
         {
-            GameObject panel = new GameObject(name, typeof(RectTransform), typeof(Image));
-            panel.transform.SetParent(parent, false);
-            Image image = panel.GetComponent<Image>();
-            image.color = color;
-            image.raycastTarget = false;
-            return panel;
+            SocialRole.Gang => "G", SocialRole.Undercover => "U",
+            SocialRole.Police => "P", SocialRole.Mole => "M", _ => "?"
+        };
+
+        private static string RoleDisplayName(SocialRole r) => r switch
+        {
+            SocialRole.Gang => "黑帮", SocialRole.Undercover => "卧底",
+            SocialRole.Police => "警察", SocialRole.Mole => "线人", _ => "?"
+        };
+
+        private static string FactionLabel(Faction f) => f switch
+        {
+            Faction.Gang => "黑帮阵营", Faction.Undercover => "卧底阵营",
+            Faction.Police => "警察阵营", Faction.Mole => "线人阵营",
+            Faction.None => "中立", _ => "?"
+        };
+
+        private static string PhaseLabel(GamePhase p) => p switch
+        {
+            GamePhase.RoleSelect => "选择身份",
+            GamePhase.PlayerTurn => "你的回合",
+            GamePhase.AiTurn => "对手行动中...",
+            GamePhase.Meeting => "会议投票",
+            GamePhase.GameOver => "游戏结束",
+            _ => ""
+        };
+
+        // ══════════════════════════════════════════════════════
+        // UI 工厂
+        // ══════════════════════════════════════════════════════
+        private static GameObject Panel(string name, Transform parent, Color color)
+        {
+            var obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+            obj.transform.SetParent(parent, false);
+            obj.GetComponent<Image>().color = color;
+            obj.GetComponent<Image>().raycastTarget = false;
+            return obj;
         }
 
-        private static Text CreateText(string name, Transform parent, int fontSize, TextAnchor alignment)
+        private static Text MakeText(string name, Transform parent, string content, int fs, Color c, FontStyle s, TextAnchor a)
         {
-            GameObject textObject = new GameObject(name, typeof(RectTransform), typeof(Text));
-            textObject.transform.SetParent(parent, false);
-
-            Text text = textObject.GetComponent<Text>();
-            text.font = LoadBuiltinFont();
-            text.fontSize = fontSize;
-            text.color = new Color(0.92f, 0.88f, 0.78f, 1f);
-            text.alignment = alignment;
-            text.horizontalOverflow = HorizontalWrapMode.Wrap;
-            text.verticalOverflow = VerticalWrapMode.Overflow;
-            text.raycastTarget = false;
-            return text;
+            var obj = new GameObject(name, typeof(RectTransform), typeof(Text));
+            obj.transform.SetParent(parent, false);
+            var t = obj.GetComponent<Text>();
+            t.text = content; t.font = LoadFont(); t.fontSize = fs;
+            t.color = c; t.fontStyle = s; t.alignment = a;
+            t.horizontalOverflow = HorizontalWrapMode.Wrap;
+            t.verticalOverflow = VerticalWrapMode.Overflow;
+            t.raycastTarget = false;
+            return t;
         }
 
-        private static Font LoadBuiltinFont()
+        private static void Stretch(GameObject obj, Vector2 amin, Vector2 amax, Vector2 omin, Vector2 omax)
         {
-            Font font = TryLoadBuiltinFont("LegacyRuntime.ttf");
-
-            if (font == null)
-            {
-                font = TryLoadBuiltinFont("Arial.ttf");
-            }
-
-            return font;
+            var rt = obj.GetComponent<RectTransform>() ?? obj.AddComponent<RectTransform>();
+            rt.anchorMin = amin; rt.anchorMax = amax;
+            rt.offsetMin = omin; rt.offsetMax = omax;
         }
 
-        private static Font TryLoadBuiltinFont(string path)
+        private static Font LoadFont()
         {
-            try
-            {
-                return Resources.GetBuiltinResource<Font>(path);
-            }
-            catch (System.ArgumentException)
-            {
-                return null;
-            }
+            var f = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            return f ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
         }
 
-        private static Button CreateButton(string label, Transform parent, float height)
+        private static Color Hex(string h)
         {
-            GameObject buttonObject = new GameObject(label + "Button", typeof(RectTransform), typeof(Image), typeof(Button));
-            buttonObject.transform.SetParent(parent, false);
-
-            Image image = buttonObject.GetComponent<Image>();
-            image.color = new Color(0.28f, 0.22f, 0.14f, 1f);
-
-            Button button = buttonObject.GetComponent<Button>();
-            ColorBlock colors = button.colors;
-            colors.normalColor = new Color(0.28f, 0.22f, 0.14f, 1f);
-            colors.highlightedColor = new Color(0.43f, 0.32f, 0.18f, 1f);
-            colors.pressedColor = new Color(0.18f, 0.14f, 0.1f, 1f);
-            button.colors = colors;
-
-            Text text = CreateText("Label", buttonObject.transform, 16, TextAnchor.MiddleCenter);
-            text.text = label;
-            Stretch(text.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(8f, 4f), new Vector2(-8f, -4f));
-
-            LayoutElement layout = buttonObject.AddComponent<LayoutElement>();
-            layout.preferredHeight = height;
-            return button;
-        }
-
-        private static void Stretch(RectTransform rect, Vector2 min, Vector2 max, Vector2 offsetMin, Vector2 offsetMax)
-        {
-            rect.anchorMin = min;
-            rect.anchorMax = max;
-            rect.offsetMin = offsetMin;
-            rect.offsetMax = offsetMax;
+            if (h.StartsWith("#")) h = h.Substring(1);
+            return new Color(
+                int.Parse(h.Substring(0, 2), System.Globalization.NumberStyles.HexNumber) / 255f,
+                int.Parse(h.Substring(2, 2), System.Globalization.NumberStyles.HexNumber) / 255f,
+                int.Parse(h.Substring(4, 2), System.Globalization.NumberStyles.HexNumber) / 255f,
+                1f);
         }
     }
 }

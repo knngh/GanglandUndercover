@@ -1,3 +1,4 @@
+using GanglandUndercover.SocialDeduction;
 using UnityEngine;
 
 namespace GanglandUndercover.Online
@@ -56,6 +57,33 @@ namespace GanglandUndercover.Online
                     DestroyImmediate(rigidbody);
                 }
             }
+
+            ConfigureCharacterAnimator(model, state);
+        }
+
+        private static void ConfigureCharacterAnimator(GameObject model, OnlinePlayerState state)
+        {
+            Animator animator = model.GetComponentInChildren<Animator>();
+            if (animator == null)
+            {
+                return;
+            }
+
+            animator.enabled = true;
+            animator.applyRootMotion = false;
+            animator.keepAnimatorStateOnDisable = false;
+
+            state.CharacterAnimator = animator;
+
+            // 通过 SocialCharacter 封装动画驱动，支持 SetMoveSpeed / TriggerAction / Kill
+            var socialChar = model.GetComponent<GanglandUndercover.SocialDeduction.SocialCharacter>();
+            if (socialChar == null)
+            {
+                socialChar = model.AddComponent<GanglandUndercover.SocialDeduction.SocialCharacter>();
+            }
+
+            socialChar.BindAnimator(animator);
+            state.SocialChar = socialChar;
         }
 
         private static string FreeCharacterPrefabPath(OnlinePlayerState state)

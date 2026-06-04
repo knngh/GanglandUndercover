@@ -40,6 +40,26 @@ namespace GanglandUndercover.Core
             }
         }
 
+        public void SetControl(Faction faction)
+        {
+            switch (faction)
+            {
+                case Faction.Gang:
+                    GangInfluence = 7;
+                    PolicePresence = 3;
+                    break;
+                case Faction.Police:
+                    GangInfluence = 3;
+                    PolicePresence = 7;
+                    break;
+                case Faction.Undercover:
+                default:
+                    GangInfluence = 5;
+                    PolicePresence = 5;
+                    break;
+            }
+        }
+
         public void AddGangInfluence(int amount)
         {
             GangInfluence = Clamp(GangInfluence + amount, 0, 10);

@@ -1,5 +1,5 @@
 Stage1 vertical slice bake
-Time: 2026-05-04 19:44:20
+Time: 2026-06-01 17:16:37
 Scene: Assets/_Project/Scenes/Stage1VerticalSlice.unity
 Prefab: Assets/_Project/Prefabs/Stage1VerticalSliceWorld.prefab
 World objects: 5872

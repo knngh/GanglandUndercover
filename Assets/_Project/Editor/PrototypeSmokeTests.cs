@@ -51,7 +51,7 @@ namespace GanglandUndercover.Editor
             Directory.CreateDirectory(logsDirectory);
             File.WriteAllText(
                 Path.Combine(logsDirectory, "latest-smoke-result.txt"),
-                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + status + Environment.NewLine + detail);
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + status + System.Environment.NewLine + detail);
         }
 
         private static void RunFactionPath(Faction faction)

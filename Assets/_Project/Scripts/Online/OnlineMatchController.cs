@@ -13,6 +13,12 @@ using Unity.Services.Relay.Models;
 using UnityEditor;
 #endif
 
+using GanglandUndercover;
+using GanglandUndercover.Audio;
+using GanglandUndercover.Core;
+using GanglandUndercover.Gameplay;
+using GanglandUndercover.SocialDeduction;
+
 namespace GanglandUndercover.Online
 {
     public sealed partial class OnlineMatchController : MonoBehaviour
@@ -22,6 +28,8 @@ namespace GanglandUndercover.Online
         private const string ClientProfileMessage = "GanglandClientProfile";
         private const string ServerSnapshotMessage = "GanglandServerSnapshot";
         private const string RoleAssignMessage = "GanglandRoleAssign";
+        private const string ChatSendMessage = "GanglandChatSend";
+        private const string ChatBroadcastMessage = "GanglandChatBroadcast";
         private const string WorldRootName = "Online Gangland Runtime Map v5";
         private const string QuaterniusFbxRoot = "Assets/_Project/Art/ThirdParty/Quaternius/ModularSciFiMegaKit/FBX/";
         private const string RuntimeResourcesRoot = "Assets/_Project/Resources/";
@@ -30,46 +38,14 @@ namespace GanglandUndercover.Online
         private const ulong SkipVoteTarget = ulong.MaxValue;
         private const float SnapshotIntervalSeconds = 0.08f;
         private const float MoveSpeed = 4.5f;
-        private const float InteractionRange = 1.08f;
-        private const float KillRange = 0.9f;
-        private const float ReportRange = 1.25f;
         private const float PlayerCollisionRadius = 0.22f;
         private const float CollisionTraceStep = 0.08f;
-        private const float UnderworldTransitRange = 1.15f;
-        private const float KillCooldownSeconds = 34f;
         private const float RoleRevealSeconds = 6.5f;
-        private const float MeetingIntroSeconds = 35f;
-        private const float VotingSeconds = 55f;
-        private const float BlackoutSeconds = 28f;
-        private const float LockdownSeconds = 32f;
-        private const float CommunicationJamSeconds = 30f;
-        private const float EvidenceLeakSeconds = 36f;
-        private const float PatrolAlertSeconds = 30f;
-        private const float EmergencyCooldownSeconds = 75f;
-        private const float AiActionGraceSeconds = 22f;
-        private const float PreviewAiActionGraceSeconds = 55f;
-        private const float MatchTargetMinSeconds = 600f;
-        private const float MatchHardLimitSeconds = 1200f;
-        private const float MapHalfWidth = 24.0f;
-        private const float MapHalfHeight = 14.0f;
-        private const float DesignScaleX = 2.0f;
-        private const float DesignScaleY = 1.85f;
-        private const float DesignMapHalfWidth = MapHalfWidth / DesignScaleX;
-        private const float DesignMapHalfHeight = MapHalfHeight / DesignScaleY;
-        private const int MinimumPlayablePlayers = 5;
-        private const int MinimumRoomPlayers = 4;
-        private const int MaximumRoomPlayers = 10;
-        private const int DefaultRoomMinPlayers = 8;
-        private const int DefaultRoomMaxPlayers = 10;
-        private const int DefaultEvidenceTarget = 44;
-        private const int UnderworldPassageCount = 4;
         private const ulong LocalPreviewClientId = 0UL;
         private const ulong BotClientIdBase = 900000UL;
         private const float BotThinkMinSeconds = 1.2f;
         private const float BotThinkMaxSeconds = 3.4f;
         private const float BotInteractDistance = 0.45f;
-        private const int MaxCaseLogEntries = 8;
-        private const float AbilityCooldownSeconds = 13f;
         private const float PreviewCameraSize = 13.4f;
         private const float ActionCameraSize = 4.25f;
         private const float BlackoutCameraSize = 3.05f;
@@ -88,43 +64,7 @@ namespace GanglandUndercover.Online
         private const float VoiceRetrySeconds = 4.0f;
         private const float VoicePositionUpdateSeconds = 0.12f;
 
-        private enum MapEntrance
-        {
-            North,
-            South,
-            East,
-            West
-        }
 
-        private readonly struct ShipRoomSpec
-        {
-            public ShipRoomSpec(string name, string label, Vector3 center, Vector3 size, Color floor, MapEntrance entrance)
-            {
-                Name = name;
-                Label = label;
-                Center = center;
-                Size = size;
-                Floor = floor;
-                Entrance = entrance;
-            }
-
-            public readonly string Name;
-            public readonly string Label;
-            public readonly Vector3 Center;
-            public readonly Vector3 Size;
-            public readonly Color Floor;
-            public readonly MapEntrance Entrance;
-        }
-
-        private enum SabotageType
-        {
-            None,
-            Blackout,
-            Lockdown,
-            Communications,
-            EvidenceLeak,
-            PatrolAlert
-        }
 
         private readonly Dictionary<ulong, OnlinePlayerState> players = new Dictionary<ulong, OnlinePlayerState>();
         private readonly List<OnlineTaskState> tasks = new List<OnlineTaskState>();
@@ -134,6 +74,7 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<ulong, ulong> votes = new Dictionary<ulong, ulong>();
         private readonly Dictionary<ulong, float> killCooldowns = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> abilityCooldowns = new Dictionary<ulong, float>();
+        private readonly Dictionary<ulong, float> ventCooldowns = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> botThinkTimers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> botVoteTimers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, Vector3> botTargets = new Dictionary<ulong, Vector3>();
@@ -158,6 +99,8 @@ namespace GanglandUndercover.Online
         private UnityServiceBootstrap serviceBootstrap;
         private GameObject worldRoot;
         private OnlineMatchHud onlineHud;
+        private OnlineSyncManager syncManager;
+        private HostMigrationManager migrationManager;
         private AudioSource audioSource;
         private Vector2 rosterScroll;
         private Vector2 intelScroll;
@@ -175,24 +118,23 @@ namespace GanglandUndercover.Online
         private string lastSabotageEvent = "尚未发生破坏。";
         private OnlineRole localRole = OnlineRole.Unassigned;
         private OnlineMatchPhase phase = OnlineMatchPhase.Lobby;
+        private ChatSystem chatSystem;
         private bool localReady;
-        private bool roomAutoFillAi = true;
-        private bool revealRoleOnEject = true;
-        private bool proximityVoiceEnabled = true;
+        private bool roomAutoFillAi;
+        private bool revealRoleOnEject;
+        private bool proximityVoiceEnabled;
         [SerializeField] private bool canvasHudEnabled = true;
+        [SerializeField] private OnlineRuleSet ruleSet;
+        [SerializeField] private OnlineMapService mapService;
+        [SerializeField] private OnlineTaskService taskService;
         private bool matchStarted;
         private bool localPreviewMode;
         private bool fullMapPreview = true;
         private bool tacticalMapOpen;
         private bool intelBoardOpen;
-        private int evidenceScore;
-        private int evidenceTarget = DefaultEvidenceTarget;
-        private int roomMinPlayers = DefaultRoomMinPlayers;
-        private int roomMaxPlayers = DefaultRoomMaxPlayers;
+        private int roomMinPlayers;
+        private int roomMaxPlayers;
         private int nextBodyId;
-        private int evidenceMilestoneIndex;
-        private int activeTaskId = -1;
-        private int activeTaskStep;
         private int emergencyMeetingsLeft;
         private Vector2 localInput;
         private Vector3 localPosition;
@@ -200,26 +142,12 @@ namespace GanglandUndercover.Online
         private float serverSnapshotTimer;
         private float actionCooldown;
         private float phaseTimer;
-        private float blackoutTimer;
-        private float lockdownTimer;
-        private float communicationJamTimer;
-        private float evidenceLeakTimer;
-        private float evidenceLeakAccumulator;
-        private float patrolAlertTimer;
         private float emergencyCooldownTimer;
         private float aiActionGraceTimer;
-        private float activeTaskCharge;
         private float matchElapsedSeconds;
         private bool cameraWasConfigured;
-        private bool submittingActiveTask;
-        private bool activeTaskStepOneDone;
-        private bool activeTaskStepTwoDone;
-        private bool activeTaskStepThreeDone;
-        private int activeTaskMistakes;
-        private float activeTaskFeedbackTimer;
         private float nextVoiceRetryTime;
         private float nextVoicePositionUpdateTime;
-        private bool activeTaskFeedbackPositive;
         private bool voiceJoinInProgress;
         private bool voiceLeaveInProgress;
         private bool relayOperationInProgress;
@@ -303,15 +231,17 @@ namespace GanglandUndercover.Online
         public bool HasRuntimeAudio => audioSource != null;
         public int RoomMinPlayers => roomMinPlayers;
         public int RoomMaxPlayers => roomMaxPlayers;
-        public int MinimumRoomPlayersValue => MinimumRoomPlayers;
-        public int MaximumRoomPlayersValue => MaximumRoomPlayers;
-        public int EvidenceScore => evidenceScore;
-        public int EvidenceTarget => evidenceTarget;
+        public int MinimumRoomPlayersValue => ruleSet.MinimumRoomPlayers;
+        public int MaximumRoomPlayersValue => ruleSet.MaximumRoomPlayers;
+        public int EvidenceScore => taskService.EvidenceScore;
+        public int EvidenceTarget => taskService.EvidenceTarget;
         public float MatchElapsedSeconds => matchElapsedSeconds;
-        public float MapHalfWidthValue => MapHalfWidth;
-        public float MapHalfHeightValue => MapHalfHeight;
-        public int TargetMatchMinutesMin => Mathf.RoundToInt(MatchTargetMinSeconds / 60f);
-        public int TargetMatchMinutesMax => Mathf.RoundToInt(MatchHardLimitSeconds / 60f);
+        public float MapHalfWidthValue => mapService.MapHalfWidth;
+        public float MapHalfHeightValue => mapService.MapHalfHeight;
+        public OnlineMapService MapService => mapService;
+        public OnlineTaskService TaskService => taskService;
+        public int TargetMatchMinutesMin => Mathf.RoundToInt(ruleSet.MatchTargetMinSeconds / 60f);
+        public int TargetMatchMinutesMax => Mathf.RoundToInt(ruleSet.MatchHardLimitSeconds / 60f);
         public string ResultSummary => resultSummary;
         public bool AutoFillAi => roomAutoFillAi;
         public bool RevealRoleOnEject => revealRoleOnEject;
@@ -320,11 +250,11 @@ namespace GanglandUndercover.Online
         public bool CanStartMatch => CanStartLobbyMatch();
         public bool RelayOperationInProgress => relayOperationInProgress;
         public int EmergencyMeetingsLeft => emergencyMeetingsLeft;
-        public float BlackoutTimer => blackoutTimer;
-        public float LockdownTimer => lockdownTimer;
-        public float CommunicationJamTimer => communicationJamTimer;
-        public float EvidenceLeakTimer => evidenceLeakTimer;
-        public float PatrolAlertTimer => patrolAlertTimer;
+        public float BlackoutTimer => taskService.BlackoutTimer;
+        public float LockdownTimer => taskService.LockdownTimer;
+        public float CommunicationJamTimer => taskService.CommunicationJamTimer;
+        public float EvidenceLeakTimer => taskService.EvidenceLeakTimer;
+        public float PatrolAlertTimer => taskService.PatrolAlertTimer;
         public bool TacticalMapOpen => tacticalMapOpen;
         public bool IntelBoardOpen => intelBoardOpen;
         public string VoiceStatus => serviceBootstrap == null ? "Vivox 未挂载。" : serviceBootstrap.VoiceStatus;
@@ -373,7 +303,7 @@ namespace GanglandUndercover.Online
         public string LastEvidenceEvent => lastEvidenceEvent;
         public string LastSabotageEvent => lastSabotageEvent;
         public int EvidenceMilestoneIndex => evidenceMilestoneIndex;
-        public int TacticalMapLabelCount => tasks.Count + ShipRooms().Length + players.Count + bodies.Count + UnderworldPassageCount;
+        public int TacticalMapLabelCount => tasks.Count + mapService.ShipRooms().Length + players.Count + bodies.Count + ruleSet.UnderworldPassageCount;
         public float LocalAbilityCooldown => TryGetLocalPlayer(out OnlinePlayerState localState) ? localState.AbilityCooldown : 0f;
         public float LocalKillCooldown => TryGetLocalPlayer(out OnlinePlayerState localState2) ? localState2.KillCooldown : 0f;
         public bool LocalAlive => IsLocalAlive();
@@ -391,7 +321,7 @@ namespace GanglandUndercover.Online
 
             if (players.Count == 0)
             {
-                players[0] = new OnlinePlayerState(0, "玩家0", SpawnPosition(0), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
+                players[0] = new OnlinePlayerState(0, "玩家0", mapService.SpawnPosition(0), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
             }
 
             EnsureMinimumBots();
@@ -492,7 +422,7 @@ namespace GanglandUndercover.Online
         {
             if (players.Count == 0)
             {
-                players[LocalPreviewClientId] = new OnlinePlayerState(LocalPreviewClientId, "烟测玩家", ScaleMapPosition(new Vector3(-1.18f, -0.72f, 0f)), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
+                players[LocalPreviewClientId] = new OnlinePlayerState(LocalPreviewClientId, "烟测玩家", mapService.ScaleMapPosition(new Vector3(-1.18f, -0.72f, 0f)), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
             }
 
             phase = OnlineMatchPhase.Opening;
@@ -510,7 +440,7 @@ namespace GanglandUndercover.Online
         public bool EditorForceStageOneBlackoutShotForSmokeTest()
         {
             ulong localClientId = LocalClientId();
-            Vector3 blackoutPosition = ScaleMapPosition(new Vector3(8.72f, 4.8f, 0f));
+            Vector3 blackoutPosition = mapService.ScaleMapPosition(new Vector3(8.72f, 4.8f, 0f));
 
             if (players.Count == 0 || !players.ContainsKey(localClientId))
             {
@@ -530,7 +460,7 @@ namespace GanglandUndercover.Online
             tacticalMapOpen = false;
             intelBoardOpen = false;
             activeTaskId = -1;
-            blackoutTimer = BlackoutSeconds;
+            blackoutTimer = ruleSet.BlackoutSeconds;
             currentCameraSubjectId = localClientId;
             cameraWasConfigured = false;
             ConfigureMainCamera();
@@ -552,7 +482,7 @@ namespace GanglandUndercover.Online
         public void EditorTriggerTaskForSmokeTest(int taskId, bool asGang)
         {
             ulong clientId = 0;
-            players[clientId] = new OnlinePlayerState(clientId, "烟测玩家", TaskPositionFor(taskId), true, true, OnlineRole.Unassigned, asGang ? OnlineProfession.Enforcer : OnlineProfession.Inspector, 0, false);
+            players[clientId] = new OnlinePlayerState(clientId, "烟测玩家", mapService.TaskPositionFor(taskId), true, true, OnlineRole.Unassigned, asGang ? OnlineProfession.Enforcer : OnlineProfession.Inspector, 0, false);
             privateRoles[clientId] = asGang ? OnlineRole.Gang : OnlineRole.Police;
             TryInteractWithTask(clientId, players[clientId]);
         }
@@ -560,7 +490,7 @@ namespace GanglandUndercover.Online
         public void EditorOpenTaskPanelForSmokeTest(int taskId)
         {
             ulong clientId = LocalClientId();
-            players[clientId] = new OnlinePlayerState(clientId, "烟测玩家", TaskPositionFor(taskId), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
+            players[clientId] = new OnlinePlayerState(clientId, "烟测玩家", mapService.TaskPositionFor(taskId), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
             privateRoles[clientId] = OnlineRole.Police;
             localRole = OnlineRole.Police;
             BeginActiveTask(taskId);
@@ -573,7 +503,7 @@ namespace GanglandUndercover.Online
                 localPreviewMode = true;
             }
 
-            if (players.Count < MinimumPlayablePlayers)
+            if (players.Count < ruleSet.MinimumPlayablePlayers)
             {
                 EnsureMinimumBots();
             }
@@ -623,7 +553,7 @@ namespace GanglandUndercover.Online
                 localPreviewMode = true;
             }
 
-            if (players.Count < MinimumPlayablePlayers)
+            if (players.Count < ruleSet.MinimumPlayablePlayers)
             {
                 EnsureMinimumBots();
             }
@@ -678,7 +608,7 @@ namespace GanglandUndercover.Online
                 EditorSkipOpeningForSmokeTest();
             }
 
-            aiActionGraceTimer = PreviewAiActionGraceSeconds;
+            aiActionGraceTimer = ruleSet.PreviewAiActionGraceSeconds;
             status = "本地可玩局已启动：AI 正在巡场，开局缓冲中。";
             AddCaseLog(status);
             fullMapPreview = false;
@@ -704,12 +634,12 @@ namespace GanglandUndercover.Online
         {
             Vector3[] preferred =
             {
-                ScaleMapPosition(new Vector3(-0.62f, -1.02f, 0f)),
-                ScaleMapPosition(new Vector3(-0.92f, -0.82f, 0f)),
-                ScaleMapPosition(new Vector3(-1.42f, -0.62f, 0f)),
-                ScaleMapPosition(new Vector3(-1.42f, -0.18f, 0f)),
-                ScaleMapPosition(new Vector3(0f, -0.82f, 0f)),
-                ScaleMapPosition(new Vector3(-0.25f, 1.68f, 0f))
+                mapService.ScaleMapPosition(new Vector3(-0.62f, -1.02f, 0f)),
+                mapService.ScaleMapPosition(new Vector3(-0.92f, -0.82f, 0f)),
+                mapService.ScaleMapPosition(new Vector3(-1.42f, -0.62f, 0f)),
+                mapService.ScaleMapPosition(new Vector3(-1.42f, -0.18f, 0f)),
+                mapService.ScaleMapPosition(new Vector3(0f, -0.82f, 0f)),
+                mapService.ScaleMapPosition(new Vector3(-0.25f, 1.68f, 0f))
             };
 
             for (int i = 0; i < preferred.Length; i++)
@@ -720,18 +650,39 @@ namespace GanglandUndercover.Online
                 }
             }
 
-            return FindNearestOpenPosition(ScaleMapPosition(new Vector3(-1.42f, -0.62f, 0f)), Vector3.zero);
+            return FindNearestOpenPosition(mapService.ScaleMapPosition(new Vector3(-1.42f, -0.62f, 0f)), Vector3.zero);
         }
+
+        private void EnsureRuleSet()
+        {
+            if (ruleSet == null)
+            {
+                ruleSet = ScriptableObject.CreateInstance<OnlineRuleSet>();
+            }
+
+            roomAutoFillAi = ruleSet.RoomAutoFillAi;
+            revealRoleOnEject = ruleSet.RevealRoleOnEject;
+            proximityVoiceEnabled = ruleSet.ProximityVoiceEnabled;
+            roomMinPlayers = ruleSet.DefaultRoomMinPlayers;
+            roomMaxPlayers = ruleSet.DefaultRoomMaxPlayers;
+            evidenceTarget = ruleSet.DefaultEvidenceTarget;
+        }
+
+        public OnlineRuleSet ActiveRuleSet => ruleSet != null ? ruleSet : ScriptableObject.CreateInstance<OnlineRuleSet>();
 
         private void Awake()
         {
+            EnsureRuleSet();
             BuildDefaultTasks();
             EnsureWorld();
             EnsureAudio();
             EnsureServiceBootstrap();
             EnsureNetworkStack();
             EnsureCanvasHud();
-            localPosition = SpawnPosition(UnityEngine.Random.Range(0, MaximumRoomPlayers));
+            syncManager = GetComponent<OnlineSyncManager>();
+            EnsureMigrationManager();
+            EnsureChatSystem();
+            localPosition = mapService.SpawnPosition(UnityEngine.Random.Range(0, ruleSet.MaximumRoomPlayers));
         }
 
         private void Reset()
@@ -793,6 +744,47 @@ namespace GanglandUndercover.Online
             TickVoiceRouting();
             ConfigureMainCamera();
             UpdateWorldVisuals();
+            TickCharacterAnimators();
+        }
+
+        private static readonly int AnimSpeedHash = Animator.StringToHash("Speed");
+        private static readonly int AnimDeadHash  = Animator.StringToHash("Dead");
+        private static readonly int AnimActionHash = Animator.StringToHash("Action");
+
+        private void TickCharacterAnimators()
+        {
+            if (players == null) return;
+
+            foreach (var kv in players)
+            {
+                OnlinePlayerState state = kv.Value;
+                var socialChar = state.SocialChar;
+                if (socialChar == null) continue;
+
+                // 死亡状态（通过 SocialCharacter.Kill 设置 Dead bool）
+                if (!state.Alive)
+                {
+                    socialChar.Kill();
+                    if (state.HasPendingAction)
+                    {
+                        state.HasPendingAction = false;
+                        players[kv.Key] = state;
+                    }
+                    continue;
+                }
+
+                // 移动速度（通过 SocialCharacter.SetMoveSpeed）
+                float speed = state.Input.magnitude;
+                socialChar.SetMoveSpeed(speed);
+
+                // Action trigger（通过 SocialCharacter.TriggerAction）
+                if (state.HasPendingAction)
+                {
+                    socialChar.TriggerAction();
+                    state.HasPendingAction = false;
+                    players[kv.Key] = state;
+                }
+            }
         }
 
         private void OnGUI()
@@ -834,6 +826,9 @@ namespace GanglandUndercover.Online
                 }
 
                 DrawActiveTaskPanel();
+
+                // 阵营私聊面板（行动阶段）
+                DrawActionChatPanel();
                 return;
             }
 
@@ -1355,7 +1350,7 @@ namespace GanglandUndercover.Online
                     return;
                 }
 
-                int maxConnections = Mathf.Clamp(roomMaxPlayers - 1, 1, MaximumRoomPlayers - 1);
+                int maxConnections = Mathf.Clamp(roomMaxPlayers - 1, 1, ruleSet.MaximumRoomPlayers - 1);
                 Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxConnections);
                 relayJoinCode = (await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId) ?? string.Empty).Trim().ToUpperInvariant();
                 transport.UseWebSockets = false;
@@ -1567,6 +1562,7 @@ namespace GanglandUndercover.Online
             status = "已离开房间。";
             relayJoinCode = string.Empty;
             relayStatus = "Relay 房间码未创建。";
+            chatSystem?.Clear();
         }
 
         public void SetLocalPlayerName(string value)
@@ -1607,7 +1603,7 @@ namespace GanglandUndercover.Online
 
         public void SetRoomMinPlayers(int value)
         {
-            roomMinPlayers = Mathf.Clamp(value, MinimumRoomPlayers, roomMaxPlayers);
+            roomMinPlayers = Mathf.Clamp(value, ruleSet.MinimumRoomPlayers, roomMaxPlayers);
 
             if (roomMaxPlayers < roomMinPlayers)
             {
@@ -1622,7 +1618,7 @@ namespace GanglandUndercover.Online
 
         public void SetRoomMaxPlayers(int value)
         {
-            roomMaxPlayers = Mathf.Clamp(value, roomMinPlayers, MaximumRoomPlayers);
+            roomMaxPlayers = Mathf.Clamp(value, roomMinPlayers, ruleSet.MaximumRoomPlayers);
 
             if (IsOnline && IsHost)
             {
@@ -1817,6 +1813,19 @@ namespace GanglandUndercover.Online
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ClientProfileMessage, ReceiveClientProfile);
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ServerSnapshotMessage, ReceiveServerSnapshot);
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(RoleAssignMessage, ReceiveRoleAssign);
+            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ChatSendMessage, ReceiveChatSend);
+            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ChatBroadcastMessage, ReceiveChatBroadcast);
+
+            // 主机迁移消息
+            if (migrationManager != null)
+            {
+                migrationManager.RegisterMessageHandlers(networkManager);
+            }
+            else
+            {
+                EnsureMigrationManager();
+                migrationManager?.RegisterMessageHandlers(networkManager);
+            }
         }
 
         private void UnregisterMessages()
@@ -1831,13 +1840,18 @@ namespace GanglandUndercover.Online
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ClientProfileMessage);
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ServerSnapshotMessage);
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(RoleAssignMessage);
+            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ChatSendMessage);
+            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ChatBroadcastMessage);
+
+            // 主机迁移消息
+            migrationManager?.UnregisterMessageHandlers(networkManager);
         }
 
         private void HandleClientConnected(ulong clientId)
         {
             if (networkManager.IsServer)
             {
-                Vector3 spawn = SpawnPosition(players.Count);
+                Vector3 spawn = mapService.SpawnPosition(players.Count);
                 players[clientId] = new OnlinePlayerState(clientId, "玩家" + clientId, spawn, false, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
                 killCooldowns[clientId] = 0f;
                 abilityCooldowns[clientId] = 0f;
@@ -1855,6 +1869,9 @@ namespace GanglandUndercover.Online
 
         private void HandleClientDisconnected(ulong clientId)
         {
+            // 主机迁移管理：通知迁移管理器检测主机断连
+            migrationManager?.OnClientDisconnected(clientId);
+
             players.Remove(clientId);
             privateRoles.Remove(clientId);
             votes.Remove(clientId);
@@ -1941,6 +1958,11 @@ namespace GanglandUndercover.Online
             {
                 SendClientAction(OnlineActionType.Ability);
                 actionCooldown = 0.45f;
+            }
+            else if (Input.GetKeyDown(KeyCode.V))
+            {
+                SendClientAction(OnlineActionType.Vent);
+                actionCooldown = 0.35f;
             }
         }
 
@@ -2111,6 +2133,12 @@ namespace GanglandUndercover.Online
             if (actionType == OnlineActionType.Ability)
             {
                 TryUseProfessionAbility(senderClientId, player);
+                return;
+            }
+
+            if (actionType == OnlineActionType.Vent)
+            {
+                TryUseUnderworldPassage(senderClientId, player);
             }
         }
 
@@ -2122,7 +2150,7 @@ namespace GanglandUndercover.Online
 
             if (!matchStarted || phase == OnlineMatchPhase.Lobby)
             {
-                state.Position = ClampToOnlineMap(position);
+                state.Position = mapService.ClampToOnlineMap(position);
             }
 
             state.Input = state.Alive && phase == OnlineMatchPhase.Action ? input : Vector2.zero;
@@ -2142,7 +2170,7 @@ namespace GanglandUndercover.Online
             }
             else
             {
-                players[senderClientId] = new OnlinePlayerState(senderClientId, safeName, SpawnPosition(players.Count), false, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
+                players[senderClientId] = new OnlinePlayerState(senderClientId, safeName, mapService.SpawnPosition(players.Count), false, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
             }
 
             status = safeName + " 已进入房间。";
@@ -2225,7 +2253,7 @@ namespace GanglandUndercover.Online
                 if (phaseTimer <= 0f)
                 {
                     phase = OnlineMatchPhase.Voting;
-                    phaseTimer = VotingSeconds;
+                    phaseTimer = ruleSet.VotingSeconds;
                     status = "开始投票。";
                     AddCaseLog(status);
                     BroadcastSnapshot();
@@ -2246,7 +2274,7 @@ namespace GanglandUndercover.Online
             {
                 matchElapsedSeconds += deltaTime;
 
-                if (matchElapsedSeconds >= MatchHardLimitSeconds)
+                if (matchElapsedSeconds >= ruleSet.MatchHardLimitSeconds)
                 {
                     ResolveTimeLimitOutcome();
                     return;
@@ -2343,6 +2371,7 @@ namespace GanglandUndercover.Online
             {
                 float killCooldown = killCooldowns.TryGetValue(state.ClientId, out float cooldown) ? cooldown : 0f;
                 float abilityCooldown = abilityCooldowns.TryGetValue(state.ClientId, out float abilityCooldownValue) ? abilityCooldownValue : 0f;
+                float ventCooldown = ventCooldowns.TryGetValue(state.ClientId, out float ventCooldownValue) ? ventCooldownValue : 0f;
                 writer.WriteValueSafe(state.ClientId);
                 writer.WriteValueSafe(state.DisplayName);
                 writer.WriteValueSafe(state.Position);
@@ -2354,6 +2383,7 @@ namespace GanglandUndercover.Online
                 writer.WriteValueSafe(state.Suspicion);
                 writer.WriteValueSafe(killCooldown);
                 writer.WriteValueSafe(abilityCooldown);
+                writer.WriteValueSafe(ventCooldown);
             }
 
             writer.WriteValueSafe(tasks.Count);
@@ -2471,6 +2501,7 @@ namespace GanglandUndercover.Online
                 reader.ReadValueSafe(out int suspicion);
                 reader.ReadValueSafe(out float killCooldown);
                 reader.ReadValueSafe(out float abilityCooldown);
+                reader.ReadValueSafe(out float ventCooldown);
 
                 OnlinePlayerState state = players.TryGetValue(clientId, out OnlinePlayerState existing)
                     ? existing
@@ -2486,6 +2517,7 @@ namespace GanglandUndercover.Online
                 state.Suspicion = suspicion;
                 state.KillCooldown = killCooldown;
                 state.AbilityCooldown = abilityCooldown;
+                state.VentCooldown = ventCooldown;
                 players[clientId] = state;
                 seenPlayers.Add(clientId);
 
@@ -2603,8 +2635,8 @@ namespace GanglandUndercover.Online
             evidenceLeakAccumulator = 0f;
             patrolAlertTimer = 0f;
             emergencyCooldownTimer = 0f;
-            emergencyMeetingsLeft = EmergencyMeetingLimitFor(players.Count);
-            aiActionGraceTimer = AiActionGraceSeconds;
+            emergencyMeetingsLeft = ruleSet.EmergencyMeetingLimitFor(players.Count);
+            aiActionGraceTimer = ruleSet.AiActionGraceSeconds;
             currentCameraSubjectId = LocalPreviewClientId;
             matchElapsedSeconds = 0f;
             resultSummary = "专案简报中。";
@@ -2619,7 +2651,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < ids.Count; i++)
             {
                 OnlinePlayerState state = players[ids[i]];
-                state.Position = FindNearestOpenPosition(SpawnPosition(i), Vector3.zero);
+                state.Position = FindNearestOpenPosition(mapService.SpawnPosition(i), Vector3.zero);
                 state.Input = Vector2.zero;
                 state.Alive = true;
                 state.PublicRole = OnlineRole.Unassigned;
@@ -2643,6 +2675,20 @@ namespace GanglandUndercover.Online
             {
                 BroadcastSnapshot();
             }
+
+            List<ulong> gangIds = new List<ulong>();
+            List<ulong> nonGangIds = new List<ulong>();
+            foreach (var kvp in players)
+            {
+                if (privateRoles.TryGetValue(kvp.Key, out OnlineRole role))
+                {
+                    if (role == OnlineRole.Gang || role == OnlineRole.Undercover)
+                        gangIds.Add(kvp.Key);
+                    else if (role == OnlineRole.Police)
+                        nonGangIds.Add(kvp.Key);
+                }
+            }
+            syncManager?.OnMatchStarted(gangIds, nonGangIds, tasks);
         }
 
         private void AssignRoles(IList<ulong> ids)
@@ -2666,13 +2712,24 @@ namespace GanglandUndercover.Online
                 {
                     role = OnlineRole.Gang;
                 }
+                else if (i == 3 && shuffled.Count >= 8)
+                {
+                    role = OnlineRole.Mole;
+                }
 
                 ulong clientId = shuffled[i];
                 privateRoles[clientId] = role;
                 if (players.TryGetValue(clientId, out OnlinePlayerState state))
                 {
                     state.Profession = ProfessionFor(role, i);
-                    state.Suspicion = role == OnlineRole.Gang ? 1 : 0;
+                    state.Suspicion = role == OnlineRole.Gang || role == OnlineRole.Mole ? 1 : 0;
+                    // Surface role: Mole appears as Police, Undercover appears as Gang
+                    state.PublicRole = role switch
+                    {
+                        OnlineRole.Mole       => OnlineRole.Police,
+                        OnlineRole.Undercover => OnlineRole.Gang,
+                        _                    => role
+                    };
                     players[clientId] = state;
                 }
 
@@ -2693,7 +2750,7 @@ namespace GanglandUndercover.Online
 
         private void EnsureMinimumBots()
         {
-            int targetCount = Mathf.Clamp(roomMinPlayers, MinimumPlayablePlayers, roomMaxPlayers);
+            int targetCount = Mathf.Clamp(roomMinPlayers, ruleSet.MinimumPlayablePlayers, roomMaxPlayers);
             int index = 0;
 
             while (players.Count < targetCount)
@@ -2707,7 +2764,7 @@ namespace GanglandUndercover.Online
                 }
 
                 string displayName = BotName(index);
-                Vector3 spawn = SpawnPosition(players.Count);
+                Vector3 spawn = mapService.SpawnPosition(players.Count);
                 players[clientId] = new OnlinePlayerState(clientId, displayName, spawn, true, true, OnlineRole.Unassigned, BotProfession(index), 0, true);
                 killCooldowns[clientId] = 0f;
                 abilityCooldowns[clientId] = 0f;
@@ -2742,6 +2799,442 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out int roleValue);
             localRole = (OnlineRole)roleValue;
             status = "收到身份：" + RoleName(localRole);
+        }
+
+        // ─── 聊天系统 ─────────────────────────────
+
+        private void EnsureChatSystem()
+        {
+            if (chatSystem == null)
+            {
+                chatSystem = new ChatSystem(SendChatMessage);
+            }
+        }
+
+        private void EnsureMigrationManager()
+        {
+            if (migrationManager != null)
+            {
+                return;
+            }
+
+            migrationManager = GetComponent<HostMigrationManager>();
+            if (migrationManager == null)
+            {
+                migrationManager = gameObject.AddComponent<HostMigrationManager>();
+            }
+        }
+
+        /// <summary>
+        /// 捕获当前游戏状态的完整快照（供主机迁移使用）。
+        /// </summary>
+        public GameStateSnapshot CaptureSnapshot()
+        {
+            var snap = new GameStateSnapshot();
+
+            // ── 全局状态 ──
+            snap.MatchStarted = matchStarted;
+            snap.Phase = phase;
+            snap.EvidenceScore = evidenceScore;
+            snap.EvidenceTarget = evidenceTarget;
+            snap.EmergencyMeetingsLeft = emergencyMeetingsLeft;
+            snap.EvidenceMilestoneIndex = evidenceMilestoneIndex;
+            snap.NextBodyId = nextBodyId;
+            snap.RoomMinPlayers = roomMinPlayers;
+            snap.RoomMaxPlayers = roomMaxPlayers;
+            snap.RoomAutoFillAi = roomAutoFillAi;
+            snap.RevealRoleOnEject = revealRoleOnEject;
+            snap.ProximityVoiceEnabled = proximityVoiceEnabled;
+            snap.RoomName = roomName;
+            snap.ResultSummary = resultSummary;
+            snap.LastMeetingReason = lastMeetingReason;
+            snap.LastVoteOutcome = lastVoteOutcome;
+            snap.LastEvidenceEvent = lastEvidenceEvent;
+            snap.LastSabotageEvent = lastSabotageEvent;
+            snap.PhaseTimer = phaseTimer;
+            snap.BlackoutTimer = blackoutTimer;
+            snap.LockdownTimer = lockdownTimer;
+            snap.CommunicationJamTimer = communicationJamTimer;
+            snap.EvidenceLeakTimer = evidenceLeakTimer;
+            snap.EvidenceLeakAccumulator = evidenceLeakAccumulator;
+            snap.PatrolAlertTimer = patrolAlertTimer;
+            snap.EmergencyCooldownTimer = emergencyCooldownTimer;
+            snap.AiActionGraceTimer = aiActionGraceTimer;
+            snap.MatchElapsedSeconds = matchElapsedSeconds;
+
+            // ── 玩家状态 ──
+            snap.Players = new List<GameStateSnapshot.SnapshotPlayerEntry>(players.Count);
+            foreach (var p in players.Values)
+            {
+                snap.Players.Add(new GameStateSnapshot.SnapshotPlayerEntry
+                {
+                    ClientId = p.ClientId,
+                    DisplayName = p.DisplayName,
+                    Position = p.Position,
+                    Input = p.Input,
+                    Ready = p.Ready,
+                    Alive = p.Alive,
+                    IsBot = p.IsBot,
+                    PublicRole = p.PublicRole,
+                    Profession = p.Profession,
+                    KillCooldown = killCooldowns.TryGetValue(p.ClientId, out float kd) ? kd : 0f,
+                    AbilityCooldown = abilityCooldowns.TryGetValue(p.ClientId, out float ac) ? ac : 0f,
+                    Suspicion = p.Suspicion,
+                });
+            }
+
+            // ── 私密角色 ──
+            snap.PrivateRoles = new List<GameStateSnapshot.SnapshotRoleEntry>(privateRoles.Count);
+            foreach (var kv in privateRoles)
+            {
+                snap.PrivateRoles.Add(new GameStateSnapshot.SnapshotRoleEntry { ClientId = kv.Key, Role = kv.Value });
+            }
+
+            // ── 任务 ──
+            snap.Tasks = new List<GameStateSnapshot.SnapshotTaskEntry>(tasks.Count);
+            foreach (var t in tasks)
+            {
+                snap.Tasks.Add(new GameStateSnapshot.SnapshotTaskEntry
+                {
+                    Id = t.Id, Name = t.Name, Position = t.Position,
+                    Progress = t.Progress, RequiredProgress = t.RequiredProgress,
+                    Completed = t.Completed, Sabotaged = t.Sabotaged,
+                });
+            }
+
+            // ── 尸体 ──
+            snap.Bodies = new List<GameStateSnapshot.SnapshotBodyEntry>(bodies.Count);
+            foreach (var b in bodies)
+            {
+                snap.Bodies.Add(new GameStateSnapshot.SnapshotBodyEntry
+                {
+                    Id = b.Id, VictimClientId = b.VictimClientId,
+                    Position = b.Position, Reported = b.Reported,
+                });
+            }
+
+            // ── 投票 ──
+            snap.Votes = new List<GameStateSnapshot.SnapshotVoteEntry>(votes.Count);
+            foreach (var v in votes)
+            {
+                snap.Votes.Add(new GameStateSnapshot.SnapshotVoteEntry { VoterClientId = v.Key, TargetClientId = v.Value });
+            }
+
+            // ── 案卷 ──
+            snap.CaseLog = new List<string>(caseLog);
+
+            // ── 冷却 ──
+            snap.KillCooldowns = CooldownsToList(killCooldowns);
+            snap.AbilityCooldowns = CooldownsToList(abilityCooldowns);
+            snap.VentCooldowns = CooldownsToList(ventCooldowns);
+            snap.BotThinkTimers = CooldownsToList(botThinkTimers);
+            snap.BotVoteTimers = CooldownsToList(botVoteTimers);
+
+            // ── Bot 目标 ──
+            snap.BotTargets = new List<GameStateSnapshot.SnapshotTargetEntry>(botTargets.Count);
+            foreach (var bt in botTargets)
+            {
+                snap.BotTargets.Add(new GameStateSnapshot.SnapshotTargetEntry { ClientId = bt.Key, Target = bt.Value });
+            }
+
+            return snap;
+        }
+
+        /// <summary>
+        /// 从快照恢复游戏状态（主机迁移时由新主机或客户端调用）。
+        /// </summary>
+        public void RestoreFromSnapshot(GameStateSnapshot snap)
+        {
+            // ── 全局状态 ──
+            matchStarted = snap.MatchStarted;
+            phase = snap.Phase;
+            evidenceScore = snap.EvidenceScore;
+            evidenceTarget = snap.EvidenceTarget;
+            emergencyMeetingsLeft = snap.EmergencyMeetingsLeft;
+            evidenceMilestoneIndex = snap.EvidenceMilestoneIndex;
+            nextBodyId = snap.NextBodyId;
+            roomMinPlayers = snap.RoomMinPlayers;
+            roomMaxPlayers = snap.RoomMaxPlayers;
+            roomAutoFillAi = snap.RoomAutoFillAi;
+            revealRoleOnEject = snap.RevealRoleOnEject;
+            proximityVoiceEnabled = snap.ProximityVoiceEnabled;
+            roomName = snap.RoomName;
+            resultSummary = snap.ResultSummary;
+            lastMeetingReason = snap.LastMeetingReason;
+            lastVoteOutcome = snap.LastVoteOutcome;
+            lastEvidenceEvent = snap.LastEvidenceEvent;
+            lastSabotageEvent = snap.LastSabotageEvent;
+            phaseTimer = snap.PhaseTimer;
+            blackoutTimer = snap.BlackoutTimer;
+            lockdownTimer = snap.LockdownTimer;
+            communicationJamTimer = snap.CommunicationJamTimer;
+            evidenceLeakTimer = snap.EvidenceLeakTimer;
+            evidenceLeakAccumulator = snap.EvidenceLeakAccumulator;
+            patrolAlertTimer = snap.PatrolAlertTimer;
+            emergencyCooldownTimer = snap.EmergencyCooldownTimer;
+            aiActionGraceTimer = snap.AiActionGraceTimer;
+            matchElapsedSeconds = snap.MatchElapsedSeconds;
+
+            // ── 玩家状态 ──
+            players.Clear();
+            foreach (var p in snap.Players)
+            {
+                var state = new OnlinePlayerState(p.ClientId, p.DisplayName, p.Position, p.Ready, p.Alive, p.PublicRole, p.Profession, p.Suspicion, p.IsBot)
+                {
+                    Input = p.Input,
+                    KillCooldown = p.KillCooldown,
+                    AbilityCooldown = p.AbilityCooldown,
+                };
+                players[p.ClientId] = state;
+            }
+
+            // ── 私密角色 ──
+            privateRoles.Clear();
+            foreach (var r in snap.PrivateRoles)
+            {
+                privateRoles[r.ClientId] = r.Role;
+            }
+
+            // ── 任务 ──
+            tasks.Clear();
+            foreach (var t in snap.Tasks)
+            {
+                tasks.Add(new OnlineTaskState(t.Id, t.Name, t.Position, t.Progress, t.RequiredProgress, t.Completed, t.Sabotaged));
+            }
+
+            // ── 尸体 ──
+            bodies.Clear();
+            foreach (var b in snap.Bodies)
+            {
+                bodies.Add(new OnlineBodyState(b.Id, b.VictimClientId, b.Position, b.Reported));
+            }
+
+            // ── 投票 ──
+            votes.Clear();
+            foreach (var v in snap.Votes)
+            {
+                votes[v.VoterClientId] = v.TargetClientId;
+            }
+
+            // ── 案卷 ──
+            caseLog.Clear();
+            caseLog.AddRange(snap.CaseLog);
+
+            // ── 冷却 ──
+            ListToCooldowns(killCooldowns, snap.KillCooldowns);
+            ListToCooldowns(abilityCooldowns, snap.AbilityCooldowns);
+            ListToCooldowns(ventCooldowns, snap.VentCooldowns);
+            ListToCooldowns(botThinkTimers, snap.BotThinkTimers);
+            ListToCooldowns(botVoteTimers, snap.BotVoteTimers);
+
+            // ── Bot 目标 ──
+            botTargets.Clear();
+            foreach (var bt in snap.BotTargets)
+            {
+                botTargets[bt.ClientId] = bt.Target;
+            }
+
+            // 更新本地位置
+            ulong localId = LocalClientId();
+            if (players.TryGetValue(localId, out OnlinePlayerState localState))
+            {
+                localPosition = localState.Position;
+            }
+
+            status = "主机迁移完成，对局已恢复。";
+            AddCaseLog("主机迁移完成，新主机接管对局。");
+
+            // 确保 UI 刷新
+            if (syncManager != null)
+            {
+                syncManager.enabled = true;
+            }
+        }
+
+        /// <summary>
+        /// 强制终止游戏（主机迁移失败 / 存活玩家不足）。
+        /// </summary>
+        public void ForceGameOver(string resultText)
+        {
+            SetResult(resultText);
+        }
+
+        private static List<GameStateSnapshot.SnapshotCooldownEntry> CooldownsToList(Dictionary<ulong, float> dict)
+        {
+            var list = new List<GameStateSnapshot.SnapshotCooldownEntry>(dict.Count);
+            foreach (var kv in dict)
+            {
+                list.Add(new GameStateSnapshot.SnapshotCooldownEntry { ClientId = kv.Key, Value = kv.Value });
+            }
+            return list;
+        }
+
+        private static void ListToCooldowns(Dictionary<ulong, float> dict, List<GameStateSnapshot.SnapshotCooldownEntry> list)
+        {
+            dict.Clear();
+            foreach (var entry in list)
+            {
+                dict[entry.ClientId] = entry.Value;
+            }
+        }
+
+        private void SendChatMessage(string content)
+        {
+            if (string.IsNullOrWhiteSpace(content) || chatSystem == null)
+            {
+                return;
+            }
+
+            OnlineRole role = LocalEffectiveRole();
+            Faction faction = ChatSystem.RoleToFaction(role);
+            bool isDead = !IsLocalAlive();
+            string senderId = LocalClientId().ToString();
+            string senderName = GetLocalDisplayName();
+
+            // 本地立即显示
+            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction);
+
+            // 联机：发送到服务器
+            if (localPreviewMode)
+            {
+                return; // 本地试玩模式，不发送网络消息
+            }
+
+            if (networkManager == null || networkManager.CustomMessagingManager == null || !networkManager.IsClient)
+            {
+                return;
+            }
+
+            try
+            {
+                byte[] contentBytes = System.Text.Encoding.UTF8.GetBytes(content);
+                using FastBufferWriter writer = new FastBufferWriter(4 + 4 + contentBytes.Length + 2048, Unity.Collections.Allocator.Temp);
+                writer.WriteValueSafe((int)role);
+                writer.WriteValueSafe(contentBytes.Length);
+                writer.WriteBytes(contentBytes, contentBytes.Length);
+                networkManager.CustomMessagingManager.SendNamedMessage(ChatSendMessage, NetworkManager.ServerClientId, writer);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("Gangland Chat: Send failed - " + ex.Message);
+            }
+        }
+
+        private void ReceiveChatSend(ulong senderClientId, FastBufferReader reader)
+        {
+            if (networkManager == null || !networkManager.IsServer)
+            {
+                return;
+            }
+
+            reader.ReadValueSafe(out int roleValue);
+            reader.ReadValueSafe(out int contentLength);
+
+            if (contentLength <= 0 || contentLength > 2048)
+            {
+                return;
+            }
+
+            byte[] contentBytes = new byte[contentLength];
+            reader.ReadBytes(ref contentBytes, contentLength);
+            string content = System.Text.Encoding.UTF8.GetString(contentBytes);
+
+            OnlineRole role = (OnlineRole)roleValue;
+            Faction faction = ChatSystem.RoleToFaction(role);
+            bool isDead = !players.TryGetValue(senderClientId, out OnlinePlayerState senderState) || !senderState.Alive;
+            string senderName = players.TryGetValue(senderClientId, out OnlinePlayerState nameState) ? nameState.DisplayName : "玩家" + senderClientId;
+
+            // 本地显示（服务器也显示）
+            chatSystem.ReceiveMessage(senderClientId.ToString(), senderName, content, isDead, faction);
+
+            // 转发：会议阶段广播给所有人，行动阶段仅发送给同阵营
+            byte[] forwardBytes = System.Text.Encoding.UTF8.GetBytes(senderClientId + "|" + senderName + "|" + content + "|" + (isDead ? "1" : "0") + "|" + ((int)faction).ToString());
+            using FastBufferWriter writer = new FastBufferWriter(4 + forwardBytes.Length + 2048, Unity.Collections.Allocator.Temp);
+            writer.WriteValueSafe(forwardBytes.Length);
+            writer.WriteBytes(forwardBytes, forwardBytes.Length);
+
+            if (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
+            {
+                // 会议期间广播给所有人
+                networkManager.CustomMessagingManager.SendNamedMessageToAll(ChatBroadcastMessage, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+            }
+            else if (phase == OnlineMatchPhase.Action)
+            {
+                // 行动阶段：仅发送给同阵营客户端
+                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
+                {
+                    if (kv.Key == senderClientId)
+                    {
+                        continue;
+                    }
+
+                    OnlineRole targetRole = GetPrivateRole(kv.Key);
+                    Faction targetFaction = ChatSystem.RoleToFaction(targetRole);
+
+                    if (ChatSystem.IsSameFaction(faction, targetFaction))
+                    {
+                        ulong targetClientId = kv.Key;
+                        // 跳过本地服务器（已在上面显示）
+                        if (networkManager.IsHost && targetClientId == NetworkManager.ServerClientId)
+                        {
+                            continue;
+                        }
+
+                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, targetClientId, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                    }
+                }
+            }
+        }
+
+        private void ReceiveChatBroadcast(ulong senderClientId, FastBufferReader reader)
+        {
+            if (networkManager == null || !networkManager.IsClient)
+            {
+                return;
+            }
+
+            reader.ReadValueSafe(out int length);
+
+            if (length <= 0 || length > 4096)
+            {
+                return;
+            }
+
+            byte[] bytes = new byte[length];
+            reader.ReadBytes(ref bytes, length);
+            string payload = System.Text.Encoding.UTF8.GetString(bytes);
+            string[] parts = payload.Split('|');
+
+            if (parts.Length < 5)
+            {
+                return;
+            }
+
+            string senderId = parts[0];
+            string senderName = parts[1];
+            string content = parts[2];
+            bool isDead = parts[3] == "1";
+            int factionValue;
+
+            if (!int.TryParse(parts[4], out factionValue))
+            {
+                return;
+            }
+
+            Faction faction = (Faction)factionValue;
+            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction);
+        }
+
+        private string GetLocalDisplayName()
+        {
+            ulong clientId = LocalClientId();
+
+            if (players.TryGetValue(clientId, out OnlinePlayerState state))
+            {
+                return state.DisplayName;
+            }
+
+            return localPlayerName;
         }
 
         private void UpsertLocalPlayer()
@@ -2786,17 +3279,20 @@ namespace GanglandUndercover.Online
 
             OnlineRole role = GetPrivateRole(senderClientId);
 
-            if (role == OnlineRole.Gang)
+            if (role == OnlineRole.Gang || role == OnlineRole.Mole)
             {
                 SabotageType sabotageType = SabotageForTask(nearestTask.Id);
                 nearestTask.Sabotaged = true;
                 nearestTask.Completed = false;
                 nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
                 evidenceScore = Mathf.Max(0, evidenceScore - SabotageEvidencePenalty(sabotageType));
-                status = "黑帮破坏了 " + nearestTask.Name + "。";
+                string actorLabel = role == OnlineRole.Mole ? "线人" : "黑帮";
+                status = actorLabel + "秘密破坏了 " + nearestTask.Name + "。";
                 lastSabotageEvent = status + " 影响: " + SabotageName(sabotageType);
                 AddCaseLog(status);
+                syncManager?.OnTaskSabotagedLocally(senderClientId, nearestTask.Id, sabotageType);
                 ApplySabotageEffect(sabotageType, nearestTask.Name);
+                AudioManager.Instance?.PlaySFX(SoundEffect.Sabotage);
             }
             else
             {
@@ -2830,6 +3326,7 @@ namespace GanglandUndercover.Online
                         UpdateEvidenceMilestone();
                         AddCaseLog(status);
                         PlayCue("task");
+                        syncManager?.OnTaskCompletedLocally(senderClientId, nearestTask.Id);
                     }
                     else
                     {
@@ -3018,7 +3515,7 @@ namespace GanglandUndercover.Online
 
             OnlineRole role = LocalEffectiveRole();
 
-            if (role == OnlineRole.Gang)
+            if (role == OnlineRole.Gang || role == OnlineRole.Mole)
             {
                 return false;
             }
@@ -3029,7 +3526,7 @@ namespace GanglandUndercover.Online
 
         private void TryKill(ulong senderClientId, OnlinePlayerState player)
         {
-            if (GetPrivateRole(senderClientId) != OnlineRole.Gang)
+            if (GetPrivateRole(senderClientId) != OnlineRole.Gang && GetPrivateRole(senderClientId) != OnlineRole.Mole)
             {
                 status = "只有黑帮可以击倒目标。";
                 BroadcastSnapshot();
@@ -3054,13 +3551,21 @@ namespace GanglandUndercover.Online
             victim.Input = Vector2.zero;
             victim.KillCooldown = 0f;
             players[victimClientId] = victim;
+
+            // 如果被击杀的是本地玩家，进入鬼魂模式
+            if (victimClientId == LocalClientId())
+            {
+                ActivateGhostModeForLocalPlayer(victimClientId);
+            }
             bodies.Add(new OnlineBodyState(nextBodyId++, victimClientId, victim.Position, false));
-            killCooldowns[senderClientId] = KillCooldownSeconds;
+            killCooldowns[senderClientId] = ruleSet.KillCooldownSeconds;
             player.Suspicion += 2;
             players[senderClientId] = player;
             status = "黑帮击倒了 " + victim.DisplayName + "。";
             AddCaseLog(status);
+            syncManager?.OnKilled(victimClientId, senderClientId);
             PlayCue("kill");
+            AudioManager.Instance?.PlaySFX(SoundEffect.Kill);
             EvaluateWinConditions();
             BroadcastSnapshot();
         }
@@ -3101,7 +3606,7 @@ namespace GanglandUndercover.Online
                     UpdateEvidenceMilestone();
                     break;
                 case OnlineProfession.Enforcer:
-                    if (role == OnlineRole.Gang)
+                    if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                     {
                         killCooldowns[senderClientId] = Mathf.Max(0f, killCooldowns.TryGetValue(senderClientId, out float killCooldown) ? killCooldown - 9f : 0f);
                         player.Suspicion += 1;
@@ -3120,7 +3625,7 @@ namespace GanglandUndercover.Online
                     status = player.DisplayName + " 篡改现场，修复表象但证据链被污染。";
                     break;
                 case OnlineProfession.Driver:
-                    if (role == OnlineRole.Gang && TryUseUnderworldPassage(ref player))
+                    if ((role == OnlineRole.Gang || role == OnlineRole.Mole) && TryUseUnderworldPassage(ref player))
                     {
                         player.Suspicion += 1;
                         status = player.DisplayName + " 通过暗线通道换位。";
@@ -3128,13 +3633,13 @@ namespace GanglandUndercover.Online
                     else
                     {
                         player.Position = FindNearestOpenPosition(player.Position + new Vector3(UnityEngine.Random.Range(-2.4f, 2.4f), UnityEngine.Random.Range(-1.8f, 1.8f), 0f), player.Position);
-                        player.Suspicion += role == OnlineRole.Gang ? 1 : 0;
+                        player.Suspicion += (role == OnlineRole.Gang || role == OnlineRole.Mole) ? 1 : 0;
                         status = player.DisplayName + " 走后巷快速换位。";
                     }
 
                     break;
                 default:
-                    if (role == OnlineRole.Gang && TryUseUnderworldPassage(ref player))
+                    if ((role == OnlineRole.Gang || role == OnlineRole.Mole) && TryUseUnderworldPassage(ref player))
                     {
                         player.Suspicion += 1;
                         status = player.DisplayName + " 通过暗线通道换位。";
@@ -3147,14 +3652,20 @@ namespace GanglandUndercover.Online
                     break;
             }
 
-            abilityCooldowns[senderClientId] = AbilityCooldownSeconds;
-            player.AbilityCooldown = AbilityCooldownSeconds;
+            abilityCooldowns[senderClientId] = ruleSet.AbilityCooldownSeconds;
+            player.AbilityCooldown = ruleSet.AbilityCooldownSeconds;
             players[senderClientId] = player;
             AddCaseLog(status);
             PlayCue("ability");
             EvaluateWinConditions();
             BroadcastSnapshot();
         }
+
+        // ──────────────────────────────────────────────
+        //  暗线通道系统（Underworld Passage）
+        //  仅 Gang/Mole 可用，冷却由 ruleSet.VentCooldownSeconds 控制；
+        //  节点位置来自 OnlineMapService；逻辑见 TryUseUnderworldPassage()。
+        // ──────────────────────────────────────────────
 
         private void TryReportOrEmergency(ulong senderClientId, OnlinePlayerState player)
         {
@@ -3163,6 +3674,7 @@ namespace GanglandUndercover.Online
                 OnlineBodyState body = bodies[bodyIndex];
                 body.Reported = true;
                 bodies[bodyIndex] = body;
+                AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
                 BeginMeeting(player.DisplayName + " 发现尸体并报案");
                 BroadcastSnapshot();
                 return;
@@ -3189,10 +3701,10 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (Vector3.Distance(player.Position, ScaleMapPosition(Vector3.zero)) <= ReportRange)
+            if (Vector3.Distance(player.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
             {
                 emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-                emergencyCooldownTimer = EmergencyCooldownSeconds;
+                emergencyCooldownTimer = ruleSet.EmergencyCooldownSeconds;
                 BeginMeeting(player.DisplayName + " 按下警署紧急铃");
                 BroadcastSnapshot();
                 return;
@@ -3205,7 +3717,7 @@ namespace GanglandUndercover.Online
         private void BeginMeeting(string reason)
         {
             phase = OnlineMatchPhase.Meeting;
-            phaseTimer = MeetingIntroSeconds;
+            phaseTimer = ruleSet.MeetingIntroSeconds;
             blackoutTimer = 0f;
             activeTaskId = -1;
             activeTaskStep = 0;
@@ -3235,6 +3747,17 @@ namespace GanglandUndercover.Online
 
             status = reason + "。进入会议。";
             AddCaseLog(status);
+            syncManager?.OnMeetingBegan(reason, phase);
+
+            // 激活聊天系统
+            if (chatSystem != null)
+            {
+                chatSystem.CurrentPhase = OnlineMatchPhase.Meeting;
+                chatSystem.CanSend = IsLocalAlive();
+                chatSystem.IsAlive = IsLocalAlive();
+                chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
+            }
+
             PlayCue("meeting");
         }
 
@@ -3242,12 +3765,10 @@ namespace GanglandUndercover.Online
         {
             List<ulong> seatedIds = new List<ulong>(players.Keys);
             seatedIds.Sort();
-
             int seatIndex = Mathf.Max(0, seatedIds.IndexOf(clientId));
-            int seatCount = Mathf.Clamp(seatedIds.Count, MinimumPlayablePlayers, MaximumRoomPlayers);
-            float angle = seatIndex / (float)seatCount * Mathf.PI * 2f + Mathf.PI * 0.5f;
-            Vector3 designSeat = new Vector3(Mathf.Cos(angle) * 1.18f, -0.35f + Mathf.Sin(angle) * 0.78f, 0f);
-            return FindNearestOpenPosition(ScaleMapPosition(designSeat), ScaleMapPosition(Vector3.zero));
+            int seatCount = Mathf.Clamp(seatedIds.Count, ruleSet.MinimumPlayablePlayers, ruleSet.MaximumRoomPlayers);
+            Vector3 worldSeat = mapService.MeetingSeatWorldPosition(seatIndex, seatCount);
+            return FindNearestOpenPosition(worldSeat, mapService.ScaleMapPosition(Vector3.zero));
         }
 
         private void ApplyVote(ulong voterClientId, ulong targetClientId)
@@ -3275,6 +3796,7 @@ namespace GanglandUndercover.Online
             votes[voterClientId] = targetClientId;
             status = voter.DisplayName + (targetClientId == SkipVoteTarget ? " 已投票跳过。" : " 已投票给 " + players[targetClientId].DisplayName + "。");
             AddCaseLog(status);
+            syncManager?.OnVoteCast(voterClientId, targetClientId);
 
             if (votes.Count >= CountAlivePlayers())
             {
@@ -3328,6 +3850,7 @@ namespace GanglandUndercover.Online
 
             if (ejectedClientId == SkipVoteTarget || tied)
             {
+                syncManager?.OnMeetingResolved(SkipVoteTarget, tied, tally);
                 RemoveReportedBodies();
                 phase = OnlineMatchPhase.Action;
                 status = "投票无结果，无人出局。";
@@ -3354,6 +3877,16 @@ namespace GanglandUndercover.Online
                 lastVoteOutcome = ejected.DisplayName + " 出局 | 得票 " + bestVotes + " | 身份 " + (revealRoleOnEject ? RoleName(ejectedRole) : "未公开");
                 AddCaseLog(status);
                 PlayCue("vote");
+
+                // 如果被投票淘汰的是本地玩家，进入鬼魂模式
+                if (ejectedClientId == LocalClientId())
+                {
+                    ActivateGhostModeForLocalPlayer(ejectedClientId);
+                }
+
+                // 记录会议淘汰到 VictoryBridge + MeetingSync
+                syncManager?.RegisterElimination(ejectedClientId, GetPrivateRole);
+                syncManager?.OnMeetingResolved(ejectedClientId, false, tally);
             }
 
             RemoveReportedBodies();
@@ -3362,6 +3895,7 @@ namespace GanglandUndercover.Online
             if (phase != OnlineMatchPhase.Result)
             {
                 phase = OnlineMatchPhase.Action;
+                syncManager?.OnMeetingEnded();
             }
 
             BroadcastSnapshot();
@@ -3376,6 +3910,21 @@ namespace GanglandUndercover.Online
 
             UpdateEvidenceMilestone();
 
+            // 优先使用 OnlineVictoryBridge 双重判定（原生在线规则 + 离线 VictoryEvaluator）
+            if (syncManager != null)
+            {
+                EvaluateResult bridgeResult = syncManager.EvaluateVictory(
+                    evidenceScore, evidenceTarget, players,
+                    GetPrivateRole, tasks, matchStarted, phase, localRole);
+
+                if (bridgeResult.HasResult)
+                {
+                    SetResult(bridgeResult.ResultText);
+                    return;
+                }
+            }
+
+            // 兜底：在线原生快速判定（证据链 / 存活阵营）
             if (evidenceScore >= evidenceTarget)
             {
                 SetResult("警方胜利：证据链闭合。");
@@ -3412,10 +3961,57 @@ namespace GanglandUndercover.Online
             }
         }
 
+        /// <summary>
+        /// 为本地玩家激活鬼魂模式。淘汰后调用：
+        /// - 设置半透明渲染
+        /// - 碰撞器设为 Trigger 可穿越墙壁
+        /// - 可继续做任务但无法报告尸体/发起会议
+        /// </summary>
+        private void ActivateGhostModeForLocalPlayer(ulong clientId)
+        {
+            // 查找本地玩家的 SocialCharacter GameObject
+            SocialCharacter[] allChars = FindObjectsOfType<SocialCharacter>();
+            SocialCharacter localChar = null;
+
+            foreach (SocialCharacter sc in allChars)
+            {
+                // 通过名称或 OnlineClientId 匹配本地玩家
+                if (sc != null && sc.IsPlayer)
+                {
+                    localChar = sc;
+                    break;
+                }
+            }
+
+            if (localChar == null)
+            {
+                Debug.LogWarning($"[OnlineMatchController] 无法找到 clientId={clientId} 对应的 SocialCharacter，GhostMode 未激活。");
+                return;
+            }
+
+            GhostMode ghost = localChar.GetComponent<GhostMode>();
+            if (ghost == null) ghost = localChar.gameObject.AddComponent<GhostMode>();
+            ghost.EnterGhostMode();
+            ghost.CanDoTasks = true;
+            ghost.CanReportBody = false;
+            ghost.GhostCanCallMeeting = false;
+
+            AddCaseLog($"{localChar.CharacterName} 被淘汰，进入鬼魂模式，可继续帮助队友完成任务。");
+            Debug.Log($"[OnlineMatchController] 本地玩家 {localChar.CharacterName} 进入鬼魂模式。");
+        }
+
         private void ResolveTimeLimitOutcome()
         {
             if (!matchStarted || phase == OnlineMatchPhase.Result)
             {
+                return;
+            }
+
+            // 优先让 VictoryBridge 做超时判定
+            if (syncManager != null && syncManager.TryTimeLimitEvaluation(
+                matchElapsedSeconds, ruleSet.MatchHardLimitSeconds, evidenceScore, evidenceTarget, tasks, out string bridgeResult))
+            {
+                SetResult(bridgeResult);
                 return;
             }
 
@@ -3549,6 +4145,31 @@ namespace GanglandUndercover.Online
                     players[clientId] = state;
                 }
             }
+
+            // 暗线通道冷却（统一系统，原 TickVentCooldowns）
+            keys = new List<ulong>(ventCooldowns.Keys);
+            foreach (ulong id in keys)
+            {
+                float remaining = ventCooldowns[id] - deltaTime;
+                if (remaining <= 0f)
+                {
+                    ventCooldowns.Remove(id);
+                    if (players.TryGetValue(id, out OnlinePlayerState vState))
+                    {
+                        vState.VentCooldown = 0f;
+                        players[id] = vState;
+                    }
+                }
+                else
+                {
+                    ventCooldowns[id] = remaining;
+                    if (players.TryGetValue(id, out OnlinePlayerState vState))
+                    {
+                        vState.VentCooldown = remaining;
+                        players[id] = vState;
+                    }
+                }
+            }
         }
 
         private void TickBotAction(float deltaTime)
@@ -3574,6 +4195,7 @@ namespace GanglandUndercover.Online
                     body.Reported = true;
                     bodies[bodyIndex] = body;
                     players[botId] = bot;
+                    AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
                     BeginMeeting(bot.DisplayName + " 发现尸体并报案");
                     return;
                 }
@@ -3584,7 +4206,7 @@ namespace GanglandUndercover.Online
                 {
                     botThinkTimers[botId] = UnityEngine.Random.Range(BotThinkMinSeconds, BotThinkMaxSeconds);
 
-                    if (role == OnlineRole.Gang)
+                    if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                     {
                         if (UnityEngine.Random.value < 0.08f)
                         {
@@ -3598,7 +4220,7 @@ namespace GanglandUndercover.Online
                             victim.Input = Vector2.zero;
                             players[victimClientId] = victim;
                             bodies.Add(new OnlineBodyState(nextBodyId++, victimClientId, victim.Position, false));
-                            killCooldowns[botId] = KillCooldownSeconds;
+                            killCooldowns[botId] = ruleSet.KillCooldownSeconds;
                             status = bot.DisplayName + " 在黑灯巷口击倒了 " + victim.DisplayName + "。";
                             AddCaseLog(status);
                             EvaluateWinConditions();
@@ -3611,10 +4233,10 @@ namespace GanglandUndercover.Online
                             botTargets[botId] = PickSabotageTarget();
                         }
                     }
-                    else if (UnityEngine.Random.value < 0.2f && communicationJamTimer <= 0f && emergencyMeetingsLeft > 0 && Vector3.Distance(bot.Position, ScaleMapPosition(Vector3.zero)) <= ReportRange)
+                    else if (UnityEngine.Random.value < 0.2f && communicationJamTimer <= 0f && emergencyMeetingsLeft > 0 && Vector3.Distance(bot.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
                     {
                         emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-                        emergencyCooldownTimer = EmergencyCooldownSeconds;
+                        emergencyCooldownTimer = ruleSet.EmergencyCooldownSeconds;
                         BeginMeeting(bot.DisplayName + " 按下警署紧急铃");
                         BroadcastSnapshot();
                         return;
@@ -3695,7 +4317,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void AddCaseLog(string entry)
+        public void AddCaseLog(string entry)
         {
             if (string.IsNullOrWhiteSpace(entry))
             {
@@ -3704,7 +4326,7 @@ namespace GanglandUndercover.Online
 
             caseLog.Add(entry);
 
-            while (caseLog.Count > MaxCaseLogEntries)
+            while (caseLog.Count > ruleSet.MaxCaseLogEntries)
             {
                 caseLog.RemoveAt(0);
             }
@@ -3757,29 +4379,29 @@ namespace GanglandUndercover.Online
             switch (sabotageType)
             {
                 case SabotageType.Blackout:
-                    blackoutTimer = BlackoutSeconds;
+                    blackoutTimer = ruleSet.BlackoutSeconds;
                     status = "黑帮切断电闸，港区进入黑灯。";
                     AddCaseLog(status);
                     PlayCue("blackout");
                     break;
                 case SabotageType.Lockdown:
-                    lockdownTimer = LockdownSeconds;
+                    lockdownTimer = ruleSet.LockdownSeconds;
                     status = taskName + " 引发门禁封锁，部分路线被迫绕行。";
                     AddCaseLog(status);
                     break;
                 case SabotageType.Communications:
-                    communicationJamTimer = CommunicationJamSeconds;
+                    communicationJamTimer = ruleSet.CommunicationJamSeconds;
                     status = taskName + " 被干扰，紧急会议暂时无法呼叫。";
                     AddCaseLog(status);
                     break;
                 case SabotageType.EvidenceLeak:
-                    evidenceLeakTimer = EvidenceLeakSeconds;
+                    evidenceLeakTimer = ruleSet.EvidenceLeakSeconds;
                     status = taskName + " 泄露证据，证据链持续受损。";
                     AddCaseLog(status);
                     break;
                 case SabotageType.PatrolAlert:
-                    patrolAlertTimer = PatrolAlertSeconds;
-                    MarkNearbyGangSuspicion(ScaleMapPosition(Vector3.zero), 1);
+                    patrolAlertTimer = ruleSet.PatrolAlertSeconds;
+                    MarkNearbyGangSuspicion(mapService.ScaleMapPosition(Vector3.zero), 1);
                     status = taskName + " 触发巡逻警戒，靠近指挥区的嫌疑上升。";
                     AddCaseLog(status);
                     break;
@@ -3808,26 +4430,94 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private bool TryUseUnderworldPassage(ref OnlinePlayerState player)
+        /// <summary>
+        /// 统一暗线通道逻辑（合并原 OnlineVents / TryVent 系统）。
+        /// 权限：仅 Gang/Mole 可用；冷却由 ruleSet.VentCooldownSeconds 控制；
+        /// 节点位置来自 OnlineMapService；目标为对侧节点 (i+2)%count。
+        /// </summary>
+        private bool TryUseUnderworldPassage(ulong senderClientId, OnlinePlayerState player)
         {
-            Vector3 current = player.Position;
-
-            for (int i = 0; i < UnderworldPassageCount; i++)
+            // 1. 权限检查：仅 Gang/Mole 可用
+            OnlineRole role = GetPrivateRole(senderClientId);
+            if (role != OnlineRole.Gang && role != OnlineRole.Mole)
             {
-                Vector3 node = UnderworldPassagePosition(i);
-
-                if (Vector3.Distance(current, node) > UnderworldTransitRange)
-                {
-                    continue;
-                }
-
-                int exitIndex = (i + 2) % UnderworldPassageCount;
-                Vector3 exit = UnderworldPassagePosition(exitIndex);
-                Vector3 offset = new Vector3(UnityEngine.Random.Range(-0.32f, 0.32f), UnityEngine.Random.Range(-0.24f, 0.24f), 0f);
-                player.Position = FindNearestOpenPosition(exit + offset, exit);
-                return true;
+                status = player.DisplayName + " 试图使用暗线通道但权限不足（非黑帮）。";
+                BroadcastSnapshot();
+                return false;
             }
 
+            // 2. 存活检查
+            if (!player.Alive)
+            {
+                return false;
+            }
+
+            // 3. 冷却检查
+            if (ventCooldowns.TryGetValue(senderClientId, out float cooldown) && cooldown > 0f)
+            {
+                status = "暗线通道冷却中：" + Mathf.CeilToInt(cooldown) + "s";
+                BroadcastSnapshot();
+                return false;
+            }
+
+            // 4. 找到最近的暗线节点
+            Vector3 current = player.Position;
+            int nearestIdx = -1;
+            float nearestDist = ruleSet.UnderworldTransitRange;
+
+            for (int i = 0; i < ruleSet.UnderworldPassageCount; i++)
+            {
+                Vector3 node = mapService.UnderworldPassagePosition(i, ruleSet.UnderworldPassageCount);
+                float dist = Vector3.Distance(current, node);
+                if (dist < nearestDist)
+                {
+                    nearestDist = dist;
+                    nearestIdx = i;
+                }
+            }
+
+            if (nearestIdx < 0)
+            {
+                status = player.DisplayName + " 附近没有暗线通道入口。";
+                BroadcastSnapshot();
+                return false;
+            }
+
+            // 5. 选择目标节点（对侧节点）
+            int targetIdx = (nearestIdx + 2) % ruleSet.UnderworldPassageCount;
+            Vector3 exit = mapService.UnderworldPassagePosition(targetIdx, ruleSet.UnderworldPassageCount);
+            Vector3 offset = new Vector3(UnityEngine.Random.Range(-0.32f, 0.32f), UnityEngine.Random.Range(-0.24f, 0.24f), 0f);
+            Vector3 destination = FindNearestOpenPosition(exit + offset, exit);
+
+            // 6. 执行瞬移
+            player.Position = destination;
+            ventCooldowns[senderClientId] = ruleSet.VentCooldownSeconds;
+            player.VentCooldown = ruleSet.VentCooldownSeconds;
+            players[senderClientId] = player;
+
+            string msg = player.DisplayName + " 通过暗线通道从节点 " + nearestIdx + " 瞬移到节点 " + targetIdx + "。";
+            status = msg;
+            AddCaseLog(msg);
+            PlayCue("vent");
+            BroadcastSnapshot();
+            return true;
+        }
+
+        /// <summary>
+        /// 重载：供职业技能（Driver 等）调用，只传入 ref player，使用默认 senderClientId 逻辑。
+        /// </summary>
+        private bool TryUseUnderworldPassage(ref OnlinePlayerState player)
+        {
+            // 查找 player 对应的 clientId
+            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
+            {
+                if (ReferenceEquals(pair.Value, player) || pair.Value.ClientId == player.ClientId)
+                {
+                    return TryUseUnderworldPassage(pair.Key, player);
+                }
+            }
+
+            // fallback：找不到对应 clientId，直接返回 false
             return false;
         }
 
@@ -3879,7 +4569,7 @@ namespace GanglandUndercover.Online
         {
             victimClientId = SkipVoteTarget;
             victim = default;
-            float bestDistance = KillRange;
+            float bestDistance = ruleSet.KillRange;
 
             foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
             {
@@ -3906,7 +4596,7 @@ namespace GanglandUndercover.Online
         private bool TryFindNearestBody(Vector3 position, out int bodyIndex)
         {
             bodyIndex = -1;
-            float bestDistance = ReportRange;
+            float bestDistance = ruleSet.ReportRange;
 
             for (int i = 0; i < bodies.Count; i++)
             {
@@ -4150,7 +4840,7 @@ namespace GanglandUndercover.Online
 
             if (options.Count == 0)
             {
-                return ScaleMapPosition(Vector3.zero);
+                return mapService.ScaleMapPosition(Vector3.zero);
             }
 
             return options[UnityEngine.Random.Range(0, options.Count)].Position;
@@ -4160,7 +4850,7 @@ namespace GanglandUndercover.Online
         {
             if (tasks.Count == 0)
             {
-                return ScaleMapPosition(Vector3.zero);
+                return mapService.ScaleMapPosition(Vector3.zero);
             }
 
             if (UnityEngine.Random.value < 0.4f)
@@ -4298,9 +4988,9 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private static int EmergencyMeetingLimitFor(int playerCount)
+        private int EmergencyMeetingLimitFor(int playerCount)
         {
-            return Mathf.Clamp(playerCount / 3, 1, 3);
+            return ruleSet.EmergencyMeetingLimitFor(playerCount);
         }
 
         private string BuildPlayerList()
@@ -4535,7 +5225,7 @@ namespace GanglandUndercover.Online
         {
             float evidenceRatio = evidenceScore / (float)Mathf.Max(1, evidenceTarget);
             float taskRatio = CountCompletedTasks() / (float)Mathf.Max(1, tasks.Count);
-            float timeRatio = Mathf.Clamp01(matchElapsedSeconds / MatchHardLimitSeconds);
+            float timeRatio = Mathf.Clamp01(matchElapsedSeconds / ruleSet.MatchHardLimitSeconds);
             int aliveGang = CountAliveRole(OnlineRole.Gang);
             int aliveNonGang = CountAlivePlayers() - aliveGang;
             int unresolvedBodies = CountUnreportedBodies();
@@ -4566,6 +5256,13 @@ namespace GanglandUndercover.Online
             {
                 OnlineTaskState target = FindRecommendedTask(LocalCameraTarget());
                 return "加速取证但控制嫌疑，优先推进 " + target.Name + "，会议里不要暴露路线。";
+            }
+
+            if (role == OnlineRole.Mole)
+            {
+                OnlineTaskState sabotageTargetMol = FindHighestValueOpenTask();
+                string targetTextMol = sabotageTargetMol.Id >= 0 ? sabotageTargetMol.Name + "/" + SabotageName(SabotageForTask(sabotageTargetMol.Id)) : "寻找落单目标";
+                return "身为线人隐匿在警方之中，破坏证据并掩护黑帮，优先干扰 " + targetTextMol + "，利用警察身份误导搜查方向。";
             }
 
             OnlineTaskState recommended = FindRecommendedTask(LocalCameraTarget());
@@ -4640,7 +5337,7 @@ namespace GanglandUndercover.Online
                 return "附近发现尸体，按 R 报案开会。";
             }
 
-            if (Vector3.Distance(localState.Position, ScaleMapPosition(Vector3.zero)) <= ReportRange)
+            if (Vector3.Distance(localState.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
             {
                 return "你在紧急铃旁，剩余会议 " + emergencyMeetingsLeft + "，断讯/冷却会阻止开会。";
             }
@@ -4687,11 +5384,11 @@ namespace GanglandUndercover.Online
             return best;
         }
 
-        private static bool IsNearUnderworldPassage(Vector3 position)
+        private bool IsNearUnderworldPassage(Vector3 position)
         {
-            for (int i = 0; i < UnderworldPassageCount; i++)
+            for (int i = 0; i < ruleSet.UnderworldPassageCount; i++)
             {
-                if (Vector3.Distance(position, UnderworldPassagePosition(i)) <= UnderworldTransitRange)
+                if (Vector3.Distance(position, mapService.UnderworldPassagePosition(i, ruleSet.UnderworldPassageCount)) <= ruleSet.UnderworldTransitRange)
                 {
                     return true;
                 }
@@ -4826,17 +5523,17 @@ namespace GanglandUndercover.Online
             roomName = LimitText(GUILayout.TextField(roomName), 20, "九龙港区夜局");
             GUILayout.BeginHorizontal();
             GUILayout.Label("最少人数 " + roomMinPlayers, GUILayout.Width(110f));
-            roomMinPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMinPlayers, MinimumRoomPlayers, MaximumRoomPlayers));
+            roomMinPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMinPlayers, ruleSet.MinimumRoomPlayers, ruleSet.MaximumRoomPlayers));
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
             GUILayout.Label("最大人数 " + roomMaxPlayers, GUILayout.Width(110f));
-            roomMaxPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMaxPlayers, roomMinPlayers, MaximumRoomPlayers));
+            roomMaxPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMaxPlayers, roomMinPlayers, ruleSet.MaximumRoomPlayers));
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
             GUILayout.Label("证据目标 " + evidenceTarget, GUILayout.Width(110f));
             evidenceTarget = Mathf.RoundToInt(GUILayout.HorizontalSlider(evidenceTarget, 34, 56));
             GUILayout.EndHorizontal();
-            GUILayout.Label("目标局长: " + TargetMatchMinutesMin + "-" + TargetMatchMinutesMax + " 分钟 | 击倒冷却 " + Mathf.RoundToInt(KillCooldownSeconds) + "s | 会议 " + Mathf.RoundToInt(MeetingIntroSeconds + VotingSeconds) + "s");
+            GUILayout.Label("目标局长: " + TargetMatchMinutesMin + "-" + TargetMatchMinutesMax + " 分钟 | 击倒冷却 " + Mathf.RoundToInt(ruleSet.KillCooldownSeconds) + "s | 会议 " + Mathf.RoundToInt(ruleSet.MeetingIntroSeconds + ruleSet.VotingSeconds) + "s");
             roomAutoFillAi = GUILayout.Toggle(roomAutoFillAi, "人数不足时 AI 补位");
             revealRoleOnEject = GUILayout.Toggle(revealRoleOnEject, "投出局时公开身份");
             proximityVoiceEnabled = GUILayout.Toggle(proximityVoiceEnabled, "近距离语音规则");
@@ -4898,7 +5595,7 @@ namespace GanglandUndercover.Online
             float promptWidth = Mathf.Clamp(Screen.width * 0.34f, 420f, 560f);
             Rect promptRect = new Rect((Screen.width - promptWidth) * 0.5f, Screen.height - 66f, promptWidth, 48f);
             GUILayout.BeginArea(promptRect, GUI.skin.box);
-            GUILayout.Label(BuildLocalActionHint() + " | WASD/E/Q/R/F/M/I");
+            GUILayout.Label(BuildLocalActionHint() + " | WASD/E/Q/R/F/V/M/I");
             GUILayout.EndArea();
 
             float miniWidth = Mathf.Clamp(Screen.width * 0.13f, 165f, 220f);
@@ -4933,7 +5630,7 @@ namespace GanglandUndercover.Online
             GUILayout.Label("技能 | " + ProfessionName(localState.Profession));
 
             float abilityCooldown = abilityCooldowns.TryGetValue(localState.ClientId, out float value) ? value : localState.AbilityCooldown;
-            float ratio = Mathf.Clamp01(1f - abilityCooldown / AbilityCooldownSeconds);
+            float ratio = Mathf.Clamp01(1f - abilityCooldown / ruleSet.AbilityCooldownSeconds);
             Rect bar = GUILayoutUtility.GetRect(rect.width - 18f, 12f);
             DrawProgressBar(bar, ratio, ratio >= 1f ? new Color(0.12f, 0.74f, 0.36f, 1f) : new Color(0.08f, 0.42f, 0.72f, 1f));
             GUILayout.Label(ratio >= 1f ? "F 可用" : "冷却 " + Mathf.CeilToInt(abilityCooldown) + "s");
@@ -5639,14 +6336,14 @@ namespace GanglandUndercover.Online
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
             DrawMiniMapCorridors(rect);
 
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
-                DrawMiniMapArea(rect, ScaleMapPosition(room.Center), ScaleMapSize(room.Size), room.Floor, withLabels ? room.Label : string.Empty);
+                DrawMiniMapArea(rect, mapService.ScaleMapPosition(room.Center), mapService.ScaleMapSize(room.Size), room.Floor, withLabels ? room.Label : string.Empty);
             }
 
-            for (int i = 0; i < UnderworldPassageCount; i++)
+            for (int i = 0; i < ruleSet.UnderworldPassageCount; i++)
             {
-                DrawMiniMapDot(rect, UnderworldPassagePosition(i), new Color(0.78f, 0.2f, 0.86f, 1f), withLabels ? 8f : 5f);
+                DrawMiniMapDot(rect, mapService.UnderworldPassagePosition(i, ruleSet.UnderworldPassageCount), new Color(0.78f, 0.2f, 0.86f, 1f), withLabels ? 8f : 5f);
             }
 
             foreach (OnlineTaskState task in tasks)
@@ -5690,18 +6387,18 @@ namespace GanglandUndercover.Online
         {
             Color oldColor = GUI.color;
             GUI.color = new Color(0.22f, 0.25f, 0.26f, 1f);
-            DrawMiniMapArea(rect, ScaleMapPosition(new Vector3(0f, -0.18f, 0f)), ScaleMapSize(new Vector3(15.5f, 1.2f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, ScaleMapPosition(new Vector3(0f, 3.65f, 0f)), ScaleMapSize(new Vector3(16.4f, 1.04f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, ScaleMapPosition(new Vector3(0.12f, -3.9f, 0f)), ScaleMapSize(new Vector3(15.4f, 1.04f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, ScaleMapPosition(new Vector3(-6.85f, 0.15f, 0f)), ScaleMapSize(new Vector3(1.08f, 8.35f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, ScaleMapPosition(new Vector3(7.05f, 0.08f, 0f)), ScaleMapSize(new Vector3(1.08f, 8.18f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, ScaleMapPosition(new Vector3(0f, 1.85f, 0f)), ScaleMapSize(new Vector3(1.08f, 3.15f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, ScaleMapPosition(new Vector3(0f, -2.35f, 0f)), ScaleMapSize(new Vector3(1.08f, 3.05f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapDot(rect, ScaleMapPosition(new Vector3(0f, -0.35f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 13f);
-            DrawMiniMapDot(rect, ScaleMapPosition(new Vector3(-6.85f, 3.65f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
-            DrawMiniMapDot(rect, ScaleMapPosition(new Vector3(7.05f, 3.65f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
-            DrawMiniMapDot(rect, ScaleMapPosition(new Vector3(-6.85f, -3.9f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
-            DrawMiniMapDot(rect, ScaleMapPosition(new Vector3(7.05f, -3.9f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
+            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, -0.18f, 0f)), mapService.ScaleMapSize(new Vector3(15.5f, 1.2f, 0f)), GUI.color, string.Empty);
+            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, 3.65f, 0f)), mapService.ScaleMapSize(new Vector3(16.4f, 1.04f, 0f)), GUI.color, string.Empty);
+            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0.12f, -3.9f, 0f)), mapService.ScaleMapSize(new Vector3(15.4f, 1.04f, 0f)), GUI.color, string.Empty);
+            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(-6.85f, 0.15f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 8.35f, 0f)), GUI.color, string.Empty);
+            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(7.05f, 0.08f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 8.18f, 0f)), GUI.color, string.Empty);
+            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, 1.85f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 3.15f, 0f)), GUI.color, string.Empty);
+            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, -2.35f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 3.05f, 0f)), GUI.color, string.Empty);
+            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(0f, -0.35f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 13f);
+            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(-6.85f, 3.65f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
+            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(7.05f, 3.65f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
+            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(-6.85f, -3.9f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
+            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(7.05f, -3.9f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
             GUI.color = oldColor;
         }
 
@@ -5752,15 +6449,15 @@ namespace GanglandUndercover.Online
         private static Rect WorldRectToMapRect(Rect mapRect, Vector3 worldCenter, Vector3 worldSize)
         {
             Vector2 center = WorldToMapPoint(mapRect, worldCenter);
-            float width = worldSize.x / (MapHalfWidth * 2f) * mapRect.width;
-            float height = worldSize.y / (MapHalfHeight * 2f) * mapRect.height;
+            float width = worldSize.x / (mapService.MapHalfWidth * 2f) * mapRect.width;
+            float height = worldSize.y / (mapService.MapHalfHeight * 2f) * mapRect.height;
             return new Rect(center.x - width * 0.5f, center.y - height * 0.5f, width, height);
         }
 
         private static Vector2 WorldToMapPoint(Rect mapRect, Vector3 worldPosition)
         {
-            float x = Mathf.InverseLerp(-MapHalfWidth, MapHalfWidth, worldPosition.x);
-            float y = Mathf.InverseLerp(-MapHalfHeight, MapHalfHeight, worldPosition.y);
+            float x = Mathf.InverseLerp(-mapService.MapHalfWidth, mapService.MapHalfWidth, worldPosition.x);
+            float y = Mathf.InverseLerp(-mapService.MapHalfHeight, mapService.MapHalfHeight, worldPosition.y);
             return new Vector2(mapRect.x + x * mapRect.width, mapRect.y + (1f - y) * mapRect.height);
         }
 
@@ -5788,7 +6485,7 @@ namespace GanglandUndercover.Online
 
             ulong bestClientId = fallbackClientId;
             float bestDistance = float.MaxValue;
-            Vector3 anchor = ScaleMapPosition(new Vector3(-4.8f, 1.65f, 0f));
+            Vector3 anchor = mapService.ScaleMapPosition(new Vector3(-4.8f, 1.65f, 0f));
 
             foreach (OnlinePlayerState state in players.Values)
             {
@@ -5849,6 +6546,25 @@ namespace GanglandUndercover.Online
             GUI.enabled = previousEnabled;
         }
 
+        private void DrawActionChatPanel()
+        {
+            if (chatSystem == null)
+            {
+                return;
+            }
+
+            float chatWidth = Mathf.Clamp(Screen.width * 0.22f, 240f, 340f);
+            float chatHeight = Mathf.Clamp(Screen.height * 0.35f, 220f, 360f);
+            Rect chatArea = new Rect(Screen.width - chatWidth - 18f, Screen.height - chatHeight - 18f, chatWidth, chatHeight);
+
+            chatSystem.CurrentPhase = OnlineMatchPhase.Action;
+            chatSystem.CanSend = IsLocalAlive();
+            chatSystem.IsAlive = IsLocalAlive();
+            chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
+            chatSystem.ProcessInputKeys();
+            chatSystem.DrawChatPanel(chatArea, null);
+        }
+
         private void DrawMeetingScreen()
         {
             float boardWidth = Mathf.Clamp(Screen.width * 0.58f, 720f, 980f);
@@ -5870,12 +6586,31 @@ namespace GanglandUndercover.Online
             GUILayout.EndVertical();
 
             GUILayout.BeginVertical();
+            float rightWidth = boardWidth * 0.4f;
+
+            // 案情记录（上半部分）
             GUILayout.Label("案情记录");
-            intelScroll = GUILayout.BeginScrollView(intelScroll);
+            float intelHeight = boardHeight * 0.38f;
+            intelScroll = GUILayout.BeginScrollView(intelScroll, GUILayout.Height(intelHeight));
             GUILayout.Label(BuildFocusedIntel());
             GUILayout.Space(8f);
             GUILayout.Label(BuildCaseLog());
             GUILayout.EndScrollView();
+
+            // 聊天区域（下半部分）
+            GUILayout.Space(6f);
+            if (chatSystem != null)
+            {
+                float chatHeight = boardHeight * 0.42f;
+                Rect chatArea = GUILayoutUtility.GetRect(rightWidth, chatHeight);
+                chatSystem.CurrentPhase = phase;
+                chatSystem.CanSend = IsLocalAlive();
+                chatSystem.IsAlive = IsLocalAlive();
+                chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
+                chatSystem.ProcessInputKeys();
+                chatSystem.DrawChatPanel(chatArea, null);
+            }
+
             GUILayout.EndVertical();
             GUILayout.EndHorizontal();
             GUILayout.EndArea();
@@ -6136,19 +6871,19 @@ namespace GanglandUndercover.Online
             tasks.Clear();
             for (int id = 0; id <= 19; id++)
             {
-                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), TaskPositionFor(id), 0, TaskRequiredProgress(id), false, false));
+                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), mapService.TaskPositionFor(id), 0, TaskRequiredProgress(id), false, false));
             }
 
             for (int id = 20; id <= 27; id++)
             {
-                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), TaskPositionFor(id), 0, TaskRequiredProgress(id), false, false));
+                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), mapService.TaskPositionFor(id), 0, TaskRequiredProgress(id), false, false));
             }
         }
 
         private OnlineTaskState FindNearestTask(Vector3 position)
         {
             OnlineTaskState best = new OnlineTaskState(-1, string.Empty, Vector3.zero, 0, 1, false, false);
-            float bestDistance = InteractionRange;
+            float bestDistance = ruleSet.InteractionRange;
 
             foreach (OnlineTaskState task in tasks)
             {
@@ -6865,7 +7600,7 @@ namespace GanglandUndercover.Online
         private void CreateStageTwoCharacterStateLayer(Transform parent, OnlinePlayerState state)
         {
             Color accent = PlayerAccentColor(state);
-            CreateSpriteChild(parent, "Stage2 Character interaction radius", circleSprite, new Vector3(0f, -0.18f, -0.44f), new Vector3(InteractionRange * 2f, InteractionRange * 1.18f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.12f));
+            CreateSpriteChild(parent, "Stage2 Character interaction radius", circleSprite, new Vector3(0f, -0.18f, -0.44f), new Vector3(ruleSet.InteractionRange * 2f, ruleSet.InteractionRange * 1.18f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.12f));
             CreateSpriteChild(parent, "Stage2 VoiceRadius action proximity", circleSprite, new Vector3(0f, -0.18f, -0.46f), new Vector3(2.35f, 1.36f, 0.05f), new Color(0.08f, 0.7f, 0.9f, 0.1f));
             CreateSpriteChild(parent, "Stage2 Downed chalk silhouette", roundedRectSprite, new Vector3(0.04f, -0.24f, -0.42f), new Vector3(0.86f, 0.28f, 0.06f), new Color(0.9f, 0.88f, 0.74f, 0.48f));
             CreateMeshBoxChild(parent, "Stage2 Downed personal item", new Vector3(-0.28f, -0.36f, 0.16f), new Vector3(0.12f, 0.035f, 0.1f), new Color(0.92f, 0.76f, 0.18f, 1f), -12f);
@@ -6921,7 +7656,7 @@ namespace GanglandUndercover.Online
             CreatePropChild(bodyObject.transform, "Stage2 Forensic blood marker", new Vector3(0.28f, -0.12f, 0.06f), new Vector3(0.16f, 0.04f, 0.05f), new Color(0.86f, 0.04f, 0.03f, 0.9f), PrimitiveType.Cube);
             CreatePropChild(bodyObject.transform, "Stage2 Forensic police tape A", new Vector3(0f, 0.34f, 0.08f), new Vector3(0.72f, 0.035f, 0.05f), new Color(0.95f, 0.72f, 0.08f, 1f), PrimitiveType.Cube);
             CreatePropChild(bodyObject.transform, "Stage2 Forensic police tape B", new Vector3(0f, -0.34f, 0.08f), new Vector3(0.72f, 0.035f, 0.05f), new Color(0.95f, 0.72f, 0.08f, 1f), PrimitiveType.Cube);
-            CreateSpriteChild(bodyObject.transform, "Stage2 Report body radius", circleSprite, new Vector3(0f, 0f, -0.08f), new Vector3(ReportRange * 2f, ReportRange * 1.22f, 0.05f), new Color(0.95f, 0.2f, 0.12f, 0.14f));
+            CreateSpriteChild(bodyObject.transform, "Stage2 Report body radius", circleSprite, new Vector3(0f, 0f, -0.08f), new Vector3(ruleSet.ReportRange * 2f, ruleSet.ReportRange * 1.22f, 0.05f), new Color(0.95f, 0.2f, 0.12f, 0.14f));
             CreateWorldLabel(bodyObject.transform, "报案", new Vector3(0f, 0.52f, -0.14f), 0.055f);
             CreateWorldLabel(bodyObject.transform, "尸体", new Vector3(0f, 0.32f, -0.12f), 0.06f);
             return bodyObject;
@@ -6934,10 +7669,10 @@ namespace GanglandUndercover.Online
             CreateProp("港区主干道暗面", new Vector3(0f, -0.1f, -0.3f), new Vector3(24.0f, 8.6f, 0.08f), new Color(0.094f, 0.112f, 0.116f, 1f));
             CreateProp("港区北侧仓储街块", new Vector3(0f, 4.7f, -0.305f), new Vector3(22.5f, 4.7f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
             CreateProp("港区南侧封控街块", new Vector3(0f, -5.2f, -0.305f), new Vector3(22.2f, 3.9f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
-            CreateProp("北侧港区围挡", new Vector3(0f, DesignMapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("南侧港区围挡", new Vector3(0f, -DesignMapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("西侧港区围挡", new Vector3(-DesignMapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("东侧港区围挡", new Vector3(DesignMapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("北侧港区围挡", new Vector3(0f, DesignmapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("南侧港区围挡", new Vector3(0f, -DesignmapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("西侧港区围挡", new Vector3(-DesignmapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
+            CreateProp("东侧港区围挡", new Vector3(DesignmapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
         }
 
         private void CreateRoadNetwork()
@@ -7023,18 +7758,18 @@ namespace GanglandUndercover.Online
             Color trim = new Color(0.48f, 0.48f, 0.42f, 1f);
             Color door = new Color(0.88f, 0.66f, 0.12f, 1f);
 
-            CreateRoomFrame("西码头货柜场", new Vector3(-9.3f, 5.35f, 0.09f), new Vector3(4.25f, 2.05f, 0.24f), wall, trim, MapEntrance.South);
-            CreateRoomFrame("海关查验区", new Vector3(-5.0f, 5.35f, 0.09f), new Vector3(2.95f, 2.05f, 0.24f), wall, trim, MapEntrance.South);
-            CreateRoomFrame("监控室", new Vector3(-9.35f, 1.85f, 0.09f), new Vector3(2.85f, 1.85f, 0.24f), wall, trim, MapEntrance.East);
-            CreateRoomFrame("茶餐厅", new Vector3(-4.8f, 1.65f, 0.09f), new Vector3(2.85f, 1.8f, 0.24f), wall, trim, MapEntrance.East);
-            CreateRoomFrame("夜市主街", new Vector3(-1.0f, 2.75f, 0.09f), new Vector3(4.0f, 2.05f, 0.24f), wall, trim, MapEntrance.South);
-            CreateRoomFrame("金融楼", new Vector3(4.75f, 2.75f, 0.09f), new Vector3(3.3f, 2.05f, 0.24f), wall, trim, MapEntrance.West);
-            CreateRoomFrame("电房", new Vector3(8.85f, 5.25f, 0.09f), new Vector3(2.7f, 2.05f, 0.24f), wall, trim, MapEntrance.South);
-            CreateRoomFrame("天台通道", new Vector3(8.95f, 1.65f, 0.09f), new Vector3(2.65f, 1.8f, 0.24f), wall, trim, MapEntrance.West);
-            CreateRoomFrame("指挥车广场", new Vector3(0f, -5.35f, 0.09f), new Vector3(4.25f, 1.85f, 0.24f), wall, trim, MapEntrance.North);
-            CreateRoomFrame("证物库", new Vector3(-8.6f, -5.05f, 0.09f), new Vector3(3.25f, 1.9f, 0.24f), wall, trim, MapEntrance.East);
-            CreateRoomFrame("后巷排档", new Vector3(5.6f, -1.55f, 0.09f), new Vector3(3.45f, 2.1f, 0.24f), wall, trim, MapEntrance.West);
-            CreateRoomFrame("地下诊所", new Vector3(6.15f, -5.05f, 0.09f), new Vector3(3.35f, 1.9f, 0.24f), wall, trim, MapEntrance.North);
+            CreateRoomFrame("西码头货柜场", new Vector3(-9.3f, 5.35f, 0.09f), new Vector3(4.25f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
+            CreateRoomFrame("海关查验区", new Vector3(-5.0f, 5.35f, 0.09f), new Vector3(2.95f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
+            CreateRoomFrame("监控室", new Vector3(-9.35f, 1.85f, 0.09f), new Vector3(2.85f, 1.85f, 0.24f), wall, trim, OnlineMapService.MapEntrance.East);
+            CreateRoomFrame("茶餐厅", new Vector3(-4.8f, 1.65f, 0.09f), new Vector3(2.85f, 1.8f, 0.24f), wall, trim, OnlineMapService.MapEntrance.East);
+            CreateRoomFrame("夜市主街", new Vector3(-1.0f, 2.75f, 0.09f), new Vector3(4.0f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
+            CreateRoomFrame("金融楼", new Vector3(4.75f, 2.75f, 0.09f), new Vector3(3.3f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.West);
+            CreateRoomFrame("电房", new Vector3(8.85f, 5.25f, 0.09f), new Vector3(2.7f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
+            CreateRoomFrame("天台通道", new Vector3(8.95f, 1.65f, 0.09f), new Vector3(2.65f, 1.8f, 0.24f), wall, trim, OnlineMapService.MapEntrance.West);
+            CreateRoomFrame("指挥车广场", new Vector3(0f, -5.35f, 0.09f), new Vector3(4.25f, 1.85f, 0.24f), wall, trim, OnlineMapService.MapEntrance.North);
+            CreateRoomFrame("证物库", new Vector3(-8.6f, -5.05f, 0.09f), new Vector3(3.25f, 1.9f, 0.24f), wall, trim, OnlineMapService.MapEntrance.East);
+            CreateRoomFrame("后巷排档", new Vector3(5.6f, -1.55f, 0.09f), new Vector3(3.45f, 2.1f, 0.24f), wall, trim, OnlineMapService.MapEntrance.West);
+            CreateRoomFrame("地下诊所", new Vector3(6.15f, -5.05f, 0.09f), new Vector3(3.35f, 1.9f, 0.24f), wall, trim, OnlineMapService.MapEntrance.North);
 
             CreateRoadDetailLayer();
             CreateSharedCityProps();
@@ -7053,7 +7788,7 @@ namespace GanglandUndercover.Online
             CreateDoorMarker("诊所卷闸门", new Vector3(6.15f, -4.02f, 0.13f), new Vector3(0.92f, 0.07f, 0.08f), new Color(0.52f, 0.78f, 0.72f, 1f));
         }
 
-        private void CreateRoomFrame(string roomName, Vector3 center, Vector3 size, Color wallColor, Color trimColor, MapEntrance entrance)
+        private void CreateRoomFrame(string roomName, Vector3 center, Vector3 size, Color wallColor, Color trimColor, OnlineMapService.MapEntrance entrance)
         {
             float wallThickness = 0.08f;
             float doorGap = Mathf.Min(1.45f, size.x * 0.42f);
@@ -7063,7 +7798,7 @@ namespace GanglandUndercover.Online
             float horizontalSegment = Mathf.Max(0.1f, (size.x - doorGap) * 0.5f);
             float verticalSegment = Mathf.Max(0.1f, (size.y - verticalDoorGap) * 0.5f);
 
-            if (entrance == MapEntrance.North)
+            if (entrance == OnlineMapService.MapEntrance.North)
             {
                 CreateWallSegment(roomName + " 北墙左", center + new Vector3(-(doorGap + horizontalSegment) * 0.5f, halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
                 CreateWallSegment(roomName + " 北墙右", center + new Vector3((doorGap + horizontalSegment) * 0.5f, halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
@@ -7073,7 +7808,7 @@ namespace GanglandUndercover.Online
                 CreateWallSegment(roomName + " 北墙", center + new Vector3(0f, halfHeight, 0f), new Vector3(size.x, wallThickness, size.z), wallColor);
             }
 
-            if (entrance == MapEntrance.South)
+            if (entrance == OnlineMapService.MapEntrance.South)
             {
                 CreateWallSegment(roomName + " 南墙左", center + new Vector3(-(doorGap + horizontalSegment) * 0.5f, -halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
                 CreateWallSegment(roomName + " 南墙右", center + new Vector3((doorGap + horizontalSegment) * 0.5f, -halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
@@ -7083,7 +7818,7 @@ namespace GanglandUndercover.Online
                 CreateWallSegment(roomName + " 南墙", center + new Vector3(0f, -halfHeight, 0f), new Vector3(size.x, wallThickness, size.z), wallColor);
             }
 
-            if (entrance == MapEntrance.East)
+            if (entrance == OnlineMapService.MapEntrance.East)
             {
                 CreateWallSegment(roomName + " 东墙上", center + new Vector3(halfWidth, (verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
                 CreateWallSegment(roomName + " 东墙下", center + new Vector3(halfWidth, -(verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
@@ -7093,7 +7828,7 @@ namespace GanglandUndercover.Online
                 CreateWallSegment(roomName + " 东墙", center + new Vector3(halfWidth, 0f, 0f), new Vector3(wallThickness, size.y, size.z), wallColor);
             }
 
-            if (entrance == MapEntrance.West)
+            if (entrance == OnlineMapService.MapEntrance.West)
             {
                 CreateWallSegment(roomName + " 西墙上", center + new Vector3(-halfWidth, (verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
                 CreateWallSegment(roomName + " 西墙下", center + new Vector3(-halfWidth, -(verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
@@ -7143,7 +7878,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void CreateRoomAirlockBulges(string roomName, Vector3 center, Vector3 size, Color trimColor, MapEntrance entrance)
+        private void CreateRoomAirlockBulges(string roomName, Vector3 center, Vector3 size, Color trimColor, OnlineMapService.MapEntrance entrance)
         {
             float halfWidth = size.x * 0.5f;
             float halfHeight = size.y * 0.5f;
@@ -7151,19 +7886,19 @@ namespace GanglandUndercover.Online
 
             switch (entrance)
             {
-                case MapEntrance.North:
+                case OnlineMapService.MapEntrance.North:
                     CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(0f, halfHeight + 0.08f, 0.12f), new Vector3(0.62f, 0.38f, 0.05f), trimColor);
                     CreateProp(roomName + " 气闸玻璃", center + new Vector3(0f, halfHeight + 0.1f, 0.18f), new Vector3(0.38f, 0.06f, 0.05f), glass);
                     break;
-                case MapEntrance.South:
+                case OnlineMapService.MapEntrance.South:
                     CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(0f, -halfHeight - 0.08f, 0.12f), new Vector3(0.62f, 0.38f, 0.05f), trimColor);
                     CreateProp(roomName + " 气闸玻璃", center + new Vector3(0f, -halfHeight - 0.1f, 0.18f), new Vector3(0.38f, 0.06f, 0.05f), glass);
                     break;
-                case MapEntrance.East:
+                case OnlineMapService.MapEntrance.East:
                     CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(halfWidth + 0.08f, 0f, 0.12f), new Vector3(0.38f, 0.62f, 0.05f), trimColor);
                     CreateProp(roomName + " 气闸玻璃", center + new Vector3(halfWidth + 0.1f, 0f, 0.18f), new Vector3(0.06f, 0.38f, 0.05f), glass);
                     break;
-                case MapEntrance.West:
+                case OnlineMapService.MapEntrance.West:
                     CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(-halfWidth - 0.08f, 0f, 0.12f), new Vector3(0.38f, 0.62f, 0.05f), trimColor);
                     CreateProp(roomName + " 气闸玻璃", center + new Vector3(-halfWidth - 0.1f, 0f, 0.18f), new Vector3(0.06f, 0.38f, 0.05f), glass);
                     break;
@@ -7217,7 +7952,7 @@ namespace GanglandUndercover.Online
             CreateRoomEquipmentBays(name, center, size, height);
             CreateProp("屋顶 " + name + " 门楣灯", center + new Vector3(0f, -halfHeight + 0.18f, 0.22f), new Vector3(Mathf.Min(1.05f, size.x * 0.35f), 0.08f, 0.08f), new Color(0.94f, 0.72f, 0.12f, 1f));
             CreateProp("屋顶 " + name + " 导航箭头", center + new Vector3(-halfWidth + 0.35f, halfHeight - 0.34f, 0.2f), new Vector3(0.22f, 0.18f, 0.08f), trim);
-            CreateWorldLabelAt(sign, ScaleMapPosition(new Vector3(center.x, center.y + halfHeight - 0.3f, -0.18f)), 0.055f);
+            CreateWorldLabelAt(sign, mapService.ScaleMapPosition(new Vector3(center.x, center.y + halfHeight - 0.3f, -0.18f)), 0.055f);
         }
 
         private void CreateRoomFloorTiles(string name, Vector3 center, Vector3 size, Color baseColor)
@@ -7372,9 +8107,9 @@ namespace GanglandUndercover.Online
 
         private void CreateUnderworldPassageNodes()
         {
-            for (int i = 0; i < UnderworldPassageCount; i++)
+            for (int i = 0; i < ruleSet.UnderworldPassageCount; i++)
             {
-                Vector3 position = UnderworldPassageDesignPosition(i);
+                Vector3 position = mapService.UnderworldPassageDesignPosition(i, ruleSet.UnderworldPassageCount);
                 CreateModelProp("暗线节点 " + i + " CC0 Vent Hatch", "Props/Prop_Vent_Big.fbx", position + new Vector3(0f, 0f, 0.02f), new Vector3(0.62f, 0.62f, 0.16f), i * 23f);
                 GameObject node = CreatePrimitiveProp("暗线节点 " + i, PrimitiveType.Cylinder, position + new Vector3(0f, 0f, 0.1f), new Vector3(0.26f, 0.08f, 0.26f), new Color(0.45f, 0.1f, 0.55f, 1f));
                 CreatePropChild(node.transform, "暗线井盖纹", new Vector3(0f, 0f, 0.06f), new Vector3(0.64f, 0.12f, 0.08f), new Color(0.9f, 0.42f, 1f, 1f), PrimitiveType.Cube);
@@ -7401,7 +8136,7 @@ namespace GanglandUndercover.Online
         private void CreateZone(string zoneName, Vector3 position, Vector3 scale, Color color)
         {
             CreateProp(zoneName, position, scale, color);
-            CreateWorldLabelAt(zoneName, ScaleMapPosition(position + new Vector3(0f, scale.y * 0.34f, -0.16f)), 0.07f);
+            CreateWorldLabelAt(zoneName, mapService.ScaleMapPosition(position + new Vector3(0f, scale.y * 0.34f, -0.16f)), 0.07f);
         }
 
         private void CreateRoad(string roadName, Vector3 position, Vector3 scale, Color color)
@@ -7680,8 +8415,8 @@ namespace GanglandUndercover.Online
                 ? CreateSpriteObject(propName, circleSprite, color)
                 : CreateSpriteObject(propName, roundedRectSprite, color);
             prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = ScaleMapPosition(position);
-            prop.transform.localScale = ScaleMapSize(scale);
+            prop.transform.position = mapService.ScaleMapPosition(position);
+            prop.transform.localScale = mapService.ScaleMapSize(scale);
             SetSortingFromZ(prop);
             return prop;
         }
@@ -7698,8 +8433,8 @@ namespace GanglandUndercover.Online
         {
             GameObject prop = CreateSpriteObject(propName, roundedRectSprite, color);
             prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = ScaleMapPosition(position);
-            prop.transform.localScale = ScaleMapSize(scale);
+            prop.transform.position = mapService.ScaleMapPosition(position);
+            prop.transform.localScale = mapService.ScaleMapSize(scale);
             SetSortingFromZ(prop);
             return prop;
         }
@@ -7721,8 +8456,8 @@ namespace GanglandUndercover.Online
         {
             GameObject prop = CreateSpriteObject(propName, sprite, color);
             prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = ScaleMapPosition(position);
-            prop.transform.localScale = ScaleMapSize(scale);
+            prop.transform.position = mapService.ScaleMapPosition(position);
+            prop.transform.localScale = mapService.ScaleMapSize(scale);
             SetSortingFromZ(prop);
             return prop;
         }
@@ -7741,8 +8476,8 @@ namespace GanglandUndercover.Online
             prop.name = propName;
             Remove3DCollider(prop);
             prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = ScaleMapPosition(position);
-            prop.transform.localScale = ScaleMapSize(scale);
+            prop.transform.position = mapService.ScaleMapPosition(position);
+            prop.transform.localScale = mapService.ScaleMapSize(scale);
             prop.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees);
             ConfigureRuntimeMesh(prop, color);
             SetSortingFromZ(prop);
@@ -7791,8 +8526,8 @@ namespace GanglandUndercover.Online
             prop.name = propName;
             Remove3DCollider(prop);
             prop.transform.SetParent(worldRoot.transform, false);
-            prop.transform.position = ScaleMapPosition(position);
-            prop.transform.localScale = ScaleMapSize(scale);
+            prop.transform.position = mapService.ScaleMapPosition(position);
+            prop.transform.localScale = mapService.ScaleMapSize(scale);
             prop.transform.rotation = rotation;
             ConfigureRuntimeMesh(prop, color);
             SetSortingFromZ(prop);
@@ -7910,8 +8645,8 @@ namespace GanglandUndercover.Online
 
         private void RegisterSolidObstacle(Vector3 position, Vector3 scale)
         {
-            Vector3 scaledPosition = ScaleMapPosition(position);
-            Vector3 scaledScale = ScaleMapSize(scale);
+            Vector3 scaledPosition = mapService.ScaleMapPosition(position);
+            Vector3 scaledScale = mapService.ScaleMapSize(scale);
             float width = Mathf.Max(0.01f, Mathf.Abs(scaledScale.x));
             float height = Mathf.Max(0.01f, Mathf.Abs(scaledScale.y));
             solidObstacleRects.Add(new Rect(scaledPosition.x - width * 0.5f, scaledPosition.y - height * 0.5f, width, height));
@@ -7919,8 +8654,8 @@ namespace GanglandUndercover.Online
 
         private void RegisterWalkableArea(Vector3 position, Vector3 scale)
         {
-            Vector3 scaledPosition = ScaleMapPosition(position);
-            Vector3 scaledScale = ScaleMapSize(scale);
+            Vector3 scaledPosition = mapService.ScaleMapPosition(position);
+            Vector3 scaledScale = mapService.ScaleMapSize(scale);
             float width = Mathf.Max(0.01f, Mathf.Abs(scaledScale.x));
             float height = Mathf.Max(0.01f, Mathf.Abs(scaledScale.y));
             walkableRects.Add(new Rect(scaledPosition.x - width * 0.5f, scaledPosition.y - height * 0.5f, width, height));
@@ -8011,10 +8746,10 @@ namespace GanglandUndercover.Online
 
             model.name = propName;
             model.transform.SetParent(worldRoot.transform, false);
-            model.transform.position = ScaleMapPosition(position);
+            model.transform.position = mapService.ScaleMapPosition(position);
             model.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees) * Quaternion.Euler(-90f, 0f, 0f);
             model.transform.localScale = Vector3.one;
-            FitModelToFootprint(model, ScaleMapPosition(position), footprint, stretchToFootprint);
+            FitModelToFootprint(model, mapService.ScaleMapPosition(position), footprint, stretchToFootprint);
             ConfigureModelRenderers(model, preserveMaterials);
             SetSortingFromZ(model);
             return model;
@@ -8051,10 +8786,10 @@ namespace GanglandUndercover.Online
 
             model.name = propName;
             model.transform.SetParent(worldRoot.transform, false);
-            model.transform.position = ScaleMapPosition(position);
+            model.transform.position = mapService.ScaleMapPosition(position);
             model.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees) * Quaternion.Euler(-90f, 0f, 0f);
             model.transform.localScale = Vector3.one;
-            FitModelToFootprint(model, ScaleMapPosition(position), footprint, stretchToFootprint);
+            FitModelToFootprint(model, mapService.ScaleMapPosition(position), footprint, stretchToFootprint);
             ConfigureModelRenderers(model, false);
             SetSortingFromZ(model);
             return model;
@@ -8064,9 +8799,9 @@ namespace GanglandUndercover.Online
         {
             GameObject fallback = new GameObject(propName);
             fallback.transform.SetParent(worldRoot.transform, false);
-            fallback.transform.position = ScaleMapPosition(position);
+            fallback.transform.position = mapService.ScaleMapPosition(position);
             fallback.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees);
-            Vector3 size = ScaleMapSize(footprint);
+            Vector3 size = mapService.ScaleMapSize(footprint);
             float width = Mathf.Max(0.08f, Mathf.Abs(size.x));
             float depth = Mathf.Max(0.08f, Mathf.Abs(size.y));
             float height = Mathf.Max(0.08f, Mathf.Abs(footprint.z));
@@ -8245,7 +8980,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            Vector3 desired = ScaleMapSize(footprint);
+            Vector3 desired = mapService.ScaleMapSize(footprint);
             float desiredX = Mathf.Max(0.04f, Mathf.Abs(desired.x));
             float desiredY = Mathf.Max(0.04f, Mathf.Abs(desired.y));
             float desiredZ = Mathf.Max(0.05f, Mathf.Abs(footprint.z));
@@ -8387,21 +9122,13 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private static Vector3 ScaleMapPosition(Vector3 position)
-        {
-            return new Vector3(position.x * DesignScaleX, position.y * DesignScaleY, position.z);
-        }
 
-        private static Vector3 ScaleMapSize(Vector3 scale)
-        {
-            return new Vector3(scale.x * DesignScaleX, scale.y * DesignScaleY, scale.z);
-        }
 
         private void CreateNeonLight(string lightName, Vector3 position, Color color, float intensity, float range)
         {
             GameObject lightObject = new GameObject(lightName);
             lightObject.transform.SetParent(worldRoot.transform, false);
-            lightObject.transform.position = ScaleMapPosition(position);
+            lightObject.transform.position = mapService.ScaleMapPosition(position);
             Light light = lightObject.AddComponent<Light>();
             light.type = LightType.Point;
             light.color = color;
@@ -8427,11 +9154,11 @@ namespace GanglandUndercover.Online
         {
             GameObject bell = CreateSpriteObject("紧急铃", circleSprite, new Color(0.72f, 0.08f, 0.06f, 1f));
             bell.transform.SetParent(worldRoot.transform, false);
-            bell.transform.position = ScaleMapPosition(new Vector3(0f, 0f, 0.12f));
+            bell.transform.position = mapService.ScaleMapPosition(new Vector3(0f, 0f, 0.12f));
             bell.transform.localScale = new Vector3(0.58f, 0.58f, 0.34f);
             SetSortingFromZ(bell);
             CreatePropChild(bell.transform, "Bell Highlight", new Vector3(0f, 0f, 0.08f), new Vector3(0.52f, 0.52f, 0.08f), new Color(1f, 0.34f, 0.22f, 0.9f), PrimitiveType.Cylinder);
-            CreateWorldLabelAt("紧急铃", ScaleMapPosition(new Vector3(0f, 0.48f, -0.16f)), 0.075f);
+            CreateWorldLabelAt("紧急铃", mapService.ScaleMapPosition(new Vector3(0f, 0.48f, -0.16f)), 0.075f);
         }
 
         private void CreateSocialDeductionShipMap()
@@ -8445,7 +9172,7 @@ namespace GanglandUndercover.Online
             CreateRoadNetwork();
             CreateMapStructureLayer();
             CreateArchitecturalVolumeLayer();
-            CreateShipRooms();
+            CreatemapService.ShipRooms();
             CreateShipRoomFrames();
             CreateShipTaskDressing();
             CreateLargeMapProps();
@@ -8465,7 +9192,7 @@ namespace GanglandUndercover.Online
             CreateShipFloor();
             CreateShipCorridors();
             CreateCorridorVolumeLayer();
-            CreateShipRooms();
+            CreatemapService.ShipRooms();
             CreateShipRoomFrames();
             CreateShipTaskDressing();
             CreateUnderworldPassageNodes();
@@ -8609,34 +9336,16 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void CreateShipRooms()
+        private void CreatemapService.ShipRooms()
         {
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
                 CreateShipRoom(room);
             }
         }
 
-        private static ShipRoomSpec[] ShipRooms()
-        {
-            return new[]
-            {
-                new ShipRoomSpec("西码头货柜场", "货柜舱", new Vector3(-9.3f, 5.35f, 0f), new Vector3(4.35f, 2.12f, 0.16f), new Color(0.13f, 0.24f, 0.21f, 1f), MapEntrance.South),
-                new ShipRoomSpec("海关查验区", "海关查验", new Vector3(-5.0f, 5.35f, 0f), new Vector3(3.05f, 2.08f, 0.16f), new Color(0.18f, 0.25f, 0.19f, 1f), MapEntrance.South),
-                new ShipRoomSpec("监控室", "监控中心", new Vector3(-9.35f, 1.85f, 0f), new Vector3(2.95f, 1.9f, 0.16f), new Color(0.1f, 0.19f, 0.27f, 1f), MapEntrance.East),
-                new ShipRoomSpec("茶餐厅", "茶餐厅", new Vector3(-4.8f, 1.65f, 0f), new Vector3(2.95f, 1.86f, 0.16f), new Color(0.32f, 0.18f, 0.1f, 1f), MapEntrance.West),
-                new ShipRoomSpec("夜市主街", "情报夜市", new Vector3(-1.0f, 2.75f, 0f), new Vector3(4.08f, 2.12f, 0.16f), new Color(0.27f, 0.14f, 0.09f, 1f), MapEntrance.South),
-                new ShipRoomSpec("金融楼", "洗钱账房", new Vector3(4.75f, 2.75f, 0f), new Vector3(3.42f, 2.12f, 0.16f), new Color(0.16f, 0.18f, 0.28f, 1f), MapEntrance.West),
-                new ShipRoomSpec("电房", "电力机房", new Vector3(8.85f, 5.25f, 0f), new Vector3(2.8f, 2.12f, 0.16f), new Color(0.12f, 0.19f, 0.27f, 1f), MapEntrance.South),
-                new ShipRoomSpec("天台通道", "天台观测", new Vector3(8.95f, 1.65f, 0f), new Vector3(2.76f, 1.86f, 0.16f), new Color(0.18f, 0.19f, 0.3f, 1f), MapEntrance.West),
-                new ShipRoomSpec("指挥车广场", "指挥广场", new Vector3(0f, -5.35f, 0f), new Vector3(4.35f, 1.92f, 0.16f), new Color(0.11f, 0.2f, 0.29f, 1f), MapEntrance.North),
-                new ShipRoomSpec("证物库", "证物冷藏", new Vector3(-8.6f, -5.05f, 0f), new Vector3(3.35f, 1.98f, 0.16f), new Color(0.2f, 0.16f, 0.27f, 1f), MapEntrance.East),
-                new ShipRoomSpec("后巷排档", "黑市排档", new Vector3(5.6f, -1.55f, 0f), new Vector3(3.55f, 2.14f, 0.16f), new Color(0.25f, 0.14f, 0.09f, 1f), MapEntrance.West),
-                new ShipRoomSpec("地下诊所", "地下诊疗", new Vector3(6.15f, -5.05f, 0f), new Vector3(3.45f, 1.98f, 0.16f), new Color(0.13f, 0.25f, 0.2f, 1f), MapEntrance.North)
-            };
-        }
 
-        private void CreateShipRoom(ShipRoomSpec room)
+        private void CreateShipRoom(OnlineMapService.ShipRoomSpec room)
         {
             Color wall = new Color(0.052f, 0.064f, 0.07f, 1f);
             Color trim = new Color(0.62f, 0.62f, 0.54f, 1f);
@@ -8647,19 +9356,19 @@ namespace GanglandUndercover.Online
             CreateShapeProp("2.5D 建筑体 " + room.Name + " 圆角房间底", roundedRectSprite, room.Center + new Vector3(0f, 0f, -0.07f), room.Size, Darken(room.Floor, 0.86f));
             CreateShapeProp("2.5D 建筑体 " + room.Name + " 中央地板", roundedRectSprite, room.Center + new Vector3(0f, 0f, -0.04f), new Vector3(room.Size.x * 0.9f, room.Size.y * 0.76f, 0.08f), room.Floor);
             CreateRoomVolumeShell(room, wall, trim);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 北厚墙", room.Center + new Vector3(0f, halfHeight - 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == MapEntrance.North);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 南厚墙", room.Center + new Vector3(0f, -halfHeight + 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == MapEntrance.South);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 西厚墙", room.Center + new Vector3(-halfWidth + 0.06f, 0f, 0.16f), new Vector3(0.14f, room.Size.y * 0.76f, 0.14f), wall, room.Entrance == MapEntrance.West);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 东厚墙", room.Center + new Vector3(halfWidth - 0.06f, 0f, 0.16f), new Vector3(0.14f, room.Size.y * 0.76f, 0.14f), wall, room.Entrance == MapEntrance.East);
+            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 北厚墙", room.Center + new Vector3(0f, halfHeight - 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.North);
+            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 南厚墙", room.Center + new Vector3(0f, -halfHeight + 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.South);
+            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 西厚墙", room.Center + new Vector3(-halfWidth + 0.06f, 0f, 0.16f), new Vector3(0.14f, room.Size.y * 0.76f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.West);
+            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 东厚墙", room.Center + new Vector3(halfWidth - 0.06f, 0f, 0.16f), new Vector3(0.14f, room.Size.y * 0.76f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.East);
             CreateProp("屋顶 " + room.Name + " 北舱金属边", room.Center + new Vector3(0f, halfHeight - 0.22f, 0.19f), new Vector3(room.Size.x * 0.58f, 0.055f, 0.08f), trim);
             CreateProp("屋顶 " + room.Name + " 舱门灯带", DoorLightPosition(room), DoorLightScale(room), DoorColor(room));
-            CreateWorldLabelAt(room.Label, ScaleMapPosition(room.Center + new Vector3(0f, halfHeight - 0.34f, -0.17f)), 0.052f);
+            CreateWorldLabelAt(room.Label, mapService.ScaleMapPosition(room.Center + new Vector3(0f, halfHeight - 0.34f, -0.17f)), 0.052f);
             CreateRoomFloorTiles(room.Name, room.Center, room.Size, room.Floor);
             CreateRoomFurniture(room);
             RegisterWalkableArea(room.Center, new Vector3(room.Size.x * 0.86f, room.Size.y * 0.7f, 0.08f));
         }
 
-        private void CreateRoomVolumeShell(ShipRoomSpec room, Color wall, Color trim)
+        private void CreateRoomVolumeShell(OnlineMapService.ShipRoomSpec room, Color wall, Color trim)
         {
             float halfWidth = room.Size.x * 0.5f;
             float halfHeight = room.Size.y * 0.5f;
@@ -8683,7 +9392,7 @@ namespace GanglandUndercover.Online
             CreateRooftopKit(room, height);
         }
 
-        private void CreateRooftopKit(ShipRoomSpec room, float height)
+        private void CreateRooftopKit(OnlineMapService.ShipRoomSpec room, float height)
         {
             float halfWidth = room.Size.x * 0.5f;
             float halfHeight = room.Size.y * 0.5f;
@@ -8703,7 +9412,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private static float RoomVisualHeight(ShipRoomSpec room)
+        private static float RoomVisualHeight(OnlineMapService.ShipRoomSpec room)
         {
             if (room.Label.Contains("账房") || room.Label.Contains("监控") || room.Label.Contains("电力"))
             {
@@ -8749,27 +9458,27 @@ namespace GanglandUndercover.Online
             CreateWallSegment(wallName + " T", position + new Vector3(0f, verticalOffset, 0f), new Vector3(scale.x, segmentLength, scale.z), color);
         }
 
-        private static Vector3 DoorLightPosition(ShipRoomSpec room)
+        private static Vector3 DoorLightPosition(OnlineMapService.ShipRoomSpec room)
         {
             float halfWidth = room.Size.x * 0.5f;
             float halfHeight = room.Size.y * 0.5f;
 
             switch (room.Entrance)
             {
-                case MapEntrance.North:
+                case OnlineMapService.MapEntrance.North:
                     return room.Center + new Vector3(0f, halfHeight - 0.12f, 0.22f);
-                case MapEntrance.South:
+                case OnlineMapService.MapEntrance.South:
                     return room.Center + new Vector3(0f, -halfHeight + 0.12f, 0.22f);
-                case MapEntrance.East:
+                case OnlineMapService.MapEntrance.East:
                     return room.Center + new Vector3(halfWidth - 0.12f, 0f, 0.22f);
                 default:
                     return room.Center + new Vector3(-halfWidth + 0.12f, 0f, 0.22f);
             }
         }
 
-        private static Vector3 DoorLightScale(ShipRoomSpec room)
+        private static Vector3 DoorLightScale(OnlineMapService.ShipRoomSpec room)
         {
-            if (room.Entrance == MapEntrance.North || room.Entrance == MapEntrance.South)
+            if (room.Entrance == OnlineMapService.MapEntrance.North || room.Entrance == OnlineMapService.MapEntrance.South)
             {
                 return new Vector3(Mathf.Min(room.Size.x * 0.42f, 1.25f), 0.07f, 0.08f);
             }
@@ -8777,7 +9486,7 @@ namespace GanglandUndercover.Online
             return new Vector3(0.07f, Mathf.Min(room.Size.y * 0.42f, 0.86f), 0.08f);
         }
 
-        private static Color DoorColor(ShipRoomSpec room)
+        private static Color DoorColor(OnlineMapService.ShipRoomSpec room)
         {
             if (room.Label.Contains("情报") || room.Label.Contains("黑市"))
             {
@@ -8797,7 +9506,7 @@ namespace GanglandUndercover.Online
             return new Color(0.95f, 0.72f, 0.1f, 1f);
         }
 
-        private void CreateRoomFurniture(ShipRoomSpec room)
+        private void CreateRoomFurniture(OnlineMapService.ShipRoomSpec room)
         {
             Color metal = new Color(0.08f, 0.1f, 0.11f, 1f);
             Color screen = new Color(0.06f, 0.62f, 0.78f, 1f);
@@ -8896,7 +9605,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void CreateWallConsoleSet(ShipRoomSpec room, int seed)
+        private void CreateWallConsoleSet(OnlineMapService.ShipRoomSpec room, int seed)
         {
             Color body = seed % 2 == 0 ? new Color(0.08f, 0.15f, 0.18f, 1f) : new Color(0.16f, 0.12f, 0.16f, 1f);
             Color screen = seed % 3 == 0 ? new Color(0.05f, 0.68f, 0.82f, 1f) : new Color(0.2f, 0.78f, 0.56f, 1f);
@@ -8936,7 +9645,7 @@ namespace GanglandUndercover.Online
 
         private void CreateShipRoomFrames()
         {
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
                 CreateDoorMarker(room.Label + " 气闸门", DoorLightPosition(room), DoorLightScale(room), DoorColor(room));
             }
@@ -8947,7 +9656,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < tasks.Count; i++)
             {
                 OnlineTaskState task = tasks[i];
-                CreateTaskConsole("任务控制台 " + task.Name, new Vector3(task.Position.x / DesignScaleX, task.Position.y / DesignScaleY, 0.05f), i);
+                CreateTaskConsole("任务控制台 " + task.Name, new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.05f), i);
             }
         }
 
@@ -9148,14 +9857,14 @@ namespace GanglandUndercover.Online
             CreateMeshBoxProp("行动视角样板层 " + label + " E键提示牌", position + new Vector3(-0.48f, 0.18f, 0.72f), new Vector3(0.22f, 0.035f, 0.14f), amber);
             CreateMeshPrimitiveProp("行动视角样板层 " + label + " 顶部信标", PrimitiveType.Cylinder, position + new Vector3(0.46f, -0.16f, 0.68f), new Vector3(0.06f, 0.06f, 0.46f), accent, Quaternion.identity);
             CreateMeshBoxProp("行动视角样板层 " + label + " 信标灯帽", position + new Vector3(0.46f, -0.16f, 0.96f), new Vector3(0.18f, 0.035f, 0.08f), amber);
-            CreateWorldLabelAt(label, ScaleMapPosition(position + new Vector3(0f, 0.6f, 0.1f)), 0.06f);
+            CreateWorldLabelAt(label, mapService.ScaleMapPosition(position + new Vector3(0f, 0.6f, 0.1f)), 0.06f);
         }
 
         private void CreateActionViewScaleCharacter(string name, Vector3 position, Color primary, Color accent, string label)
         {
             GameObject root = new GameObject(name);
             root.transform.SetParent(worldRoot.transform, false);
-            root.transform.position = ScaleMapPosition(position);
+            root.transform.position = mapService.ScaleMapPosition(position);
             root.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
             CreateMeshPrimitiveChild(root.transform, "Shadow", PrimitiveType.Cylinder, new Vector3(0f, -0.32f, -0.12f), new Vector3(0.52f, 0.08f, 0.28f), new Color(0f, 0f, 0f, 0.32f), Quaternion.Euler(90f, 0f, 0f));
             CreateMeshPrimitiveChild(root.transform, "Body", PrimitiveType.Capsule, new Vector3(0f, -0.04f, 0.2f), new Vector3(0.26f, 0.26f, 0.56f), primary, Quaternion.Euler(90f, 0f, 0f));
@@ -9223,7 +9932,7 @@ namespace GanglandUndercover.Online
 
         private void CreateRoomForegroundSilhouettes()
         {
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
                 float halfWidth = room.Size.x * 0.5f;
                 float halfHeight = room.Size.y * 0.5f;
@@ -9251,7 +9960,7 @@ namespace GanglandUndercover.Online
             Color glass = new Color(0.12f, 0.32f, 0.38f, 0.68f);
             Color trim = new Color(0.44f, 0.52f, 0.52f, 0.86f);
 
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
                 float halfWidth = room.Size.x * 0.5f;
                 float halfHeight = room.Size.y * 0.5f;
@@ -9261,15 +9970,15 @@ namespace GanglandUndercover.Online
                 CreateMeshBoxProp("前景遮挡层 " + room.Name + " 上檐阴影", room.Center + new Vector3(0f, topY, 0.78f), new Vector3(room.Size.x * 0.82f, 0.18f, 0.42f), deepShadow);
                 CreateMeshBoxProp("前景遮挡层 " + room.Name + " 下檐黑边", room.Center + new Vector3(0f, bottomY, 0.58f), new Vector3(room.Size.x * 0.58f, 0.12f, 0.32f), bulkhead);
 
-                if (room.Entrance == MapEntrance.East || room.Entrance == MapEntrance.West)
+                if (room.Entrance == OnlineMapService.MapEntrance.East || room.Entrance == OnlineMapService.MapEntrance.West)
                 {
-                    float side = room.Entrance == MapEntrance.East ? halfWidth + 0.18f : -halfWidth - 0.18f;
+                    float side = room.Entrance == OnlineMapService.MapEntrance.East ? halfWidth + 0.18f : -halfWidth - 0.18f;
                     CreateMeshBoxProp("前景遮挡层 " + room.Name + " 侧门厚框", room.Center + new Vector3(side, 0f, 0.62f), new Vector3(0.18f, room.Size.y * 0.56f, 0.36f), bulkhead);
                     CreateMeshBoxProp("前景遮挡层 " + room.Name + " 侧门玻璃", room.Center + new Vector3(side, 0f, 0.88f), new Vector3(0.05f, room.Size.y * 0.32f, 0.18f), glass);
                 }
                 else
                 {
-                    float side = room.Entrance == MapEntrance.North ? topY : bottomY;
+                    float side = room.Entrance == OnlineMapService.MapEntrance.North ? topY : bottomY;
                     CreateMeshBoxProp("前景遮挡层 " + room.Name + " 横门厚框", room.Center + new Vector3(0f, side, 0.62f), new Vector3(room.Size.x * 0.36f, 0.14f, 0.36f), bulkhead);
                     CreateMeshBoxProp("前景遮挡层 " + room.Name + " 横门灯缝", room.Center + new Vector3(0f, side, 0.88f), new Vector3(room.Size.x * 0.28f, 0.035f, 0.08f), DoorColor(room));
                 }
@@ -9480,7 +10189,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < tasks.Count; i++)
             {
                 OnlineTaskState task = tasks[i];
-                Vector3 position = new Vector3(task.Position.x / DesignScaleX, task.Position.y / DesignScaleY, 0f);
+                Vector3 position = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0f);
                 CreatePremiumTaskSetPiece(task.Id, task.Name, position);
             }
         }
@@ -9578,11 +10287,11 @@ namespace GanglandUndercover.Online
                 CreateModelProp("成熟港区设施 免费地面箭头标识 " + i, i % 3 == 0 ? "Decals/Decal_Line_Bend1_R.fbx" : "Decals/Decal_Line_Straight.fbx", railLine[i] + new Vector3(0.0f, -0.28f, -0.02f), new Vector3(0.48f, 0.22f, 0.04f), rotation, true);
             }
 
-            ShipRoomSpec[] rooms = ShipRooms();
+            OnlineMapService.ShipRoomSpec[] rooms = mapService.ShipRooms();
 
             for (int i = 0; i < rooms.Length; i++)
             {
-                ShipRoomSpec room = rooms[i];
+                OnlineMapService.ShipRoomSpec room = rooms[i];
                 float halfWidth = room.Size.x * 0.5f;
                 Vector3 left = room.Center + new Vector3(-halfWidth + 0.48f, 0.12f, 0.16f);
                 Vector3 right = room.Center + new Vector3(halfWidth - 0.48f, -0.18f, 0.16f);
@@ -9752,7 +10461,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < tasks.Count; i++)
             {
                 OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / DesignScaleX, task.Position.y / DesignScaleY, 0f);
+                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0f);
                 Color accent = TaskPanelAccent(task.Id);
                 CreateShapeProp("任务交互范围环 " + task.Name, circleSprite, designPosition + new Vector3(0f, 0f, -0.03f), new Vector3(0.72f, 0.46f, 0.04f), new Color(accent.r, accent.g, accent.b, 0.2f));
                 CreateShapeProp("任务可读性 外发光底环 " + task.Name, softCircleSprite, designPosition + new Vector3(0f, 0f, 0.03f), new Vector3(0.96f, 0.62f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.24f));
@@ -9831,7 +10540,7 @@ namespace GanglandUndercover.Online
             Color shadow = new Color(0.004f, 0.006f, 0.008f, 0.62f);
             Color glass = new Color(0.08f, 0.38f, 0.46f, 1f);
 
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
                 float halfWidth = room.Size.x * 0.5f;
                 float halfHeight = room.Size.y * 0.5f;
@@ -9857,12 +10566,12 @@ namespace GanglandUndercover.Online
             CreatePlayableSightlineBlockers();
         }
 
-        private void CreateRoomPortalKit(ShipRoomSpec room)
+        private void CreateRoomPortalKit(OnlineMapService.ShipRoomSpec room)
         {
             Vector3 door = DoorLightPosition(room);
             Vector3 doorScale = DoorLightScale(room);
             Color light = DoorColor(room);
-            bool horizontal = room.Entrance == MapEntrance.North || room.Entrance == MapEntrance.South;
+            bool horizontal = room.Entrance == OnlineMapService.MapEntrance.North || room.Entrance == OnlineMapService.MapEntrance.South;
             float rotation = horizontal ? 0f : 90f;
             Vector3 frameSize = horizontal
                 ? new Vector3(Mathf.Max(0.7f, doorScale.x + 0.3f), 0.34f, 0.6f)
@@ -9871,16 +10580,16 @@ namespace GanglandUndercover.Online
 
             switch (room.Entrance)
             {
-                case MapEntrance.North:
+                case OnlineMapService.MapEntrance.North:
                     offset = new Vector3(0f, 0.28f, 0.1f);
                     break;
-                case MapEntrance.South:
+                case OnlineMapService.MapEntrance.South:
                     offset = new Vector3(0f, -0.28f, 0.1f);
                     break;
-                case MapEntrance.East:
+                case OnlineMapService.MapEntrance.East:
                     offset = new Vector3(0.28f, 0f, 0.1f);
                     break;
-                case MapEntrance.West:
+                case OnlineMapService.MapEntrance.West:
                     offset = new Vector3(-0.28f, 0f, 0.1f);
                     break;
             }
@@ -10147,7 +10856,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < tasks.Count; i += 3)
             {
                 OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / DesignScaleX, task.Position.y / DesignScaleY, 0.18f);
+                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.18f);
                 CreateAssetStoreProp("官方免费素材层 任务旁实物 " + task.Id, taskProps[i % taskProps.Length], designPosition + new Vector3(0.42f, -0.28f, 0f), new Vector3(0.34f, 0.26f, 0.32f), i * 11f, false);
             }
         }
@@ -10350,7 +11059,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < tasks.Count; i++)
             {
                 OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / DesignScaleX, task.Position.y / DesignScaleY, 0.22f);
+                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.22f);
                 Vector3 offset = new Vector3(i % 2 == 0 ? -0.38f : 0.38f, i % 3 == 0 ? 0.3f : -0.26f, 0f);
                 CreateAssetStoreProp("官方免费街区密度层 任务实体锚点 " + task.Id, anchors[i % anchors.Length], designPosition + offset, new Vector3(0.34f, 0.26f, 0.34f), i * 19f, false);
             }
@@ -10654,7 +11363,7 @@ namespace GanglandUndercover.Online
 
         private void CreateRoomMicroProps()
         {
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
                 float halfWidth = room.Size.x * 0.5f;
                 float halfHeight = room.Size.y * 0.5f;
@@ -10723,7 +11432,7 @@ namespace GanglandUndercover.Online
 
         private void CreateModelRoomKits()
         {
-            foreach (ShipRoomSpec room in ShipRooms())
+            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
             {
                 float halfWidth = room.Size.x * 0.5f;
                 float halfHeight = room.Size.y * 0.5f;
@@ -10794,7 +11503,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private static string RoomPlatformModel(ShipRoomSpec room)
+        private static string RoomPlatformModel(OnlineMapService.ShipRoomSpec room)
         {
             if (room.Label.Contains("账房") || room.Label.Contains("监控") || room.Label.Contains("电力"))
             {
@@ -11229,7 +11938,7 @@ namespace GanglandUndercover.Online
             if (interactionRadius != null)
             {
                 float pulse = 1f + Mathf.Sin(Time.time * 5.6f) * 0.025f;
-                interactionRadius.localScale = new Vector3(InteractionRange * 2f * pulse, InteractionRange * 1.18f * pulse, 0.05f);
+                interactionRadius.localScale = new Vector3(ruleSet.InteractionRange * 2f * pulse, ruleSet.InteractionRange * 1.18f * pulse, 0.05f);
             }
 
             Transform facingWedge = visual.transform.Find("Stage2 Character facing wedge");
@@ -11278,7 +11987,7 @@ namespace GanglandUndercover.Online
             {
                 OnlineBodyState body = bodies[i];
 
-                if (!body.Reported && Vector3.Distance(position, body.Position) <= ReportRange * 1.4f)
+                if (!body.Reported && Vector3.Distance(position, body.Position) <= ruleSet.ReportRange * 1.4f)
                 {
                     return true;
                 }
@@ -11443,6 +12152,7 @@ namespace GanglandUndercover.Online
             botThinkTimers.Clear();
             botVoteTimers.Clear();
             botTargets.Clear();
+            migrationManager?.ResetState();
             BuildDefaultTasks();
             evidenceScore = 0;
             evidenceMilestoneIndex = 0;
@@ -11594,44 +12304,7 @@ namespace GanglandUndercover.Online
             return new Color(0.78f, 0.78f, 0.86f, 1f);
         }
 
-        private static Vector3 SpawnPosition(int index)
-        {
-            Vector3[] spawns =
-            {
-                ScaleMapPosition(new Vector3(-9.45f, 4.95f, 0f)),
-                ScaleMapPosition(new Vector3(-5.05f, 1.82f, 0f)),
-                ScaleMapPosition(new Vector3(-1.08f, 2.62f, 0f)),
-                ScaleMapPosition(new Vector3(4.72f, 2.68f, 0f)),
-                ScaleMapPosition(new Vector3(8.82f, 4.45f, 0f)),
-                ScaleMapPosition(new Vector3(0f, -4.55f, 0f)),
-                ScaleMapPosition(new Vector3(-8.55f, -4.42f, 0f)),
-                ScaleMapPosition(new Vector3(5.52f, -1.32f, 0f)),
-                ScaleMapPosition(new Vector3(6.05f, -4.42f, 0f)),
-                ScaleMapPosition(new Vector3(-9.32f, 1.18f, 0f))
-            };
 
-            return spawns[index % spawns.Length];
-        }
-
-        private static Vector3 UnderworldPassageDesignPosition(int index)
-        {
-            switch (index % UnderworldPassageCount)
-            {
-                case 0:
-                    return new Vector3(-6.85f, 0.72f, 0f);
-                case 1:
-                    return new Vector3(1.65f, 3.65f, 0f);
-                case 2:
-                    return new Vector3(6.95f, -2.25f, 0f);
-                default:
-                    return new Vector3(-7.25f, -4.15f, 0f);
-            }
-        }
-
-        private static Vector3 UnderworldPassagePosition(int index)
-        {
-            return ScaleMapPosition(UnderworldPassageDesignPosition(index));
-        }
 
         private static string BotName(int index)
         {
@@ -11764,309 +12437,13 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private static Vector3 TaskPositionFor(int id)
-        {
-            switch (id)
-            {
-                case 0:
-                    return ScaleMapPosition(new Vector3(-9.45f, 2.2f, 0f));
-                case 1:
-                    return ScaleMapPosition(new Vector3(-8.75f, 5.72f, 0f));
-                case 2:
-                    return ScaleMapPosition(new Vector3(8.7f, 5.42f, 0f));
-                case 3:
-                    return ScaleMapPosition(new Vector3(-8.65f, -4.95f, 0f));
-                case 4:
-                    return ScaleMapPosition(new Vector3(0.2f, -5.32f, 0f));
-                case 5:
-                    return ScaleMapPosition(new Vector3(-4.82f, 1.38f, 0f));
-                case 6:
-                    return ScaleMapPosition(new Vector3(-0.25f, 3.25f, 0f));
-                case 7:
-                    return ScaleMapPosition(new Vector3(3.98f, 2.9f, 0f));
-                case 8:
-                    return ScaleMapPosition(new Vector3(8.82f, 1.72f, 0f));
-                case 9:
-                    return ScaleMapPosition(new Vector3(6.12f, -5.12f, 0f));
-                case 10:
-                    return ScaleMapPosition(new Vector3(-10.55f, 4.45f, 0f));
-                case 11:
-                    return ScaleMapPosition(new Vector3(5.65f, 3.22f, 0f));
-                case 12:
-                    return ScaleMapPosition(new Vector3(5.38f, -1.02f, 0f));
-                case 13:
-                    return ScaleMapPosition(new Vector3(-1.42f, -0.18f, 0f));
-                case 14:
-                    return ScaleMapPosition(new Vector3(9.62f, 4.72f, 0f));
-                case 15:
-                    return ScaleMapPosition(new Vector3(-7.62f, -5.68f, 0f));
-                case 16:
-                    return ScaleMapPosition(new Vector3(6.35f, 2.18f, 0f));
-                case 17:
-                    return ScaleMapPosition(new Vector3(-6.86f, 0.16f, 0f));
-                case 18:
-                    return ScaleMapPosition(new Vector3(1.74f, -3.62f, 0f));
-                case 19:
-                    return ScaleMapPosition(new Vector3(7.25f, -4.45f, 0f));
-                case 20:
-                    return ScaleMapPosition(new Vector3(-1.95f, 2.22f, 0f));
-                case 21:
-                    return ScaleMapPosition(new Vector3(-9.88f, 1.25f, 0f));
-                case 22:
-                    return ScaleMapPosition(new Vector3(5.65f, 2.52f, 0f));
-                case 23:
-                    return ScaleMapPosition(new Vector3(-10.35f, 5.05f, 0f));
-                case 24:
-                    return ScaleMapPosition(new Vector3(0.95f, -4.62f, 0f));
-                case 25:
-                    return ScaleMapPosition(new Vector3(6.74f, -1.95f, 0f));
-                case 26:
-                    return ScaleMapPosition(new Vector3(-6.85f, -2.82f, 0f));
-                case 27:
-                    return ScaleMapPosition(new Vector3(8.95f, 1.12f, 0f));
-                default:
-                    return Vector3.zero;
-            }
-        }
-
-        private static int TaskRequiredProgress(int id)
-        {
-            switch (id)
-            {
-                case 1:
-                case 11:
-                case 16:
-                case 22:
-                case 23:
-                case 25:
-                case 26:
-                    return 3;
-                case 4:
-                case 12:
-                case 14:
-                case 18:
-                case 21:
-                case 24:
-                case 27:
-                    return 3;
-                default:
-                    return 3;
-            }
-        }
-
-        private static OnlineProfession ProfessionFor(OnlineRole role, int seed)
-        {
-            if (role == OnlineRole.Gang)
-            {
-                OnlineProfession[] gangProfessions =
-                {
-                    OnlineProfession.Enforcer,
-                    OnlineProfession.Fixer,
-                    OnlineProfession.Driver
-                };
-
-                return gangProfessions[seed % gangProfessions.Length];
-            }
-
-            if (role == OnlineRole.Undercover)
-            {
-                return OnlineProfession.UndercoverAgent;
-            }
-
-            OnlineProfession[] policeProfessions =
-            {
-                OnlineProfession.Inspector,
-                OnlineProfession.Forensics,
-                OnlineProfession.Tech
-            };
-
-            return policeProfessions[seed % policeProfessions.Length];
-        }
-
-        private static OnlineProfession BotProfession(int index)
-        {
-            OnlineProfession[] professions =
-            {
-                OnlineProfession.Inspector,
-                OnlineProfession.Tech,
-                OnlineProfession.UndercoverAgent,
-                OnlineProfession.Forensics,
-                OnlineProfession.Enforcer,
-                OnlineProfession.Fixer,
-                OnlineProfession.Driver
-            };
-
-            return professions[(index - 1) % professions.Length];
-        }
-
-        private static string ProfessionName(OnlineProfession profession)
-        {
-            switch (profession)
-            {
-                case OnlineProfession.Inspector:
-                    return "反黑督察";
-                case OnlineProfession.Forensics:
-                    return "鉴证员";
-                case OnlineProfession.Tech:
-                    return "技侦警员";
-                case OnlineProfession.UndercoverAgent:
-                    return "潜伏探员";
-                case OnlineProfession.Enforcer:
-                    return "黑帮打手";
-                case OnlineProfession.Fixer:
-                    return "白纸扇";
-                case OnlineProfession.Driver:
-                    return "车手";
-                default:
-                    return "待分配";
-            }
-        }
-
-        private static string RoleName(OnlineRole role)
-        {
-            switch (role)
-            {
-                case OnlineRole.Gang:
-                    return "黑帮";
-                case OnlineRole.Undercover:
-                    return "卧底";
-                case OnlineRole.Police:
-                    return "警方";
-                default:
-                    return "未公开";
-            }
-        }
-
-        private static string PhaseName(OnlineMatchPhase matchPhase)
-        {
-            switch (matchPhase)
-            {
-                case OnlineMatchPhase.Opening:
-                    return "开局简报";
-                case OnlineMatchPhase.Action:
-                    return "行动";
-                case OnlineMatchPhase.Meeting:
-                    return "会议";
-                case OnlineMatchPhase.Voting:
-                    return "投票";
-                case OnlineMatchPhase.Result:
-                    return "结算";
-                default:
-                    return "房间";
-            }
-        }
-
-        private static Vector3 ClampToOnlineMap(Vector3 position)
-        {
-            return new Vector3(Mathf.Clamp(position.x, -MapHalfWidth, MapHalfWidth), Mathf.Clamp(position.y, -MapHalfHeight, MapHalfHeight), 0f);
-        }
-
-        private static Vector3 ClampToDesignMap(Vector3 position)
-        {
-            return new Vector3(Mathf.Clamp(position.x, -DesignMapHalfWidth, DesignMapHalfWidth), Mathf.Clamp(position.y, -DesignMapHalfHeight, DesignMapHalfHeight), 0f);
-        }
-
-        private Vector3 ResolveMapCollision(Vector3 from, Vector3 requested)
-        {
-            Vector3 clampedFrom = ClampToOnlineMap(from);
-            Vector3 clampedRequested = ClampToOnlineMap(requested);
-            Vector3 delta = clampedRequested - clampedFrom;
-            float distance = delta.magnitude;
-
-            if (distance <= 0.0001f)
-            {
-                return IsWalkable(clampedRequested) ? clampedRequested : FindNearestOpenPosition(clampedRequested, clampedFrom);
-            }
-
-            int steps = Mathf.Max(1, Mathf.CeilToInt(distance / CollisionTraceStep));
-            Vector3 lastValid = IsWalkable(clampedFrom) ? clampedFrom : FindNearestOpenPosition(clampedFrom, Vector3.zero);
-
-            for (int i = 1; i <= steps; i++)
-            {
-                Vector3 candidate = Vector3.Lerp(clampedFrom, clampedRequested, i / (float)steps);
-
-                if (IsWalkable(candidate))
-                {
-                    lastValid = candidate;
-                    continue;
-                }
-
-                Vector3 slideX = new Vector3(candidate.x, lastValid.y, 0f);
-
-                if (IsWalkable(slideX))
-                {
-                    lastValid = slideX;
-                    continue;
-                }
-
-                Vector3 slideY = new Vector3(lastValid.x, candidate.y, 0f);
-
-                if (IsWalkable(slideY))
-                {
-                    lastValid = slideY;
-                }
-            }
-
-            return ClampToOnlineMap(lastValid);
-        }
-
-        private Vector3 FindNearestOpenPosition(Vector3 requested, Vector3 fallback)
-        {
-            Vector3 clamped = ClampToOnlineMap(requested);
-
-            if (IsWalkable(clamped))
-            {
-                return clamped;
-            }
-
-            Vector3 fallbackClamped = ClampToOnlineMap(fallback);
-
-            if (IsWalkable(fallbackClamped))
-            {
-                return fallbackClamped;
-            }
-
-            Vector3[] anchors =
-            {
-                ScaleMapPosition(new Vector3(0f, -4.35f, 0f)),
-                new Vector3(0f, 0f, 0f),
-                ScaleMapPosition(new Vector3(-7f, 0f, 0f)),
-                ScaleMapPosition(new Vector3(7.25f, 0f, 0f))
-            };
-
-            for (int i = 0; i < anchors.Length; i++)
-            {
-                if (IsWalkable(anchors[i]))
-                {
-                    return anchors[i];
-                }
-            }
-
-            for (int ring = 1; ring <= 8; ring++)
-            {
-                float radius = ring * 0.22f;
-
-                for (int i = 0; i < 16; i++)
-                {
-                    float angle = i * Mathf.PI * 2f / 16f;
-                    Vector3 candidate = ClampToOnlineMap(clamped + new Vector3(Mathf.Cos(angle) * radius, Mathf.Sin(angle) * radius, 0f));
-
-                    if (IsWalkable(candidate))
-                    {
-                        return candidate;
-                    }
-                }
-            }
-
-            return Vector3.zero;
-        }
 
         private bool IsWalkable(Vector3 position)
         {
-            if (position.x < -MapHalfWidth + PlayerCollisionRadius
-                || position.x > MapHalfWidth - PlayerCollisionRadius
-                || position.y < -MapHalfHeight + PlayerCollisionRadius
-                || position.y > MapHalfHeight - PlayerCollisionRadius)
+            if (position.x < -mapService.MapHalfWidth + PlayerCollisionRadius
+                || position.x > mapService.MapHalfWidth - PlayerCollisionRadius
+                || position.y < -mapService.MapHalfHeight + PlayerCollisionRadius
+                || position.y > mapService.MapHalfHeight - PlayerCollisionRadius)
             {
                 return false;
             }
@@ -12198,8 +12575,12 @@ namespace GanglandUndercover.Online
             Profession = profession;
             KillCooldown = 0f;
             AbilityCooldown = 0f;
+            VentCooldown = 0f;
             Suspicion = suspicion;
             IsBot = isBot;
+            CharacterAnimator = null;
+            SocialChar = null;
+            HasPendingAction = false;
         }
 
         public ulong ClientId;
@@ -12213,7 +12594,11 @@ namespace GanglandUndercover.Online
         public OnlineProfession Profession;
         public float KillCooldown;
         public float AbilityCooldown;
+        public float VentCooldown;
         public int Suspicion;
+        public Animator CharacterAnimator;
+        public SocialDeduction.SocialCharacter SocialChar;
+        public bool HasPendingAction;
     }
 
     public struct OnlineTaskState
@@ -12271,7 +12656,8 @@ namespace GanglandUndercover.Online
         Kill,
         Vote,
         SkipVote,
-        Ability
+        Ability,
+        Vent
     }
 
     public enum OnlineProfession

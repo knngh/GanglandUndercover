@@ -4,6 +4,7 @@ namespace GanglandUndercover.SocialDeduction
     {
         Gang,
         Police,
-        Undercover
+        Undercover,
+        Mole
     }
 }

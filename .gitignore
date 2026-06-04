@@ -18,5 +18,12 @@
 *.log
 mono_crash*.json
 
+# macOS Apple Double files (especially on exFAT/FAT32 volumes)
+._*
+
 # Local asset download/cache workspace. Import or mirror needed assets into Assets/.
 [Tt]emp[Aa]ssets/
+
+# Third-party 3D art assets (downgraded to concept reference, project going 2D)
+Assets/_Project/Art/ThirdParty/
+Assets/_Project/Resources/AssetStore/
