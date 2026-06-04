@@ -30,5 +30,7 @@ Assets/_Project/Resources/AssetStore/
 
 # Batchmode 验证产物（测试结果 / 日志），不入仓库
 /test-results.xml
+/playmode-results.xml
 /unity-smoke.log
 /unity-tests.log
+/unity-playmode.log

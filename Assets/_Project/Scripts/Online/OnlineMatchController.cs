@@ -668,6 +668,33 @@ namespace GanglandUndercover.Online
             return StageTwoActiveDownedStateCount > 0 && StageTwoForensicSceneCount > 0 && BodyCount > 0;
         }
 
+        /// <summary>
+        /// 烟测/自动化用：淘汰所有黑帮玩家并评估胜负，确定性地把对局推进到 Result 阶段。
+        /// 走真实的 EvaluateWinConditions 路径（含 VictoryBridge），返回是否成功进入结算。
+        /// </summary>
+        public bool EditorForceResultForSmokeTest()
+        {
+            if (!matchStarted)
+            {
+                return false;
+            }
+
+            List<ulong> ids = new List<ulong>(players.Keys);
+            foreach (ulong clientId in ids)
+            {
+                if (GetPrivateRole(clientId) == OnlineRole.Gang)
+                {
+                    OnlinePlayerState gangState = players[clientId];
+                    gangState.Alive = false;
+                    gangState.Input = Vector2.zero;
+                    players[clientId] = gangState;
+                }
+            }
+
+            EvaluateWinConditions();
+            return phase == OnlineMatchPhase.Result;
+        }
+
         public void EditorStartLocalPlayablePreview()
         {
             if (!Application.isPlaying)
