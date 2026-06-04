@@ -22,7 +22,9 @@ namespace GanglandUndercover.Editor
 
         private static readonly string[] MainScenes =
         {
-            "Assets/_Project/Scenes/PrototypeBootstrap.unity",
+            // 引导场景：内含挂了 PrototypeBootstrap 的 GameObject，Awake 中程序化拉起主菜单与对局。
+            // 与 EditorBuildSettings 启用的场景保持一致。
+            "Assets/_Project/Scenes/Prototype.unity",
         };
 
         // ─── 公共入口 ───────────────────────────────────────
@@ -90,6 +92,16 @@ namespace GanglandUndercover.Editor
             // 配置 PlayerSettings
             PlayerSettings.productName = ProductName;
             PlayerSettings.companyName = CompanyName;
+
+            // 近距离语音（VoiceChatSystem）使用 Microphone API；macOS 构建必须提供用途说明，
+            // 否则 Info.plist 校验会让构建失败（NSMicrophoneUsageDescription）。
+            if (target == BuildTarget.StandaloneOSX
+                && string.IsNullOrEmpty(PlayerSettings.macOS.microphoneUsageDescription))
+            {
+                PlayerSettings.macOS.microphoneUsageDescription =
+                    "用于对局内的近距离语音通话。";
+            }
+
             PlayerSettings.SetApplicationIdentifier(
                 target == BuildTarget.StandaloneOSX
                     ? NamedBuildTarget.Standalone
