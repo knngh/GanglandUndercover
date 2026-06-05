@@ -46,6 +46,7 @@ namespace GanglandUndercover.Online
         private const float CollisionTraceStep = 0.08f;
         private const float RoleRevealSeconds = 6.5f;
         private const ulong LocalPreviewClientId = 0UL;
+        private const uint SurveillanceCameraPrefabHash = 0x47554343; // "GUCC" stable runtime prefab source hash.
         private const ulong BotClientIdBase = OnlineBotController.BotClientIdBase;
         private const float BotThinkMinSeconds = 1.2f;
         private const float BotThinkMaxSeconds = 3.4f;
@@ -1384,9 +1385,10 @@ namespace GanglandUndercover.Online
         private void RegisterSurveillanceCameraPrefab()
         {
             if (surveillanceCameraTemplate != null) return;
+            if (TryReuseRegisteredSurveillanceCameraPrefab(out surveillanceCameraTemplate)) return;
 
             surveillanceCameraTemplate = new GameObject("SurveillanceCameraTemplate");
-            var templateNetObj = surveillanceCameraTemplate.AddComponent<NetworkObject>();
+            surveillanceCameraTemplate.AddComponent<NetworkObject>();
             var templateCamera = surveillanceCameraTemplate.AddComponent<Online.Surveillance.OnlineSecurityCamera>();
             templateCamera.ZoneCenter = Vector2.zero;
             templateCamera.ZoneSize = new Vector2(6f, 4f);
@@ -1395,7 +1397,45 @@ namespace GanglandUndercover.Online
             DontDestroyOnLoad(surveillanceCameraTemplate);
 
             networkManager.NetworkConfig.Prefabs.Add(
-                new Unity.Netcode.NetworkPrefab { Prefab = surveillanceCameraTemplate });
+                new Unity.Netcode.NetworkPrefab
+                {
+                    Override = NetworkPrefabOverride.Hash,
+                    SourceHashToOverride = SurveillanceCameraPrefabHash,
+                    OverridingTargetPrefab = surveillanceCameraTemplate
+                });
+        }
+
+        private bool TryReuseRegisteredSurveillanceCameraPrefab(out GameObject template)
+        {
+            template = null;
+
+            if (networkManager?.NetworkConfig?.Prefabs == null)
+            {
+                return false;
+            }
+
+            foreach (NetworkPrefab prefab in networkManager.NetworkConfig.Prefabs.Prefabs)
+            {
+                if (prefab != null
+                    && prefab.Override == NetworkPrefabOverride.Hash
+                    && prefab.SourceHashToOverride == SurveillanceCameraPrefabHash)
+                {
+                    template = prefab.OverridingTargetPrefab != null ? prefab.OverridingTargetPrefab : prefab.Prefab;
+                    return template != null;
+                }
+            }
+
+            if (networkManager.NetworkConfig.Prefabs.NetworkPrefabOverrideLinks.TryGetValue(
+                    SurveillanceCameraPrefabHash,
+                    out NetworkPrefab registeredPrefab))
+            {
+                template = registeredPrefab.OverridingTargetPrefab != null
+                    ? registeredPrefab.OverridingTargetPrefab
+                    : registeredPrefab.Prefab;
+                return template != null;
+            }
+
+            return false;
         }
 
         private void EnsureServiceBootstrap()
