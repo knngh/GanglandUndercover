@@ -14,8 +14,11 @@ The current playable build is now online-first and structured as a large-map rel
 
 1. Open Unity Hub.
 2. Add this folder as an existing project: `/Users/zhugehao/projects/GanglandUndercover`.
-3. In Unity, choose `Gangland > Create Prototype Scene`.
-4. Press Play.
+3. Open it with Unity `6000.4.9f1`.
+4. For the fastest playable check, choose `Gangland > Play Online Demo`.
+5. Watch the `Game` view, not the edit-time `Scene` view.
+
+`Assets/_Project/Scenes/Prototype.unity` is intentionally a runtime bootstrap scene. In edit mode it only contains `PrototypeBootstrap`; the map, players, HUD, task stations, props, and camera are created after entering Play mode. If you only open the scene in the editor, it will look empty.
 
 The prototype builds the large online harbor city map, task stations, characters, props, neon lights, generated sound cues, AI fill, opening briefing, meeting flow, and HUD at runtime. If the menu script does not compile because your Unity version is older, create an empty scene manually, add an empty GameObject named `PrototypeBootstrap`, attach `Assets/_Project/Scripts/Gameplay/PrototypeBootstrap.cs`, then press Play.
 

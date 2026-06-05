@@ -4,9 +4,9 @@
 
 本机已检测到 Unity Hub 和 Unity Editor。当前可用 Editor：
 
-`/Applications/Unity/Hub/Editor/6000.4.5f1/Unity.app`
+`/Applications/Unity/Hub/Editor/6000.4.9f1/Unity.app`
 
-项目已按本机 Unity `6000.4.5f1` 打开和升级。继续开发时使用同一版本，避免反复升级/降级项目设置。
+项目已按本机 Unity `6000.4.9f1` 打开和升级。继续开发时使用同一版本，避免反复升级/降级项目设置。
 
 ## 打开项目
 
@@ -17,11 +17,21 @@
 
 `/Users/zhugehao/projects/GanglandUndercover`
 
-5. 用 Unity `6000.4.5f1` 打开项目，等待 Unity 导入和编译脚本。
+5. 用 Unity `6000.4.9f1` 打开项目，等待 Unity 导入和编译脚本。
 
-## 生成原型场景
+## 推荐试玩入口
 
 编译完成后，顶部菜单会出现：
+
+`Gangland > Play Online Demo`
+
+点击后 Unity 会自动打开 `Assets/_Project/Scenes/Prototype.unity`，进入 Play mode，并启动本地联机预览。
+
+注意看 `Game` 视图，不要用编辑态 `Scene` 视图判断是否有内容。`Prototype.unity` 是运行时引导场景，编辑态只保留一个 `PrototypeBootstrap`，地图、玩家、HUD、任务站和道具都会在 Play 后生成。
+
+## 手动生成原型场景
+
+如需重建引导场景，可执行：
 
 `Gangland > Create Prototype Scene`
 
@@ -29,9 +39,7 @@
 
 `Assets/_Project/Scenes/Prototype.unity`
 
-然后点击 `Play`。当前启动的是可玩的港区社交推理 Demo：`港区潜线 / Harbor Undercover`。
-
-默认会直接以卧底身份开局。也可以在左侧 HUD 按钮切换为警察或黑帮重开。
+然后点击 `Play`。当前会先进入主菜单，可选择离线模式或联机大厅。
 
 ## 当前操作
 
@@ -51,7 +59,7 @@ Unity 授权激活正常后，可以在 Unity 菜单执行：
 也可以用命令行跑批处理烟测：
 
 ```bash
-'/Applications/Unity/Hub/Editor/6000.4.5f1/Unity.app/Contents/MacOS/Unity' -batchmode -quit -projectPath /Users/zhugehao/projects/GanglandUndercover -executeMethod GanglandUndercover.Editor.PrototypeSmokeTests.Run -logFile /Users/zhugehao/projects/GanglandUndercover/unity-smoke.log
+'/Applications/Unity/Hub/Editor/6000.4.9f1/Unity.app/Contents/MacOS/Unity' -batchmode -quit -projectPath /Users/zhugehao/projects/GanglandUndercover -executeMethod GanglandUndercover.Editor.PrototypeSmokeTests.Run -logFile /Users/zhugehao/projects/GanglandUndercover/unity-smoke.log
 ```
 
 如果批处理卡在 `Licensing initialization failed`，先在 Unity Hub 里登录并完成 Unity 个人版或专业版授权，再重新运行。

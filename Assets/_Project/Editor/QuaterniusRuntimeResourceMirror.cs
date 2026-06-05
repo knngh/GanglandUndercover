@@ -18,6 +18,12 @@ namespace GanglandUndercover.Editor
 
         public static void SyncRuntimeResources()
         {
+            if (AssetDatabase.IsAssetImportWorkerProcess() || EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                Debug.LogWarning("Quaternius runtime resource mirror skipped: Unity is importing or compiling assets.");
+                return;
+            }
+
             string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             string sourceRoot = EnsureTrailingSeparator(Path.GetFullPath(Path.Combine(projectRoot, SourceRootAssetPath)));
             string runtimeRoot = EnsureTrailingSeparator(Path.GetFullPath(Path.Combine(projectRoot, RuntimeRootAssetPath)));
@@ -35,9 +41,12 @@ namespace GanglandUndercover.Editor
             int copied = 0;
             int skipped = 0;
 
-            AssetDatabase.StartAssetEditing();
+            bool assetEditingStarted = false;
             try
             {
+                AssetDatabase.StartAssetEditing();
+                assetEditingStarted = true;
+
                 foreach (string sourceFolder in new[] { "FBX", "Textures" })
                 {
                     string absoluteFolder = Path.Combine(sourceRoot, sourceFolder);
@@ -90,9 +99,17 @@ namespace GanglandUndercover.Editor
                     }
                 }
             }
+            catch (UnityException exception) when (!assetEditingStarted)
+            {
+                Debug.LogWarning("Quaternius runtime resource mirror skipped: " + exception.Message);
+                return;
+            }
             finally
             {
-                AssetDatabase.StopAssetEditing();
+                if (assetEditingStarted)
+                {
+                    AssetDatabase.StopAssetEditing();
+                }
             }
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);

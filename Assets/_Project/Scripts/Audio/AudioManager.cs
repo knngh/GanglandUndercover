@@ -163,7 +163,15 @@ namespace GanglandUndercover.Audio
 
             ApplyVolumes();
 
-            // Auto-start ambient loop if clip is assigned.
+            // Auto-start ambient loop if clip is assigned or loadable.
+            if (ambientClip == null)
+            {
+                // Try to load the first available ambient from Resources
+                var ambClips = Resources.LoadAll<AudioClip>("Audio/Ambience");
+                if (ambClips != null && ambClips.Length > 0)
+                    ambientClip = ambClips[0];
+            }
+
             if (ambientClip != null)
             {
                 ambientSource.clip = ambientClip;
@@ -208,10 +216,29 @@ namespace GanglandUndercover.Audio
             }
         }
 
+        // ── Runtime auto-load cache (lazy, one-shot) ──────────
+        private static readonly System.Collections.Generic.Dictionary<string, AudioClip> _clipCache = new();
+
+        /// <summary>
+        /// Try to load an AudioClip from Resources/Audio/ at runtime.
+        /// Used as fallback when Inspector slots are left empty.
+        /// Path convention: "Audio/SFX/SFX_{EnumName}" or "Audio/Ambience/{fileName}"
+        /// </summary>
+        private static AudioClip LoadFromResources(string resourcePath)
+        {
+            if (_clipCache.TryGetValue(resourcePath, out var cached))
+                return cached;
+
+            var clip = Resources.Load<AudioClip>(resourcePath);
+            _clipCache[resourcePath] = clip;
+            return clip;
+        }
+
         // ── Clip lookup ────────────────────────────────────────
         private AudioClip ResolveClip(SoundEffect effect)
         {
-            return effect switch
+            // First try Inspector-assigned clip
+            AudioClip inspectorClip = effect switch
             {
                 SoundEffect.UIClick          => uiClickClip,
                 SoundEffect.Footstep         => footstepClip,
@@ -232,17 +259,32 @@ namespace GanglandUndercover.Audio
                 SoundEffect.ButtonHover      => buttonHoverClip,
                 _ => null
             };
+
+            if (inspectorClip != null)
+                return inspectorClip;
+
+            // Fallback: auto-load from Resources/Audio/SFX/
+            string resourcePath = $"Audio/SFX/SFX_{effect}";
+            return LoadFromResources(resourcePath);
         }
 
         private AudioClip ResolveMusicClip(MusicTrack track)
         {
-            return track switch
+            // First try Inspector-assigned clip
+            AudioClip inspectorClip = track switch
             {
                 MusicTrack.MainMenu => mainMenuBGM,
                 MusicTrack.InGame   => inGameBGM,
                 MusicTrack.Meeting  => meetingBGM,
                 _ => null
             };
+
+            if (inspectorClip != null)
+                return inspectorClip;
+
+            // Fallback: auto-load from Resources/Audio/BGM/
+            string resourcePath = $"Audio/BGM/BGM_{track}";
+            return LoadFromResources(resourcePath);
         }
 
         // ── Background Music API ────────────────────────────────

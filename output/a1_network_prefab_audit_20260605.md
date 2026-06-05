@@ -14,12 +14,20 @@
 
 | 项目 | 状态 | 风险 |
 |------|------|------|
-| 监控摄像头 | ✅ 已修复 | 低 |
+| 监控摄像头 | ✅ 已修复并通过 PlayMode 回归 | 低 |
 | 小游戏桥 | ✅ 无问题 | 低 |
 | 玩家角色 | ✅ 标准 Prefab | 低 |
 | 任务站可视化 | ✅ 纯本地对象 | 无 |
 | 破坏对象 | ⚠️ 需复核 | 中 |
 | 会议/投票系统 | ✅ 基于 Snapshot | 低 |
+
+## 本次修复记录（2026-06-05）
+
+- `OnlineMatchController.RegisterSurveillanceCameraPrefab()` 不再用运行时 prefab 的默认 `GlobalObjectIdHash=0` 注册，改为 `NetworkPrefabOverride.Hash` + 固定 `SourceHashToOverride = 0x47554343`。
+- 增加已注册模板复用逻辑，避免 PlayMode/多控制器初始化时重复注册同一个 runtime prefab。
+- Client 断线清理同步推进：掉线玩家持有的任务锁释放、会议投票清理、指向掉线玩家的票清理，尸体保留为可报告状态。
+- 隔离 worktree 验证通过：Unity 6000.4.9f1 batchmode 编译成功；`MatchLoopPlayTests` 2/2 通过。
+- 主项目 batchmode 验证被已打开的 Unity 实例阻塞，未强制关闭现有 Editor。
 
 ---
 
@@ -32,17 +40,19 @@
 ```
 流程：
 1. RegisterSurveillanceCameraPrefab() → new GameObject + AddComponent<NetworkObject>
-2. NetworkConfig.Prefabs.Add(template)
+2. NetworkConfig.Prefabs.Add(NetworkPrefabOverride.Hash + stable SourceHashToOverride)
 3. CreateSurveillanceCameraNetworkObject() → Instantiate(template) → netObj.Spawn()
 ```
 
 **验证要点（需 Unity 运行时）**：
+- [x] PlayMode 不再触发 `NetworkPrefab (SurveillanceCameraTemplate) has a duplicate GlobalObjectIdHash source entry value of: 0`
 - [ ] 双进程 Relay 日志搜索 `NetworkPrefab could not be found` → 期望 0
 - [ ] Host 触发摄像头 → Client 可看到摄像头状态变化（`OnlineSecurityCamera` 使用 `NetworkVariable`）
 - [ ] 摄像头视野覆盖在双端一致
 
 **无风险点**：
 - 模板在 `DontDestroyOnLoad` 中，不会因场景切换丢失
+- 固定 hash 避免 runtime-created prefab 的 `GlobalObjectIdHash=0` 进入 NGO prefab 表
 - `Spawn()` 前先设置所有 `NetworkVariable` 字段，避免初始值不同步
 
 ---
@@ -146,7 +156,7 @@ Snapshot 是服务器→客户端的全量状态同步，包含玩家位置、�
 所有 6 个网络对象路径已审计完毕：
 - 运行时 NetworkObject 数量：1（监控摄像头 x N 个实例）
 - NetworkBehaviour 类：3（OnlineMiniGameBridge、OnlineSecurityCamera、CharacterCustomizer）
-- 无 `globalObjectIdHash=0` 模式
+- 监控摄像头已移除 `globalObjectIdHash=0` 注册模式
 - 无运行时 `AddComponent<NetworkObject>.Spawn()` 反模式
 
 ### 运行时验证清单（需双进程或多机运行）

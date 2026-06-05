@@ -56,15 +56,15 @@ namespace GanglandUndercover.Art
             CharDirectionArrow = DrawArrow(16);
             CharGhostOverlay = DrawGhostOverlay(64);
 
-            // ─── 地图 ───
-            FloorWood      = DrawFloorWood(32);
-            FloorConcrete  = DrawFloorConcrete(32);
-            FloorMetal     = DrawFloorMetal(32);
-            FloorCarpet    = DrawFloorCarpet(32);
-            FloorTile      = DrawFloorTileGrout(32);
-            WallBrick      = DrawWallBrick(16);
-            WallConcrete   = DrawWallConcrete(16);
-            WallStripe     = DrawWallStripe(16);
+            // ─── 地图 ─── (CC0优先，程序化兜底)
+            FloorWood      = LoadCCTile("Shared/floors", "FloorWood")      ?? DrawFloorWood(32);
+            FloorConcrete  = LoadCCTile("PoliceStation/floors", "FloorConcrete") ?? DrawFloorConcrete(32);
+            FloorMetal     = LoadCCTile("Harbour/floors", "FloorMetal")     ?? DrawFloorMetal(32);
+            FloorCarpet    = LoadCCTile("KowloonWalledCity/floors", "FloorCarpet") ?? DrawFloorCarpet(32);
+            FloorTile      = LoadCCTile("PoliceStation/floors", "FloorTile") ?? DrawFloorTileGrout(32);
+            WallBrick      = LoadCCTile("KowloonWalledCity/walls", "WallBrick") ?? DrawWallBrick(16);
+            WallConcrete   = LoadCCTile("PoliceStation/walls", "WallConcrete") ?? DrawWallConcrete(16);
+            WallStripe     = LoadCCTile("Shared/walls", "WallStripe")       ?? DrawWallStripe(16);
             FloorTileAlt   = FloorCarpet;
             CorridorTile   = FloorConcrete;
             WallBlock      = WallBrick;
@@ -94,13 +94,90 @@ namespace GanglandUndercover.Art
         // E2 职业角色生成器（64×64 像素，4向×3帧+死亡+头像）
         // ═══════════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// Try to load a CC0 pixel-art character set from Resources.
+        /// Returns null if CC0 sprites are not available for this profession.
+        /// Path convention: Resources/Sprites/Characters/{Profession}/{Direction}/{frame}.png
+        /// </summary>
+        private static ProfSpriteSet LoadCC0CharacterSet(Online.OnlineProfession prof)
+        {
+            string basePath = $"Sprites/Characters/{prof}";
+
+            // Check if CC0 sprites exist for this profession
+            var probe = Resources.Load<Texture2D>($"{basePath}/Front/idle");
+            if (probe == null) return null;
+
+            var set = new ProfSpriteSet();
+
+            // Helper: load Texture2D, convert to Sprite (pixel-art, point filter, pivot bottom-center)
+            System.Func<string, Sprite> LoadSprite = (path) =>
+            {
+                var tex = Resources.Load<Texture2D>(path);
+                if (tex == null) return null;
+                tex.filterMode = FilterMode.Point;
+                return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
+                    new Vector2(0.5f, 0f), 16f);
+            };
+
+            // Frame mapping: CC0 idle→Frame0(站立), walk_0→Frame1, walk_1→Frame2
+            set.Front_Frame0 = LoadSprite($"{basePath}/Front/idle");
+            set.Front_Frame1 = LoadSprite($"{basePath}/Front/walk_0");
+            set.Front_Frame2 = LoadSprite($"{basePath}/Front/walk_1");
+
+            set.Back_Frame0  = LoadSprite($"{basePath}/Back/idle");
+            set.Back_Frame1  = LoadSprite($"{basePath}/Back/walk_0");
+            set.Back_Frame2  = LoadSprite($"{basePath}/Back/walk_1");
+
+            set.Left_Frame0  = LoadSprite($"{basePath}/Left/idle");
+            set.Left_Frame1  = LoadSprite($"{basePath}/Left/walk_0");
+            set.Left_Frame2  = LoadSprite($"{basePath}/Left/walk_1");
+
+            set.Right_Frame0 = LoadSprite($"{basePath}/Right/idle");
+            set.Right_Frame1 = LoadSprite($"{basePath}/Right/walk_0");
+            set.Right_Frame2 = LoadSprite($"{basePath}/Right/walk_1");
+
+            // Death/Avatar: use procedural fallback (CC0 doesn't provide these)
+            // Will be generated alongside and populated by the calling code
+
+            Debug.Log($"[Sprite2DAssetCache] Loaded CC0 pixel sprites for {prof}");
+
+            return set;
+        }
+
+        /// <summary>
+        /// Try to load a CC0 tileset sprite from Resources.
+        /// Returns the first available PNG in the theme/category path.
+        /// </summary>
+        private static Sprite LoadCCTile(string resourceSubPath, string fallbackName)
+        {
+            string fullPath = $"Sprites/Tilesets/{resourceSubPath}";
+
+            // Load all textures in this directory
+            var textures = Resources.LoadAll<Texture2D>(fullPath);
+            if (textures == null || textures.Length == 0) return null;
+
+            // Pick the first one (representative tile)
+            var tex = textures[0];
+            tex.filterMode = FilterMode.Point;
+            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
+                new Vector2(0.5f, 0.5f), Mathf.Max(tex.width, tex.height));
+        }
+
         private static void GenerateAllCharacterSets()
         {
             foreach (Online.OnlineProfession prof in System.Enum.GetValues(typeof(Online.OnlineProfession)))
             {
+                // Try CC0 pixel art first, fall back to procedural
+                var set = LoadCC0CharacterSet(prof);
+                if (set != null)
+                {
+                    CharacterSets[prof] = set;
+                    continue;
+                }
+
                 Color main  = ProfessionPalette.MainColor(prof);
                 Color accent= ProfessionPalette.AccentColor(prof);
-                var set = new ProfSpriteSet();
+                set = new ProfSpriteSet();
 
                 // 正面：3帧行走（-1左腿前, 0站立, 1右腿前）
                 set.Front_Frame0 = DrawCharFront(prof, main, accent, 0);

@@ -70,6 +70,7 @@ namespace GanglandUndercover.Gameplay
         /// </summary>
         public void StartOfflineGame(SocialRole role, MapType mapType = MapType.GanglandDistrict)
         {
+            _mainMenuController?.Hide();
             DestroyActiveGame();
             _offlinePlayerRole = role;
             _offlineMapType = mapType;
@@ -82,6 +83,7 @@ namespace GanglandUndercover.Gameplay
         /// </summary>
         public void StartOnlineGame()
         {
+            _mainMenuController?.Hide();
             DestroyActiveGame();
             BuildOnlinePrototype();
             CreateGameOverController();

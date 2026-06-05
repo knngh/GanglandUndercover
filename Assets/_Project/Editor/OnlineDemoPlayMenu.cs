@@ -1,4 +1,5 @@
 using System.IO;
+using GanglandUndercover.Gameplay;
 using GanglandUndercover.Online;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -13,6 +14,7 @@ namespace GanglandUndercover.Editor
         private const string ScreenshotPath = "Screenshots/gangland-online-demo.png";
         private const string ActiveKey = "Gangland.PlayDemo.Active";
         private const string StartedKey = "Gangland.PlayDemo.Started";
+        private const string OnlineRequestedKey = "Gangland.PlayDemo.OnlineRequested";
         private const string ActionViewKey = "Gangland.PlayDemo.ActionView";
         private const string ScreenshotKey = "Gangland.PlayDemo.Screenshot";
         private const string RequestedAtKey = "Gangland.PlayDemo.RequestedAt";
@@ -29,9 +31,18 @@ namespace GanglandUndercover.Editor
         [MenuItem("Gangland/Play Online Demo")]
         public static void PlayOnlineDemo()
         {
-            QuaterniusRuntimeResourceMirror.SyncRuntimeResources();
+            try
+            {
+                QuaterniusRuntimeResourceMirror.SyncRuntimeResources();
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogWarning("Gangland Play Online Demo: resource mirror skipped so the demo can start. " + exception.Message);
+            }
+
             SessionState.SetBool(ActiveKey, true);
             SessionState.SetBool(StartedKey, false);
+            SessionState.SetBool(OnlineRequestedKey, false);
             SessionState.SetBool(ActionViewKey, false);
             SessionState.SetBool(ScreenshotKey, false);
             SessionState.SetFloat(RequestedAtKey, (float)EditorApplication.timeSinceStartup);
@@ -82,6 +93,15 @@ namespace GanglandUndercover.Editor
 
             if (controller == null)
             {
+                PrototypeBootstrap bootstrap = Object.FindAnyObjectByType<PrototypeBootstrap>();
+                if (bootstrap != null && !SessionState.GetBool(OnlineRequestedKey, false))
+                {
+                    bootstrap.StartOnlineGame();
+                    SessionState.SetBool(OnlineRequestedKey, true);
+                    SessionState.SetFloat(RequestedAtKey, (float)EditorApplication.timeSinceStartup);
+                    return;
+                }
+
                 if (EditorApplication.timeSinceStartup - requestedAt > 20.0)
                 {
                     StopWaiting("Timed out waiting for OnlineMatchController.");
@@ -122,6 +142,7 @@ namespace GanglandUndercover.Editor
             EditorApplication.update -= Tick;
             SessionState.SetBool(ActiveKey, false);
             SessionState.SetBool(ActionViewKey, false);
+            SessionState.SetBool(OnlineRequestedKey, false);
             Debug.Log("Gangland Play Online Demo: " + message);
         }
     }
