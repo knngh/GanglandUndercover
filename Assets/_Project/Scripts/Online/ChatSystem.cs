@@ -41,8 +41,8 @@ namespace GanglandUndercover.Online
     public class ChatSystem
     {
         private const int MaxMessages = 50;
-        private const float SendCooldown = 1.0f;
-        private const int MaxMessageLength = 500;
+        private const float SendCooldown = 5.0f;   // F3: 发言冷却 5 秒
+        private const int MaxMessageLength = 256;   // F3: 消息长度限制 256 字符
 
         /// <summary>近距离聊天半径（世界单位，x/y 平面距离）。</summary>
         public const float ProximityRadius = 15f;

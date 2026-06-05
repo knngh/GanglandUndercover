@@ -19,10 +19,13 @@ namespace GanglandUndercover.UI
 
         private const string KeyMasterVolume     = PrefKeyPrefix + "MasterVolume";
         private const string KeySfxVolume        = PrefKeyPrefix + "SfxVolume";
+        private const string KeyBgmVolume        = PrefKeyPrefix + "BgmVolume";      // F2
         private const string KeyVoiceChatVolume  = PrefKeyPrefix + "VoiceChatVolume";
         private const string KeyMicSensitivity   = PrefKeyPrefix + "MicSensitivity";
         private const string KeyResolutionIndex  = PrefKeyPrefix + "ResolutionIndex";
+        private const string KeyResolutionPreset = PrefKeyPrefix + "ResolutionPreset"; // F2
         private const string KeyIsFullscreen     = PrefKeyPrefix + "IsFullscreen";
+        private const string KeyWindowMode       = PrefKeyPrefix + "WindowMode";        // F2
         private const string KeyQualityPreset    = PrefKeyPrefix + "QualityPreset";
         private const string KeyFrameRateCap     = PrefKeyPrefix + "FrameRateCap";
         private const string KeyVSync            = PrefKeyPrefix + "VSync";
@@ -37,8 +40,8 @@ namespace GanglandUndercover.UI
         public SettingsData Current => _current;
 
         // ─── 事件 ───────────────────────────────────────
-        /// <summary>音量变更事件（主音量, 音效, 语音聊天, 麦克风灵敏度）</summary>
-        public static event Action<float, float, float, float> OnVolumeChanged;
+        /// <summary>音量变更事件（主音量, 音效, BGM, 语音聊天, 麦克风灵敏度）</summary>
+        public static event Action<float, float, float, float, float> OnVolumeChanged;
 
         /// <summary>画面设置变更事件</summary>
         public event Action<SettingsData> OnGraphicsChanged;
@@ -83,11 +86,14 @@ namespace GanglandUndercover.UI
 
             _current.MasterVolume    = PlayerPrefs.GetFloat(KeyMasterVolume,    _current.MasterVolume);
             _current.SfxVolume       = PlayerPrefs.GetFloat(KeySfxVolume,       _current.SfxVolume);
+            _current.BgmVolume       = PlayerPrefs.GetFloat(KeyBgmVolume,       _current.BgmVolume);        // F2
             _current.VoiceChatVolume = PlayerPrefs.GetFloat(KeyVoiceChatVolume, _current.VoiceChatVolume);
             _current.MicSensitivity  = PlayerPrefs.GetFloat(KeyMicSensitivity,  _current.MicSensitivity);
 
-            _current.ResolutionIndex = PlayerPrefs.GetInt(KeyResolutionIndex, _current.ResolutionIndex);
-            _current.IsFullscreen    = PlayerPrefs.GetInt(KeyIsFullscreen,  _current.IsFullscreen ? 1 : 0) == 1;
+            _current.ResolutionIndex  = PlayerPrefs.GetInt(KeyResolutionIndex,  _current.ResolutionIndex);
+            _current.ResolutionPreset = PlayerPrefs.GetInt(KeyResolutionPreset, _current.ResolutionPreset); // F2
+            _current.IsFullscreen     = PlayerPrefs.GetInt(KeyIsFullscreen,  _current.IsFullscreen ? 1 : 0) == 1;
+            _current.WindowMode       = PlayerPrefs.GetInt(KeyWindowMode,    _current.WindowMode);           // F2
             _current.QualityPreset   = PlayerPrefs.GetInt(KeyQualityPreset, _current.QualityPreset);
             _current.FrameRateCap    = PlayerPrefs.GetInt(KeyFrameRateCap,  _current.FrameRateCap);
             _current.VSync           = PlayerPrefs.GetInt(KeyVSync,         _current.VSync ? 1 : 0) == 1;
@@ -164,11 +170,14 @@ namespace GanglandUndercover.UI
         {
             PlayerPrefs.SetFloat(KeyMasterVolume,    _current.MasterVolume);
             PlayerPrefs.SetFloat(KeySfxVolume,       _current.SfxVolume);
+            PlayerPrefs.SetFloat(KeyBgmVolume,       _current.BgmVolume);        // F2
             PlayerPrefs.SetFloat(KeyVoiceChatVolume, _current.VoiceChatVolume);
             PlayerPrefs.SetFloat(KeyMicSensitivity,  _current.MicSensitivity);
 
-            PlayerPrefs.SetInt(KeyResolutionIndex, _current.ResolutionIndex);
-            PlayerPrefs.SetInt(KeyIsFullscreen,    _current.IsFullscreen ? 1 : 0);
+            PlayerPrefs.SetInt(KeyResolutionIndex,  _current.ResolutionIndex);
+            PlayerPrefs.SetInt(KeyResolutionPreset, _current.ResolutionPreset);  // F2
+            PlayerPrefs.SetInt(KeyWindowMode,       _current.WindowMode);        // F2
+            PlayerPrefs.SetInt(KeyIsFullscreen,     _current.IsFullscreen ? 1 : 0);
             PlayerPrefs.SetInt(KeyQualityPreset,   _current.QualityPreset);
             PlayerPrefs.SetInt(KeyFrameRateCap,    _current.FrameRateCap);
             PlayerPrefs.SetInt(KeyVSync,           _current.VSync ? 1 : 0);
@@ -198,6 +207,15 @@ namespace GanglandUndercover.UI
         {
             _current.SfxVolume = value;
             PlayerPrefs.SetFloat(KeySfxVolume, value);
+            InvokeVolumeChanged();
+            OnAnySettingChanged?.Invoke();
+        }
+
+        /// <summary>F2: 设置 BGM 音量</summary>
+        public void SetBgmVolume(float value)
+        {
+            _current.BgmVolume = value;
+            PlayerPrefs.SetFloat(KeyBgmVolume, value);
             InvokeVolumeChanged();
             OnAnySettingChanged?.Invoke();
         }
@@ -232,6 +250,26 @@ namespace GanglandUndercover.UI
         {
             _current.IsFullscreen = value;
             PlayerPrefs.SetInt(KeyIsFullscreen, value ? 1 : 0);
+            _current.Apply();
+            OnGraphicsChanged?.Invoke(_current);
+            OnAnySettingChanged?.Invoke();
+        }
+
+        /// <summary>F2: 设置窗口模式 0=全屏,1=窗口,2=无边框</summary>
+        public void SetWindowMode(int mode)
+        {
+            _current.WindowMode = mode;
+            PlayerPrefs.SetInt(KeyWindowMode, mode);
+            _current.Apply();
+            OnGraphicsChanged?.Invoke(_current);
+            OnAnySettingChanged?.Invoke();
+        }
+
+        /// <summary>F2: 设置分辨率预设 0=自动,1=720p,2=1080p,3=1440p</summary>
+        public void SetResolutionPreset(int preset)
+        {
+            _current.ResolutionPreset = preset;
+            PlayerPrefs.SetInt(KeyResolutionPreset, preset);
             _current.Apply();
             OnGraphicsChanged?.Invoke(_current);
             OnAnySettingChanged?.Invoke();
@@ -315,9 +353,9 @@ namespace GanglandUndercover.UI
 
         /// <summary>内部调用：音量变更事件触发器</summary>
         internal static void InvokeVolumeChanged(
-            float master, float sfx, float voice, float mic)
+            float master, float sfx, float bgm, float voice, float mic)
         {
-            OnVolumeChanged?.Invoke(master, sfx, voice, mic);
+            OnVolumeChanged?.Invoke(master, sfx, bgm, voice, mic);
         }
 
         private void InvokeVolumeChanged()
@@ -325,6 +363,7 @@ namespace GanglandUndercover.UI
             OnVolumeChanged?.Invoke(
                 _current.MasterVolume,
                 _current.SfxVolume,
+                _current.BgmVolume,
                 _current.VoiceChatVolume,
                 _current.MicSensitivity
             );

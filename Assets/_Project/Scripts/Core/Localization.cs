@@ -151,7 +151,27 @@ namespace GanglandUndercover.Core
             { "notify.sabotage", "破坏事件" },
             { "notify.emergency", "紧急会议" },
             { "notify.blackout", "断电" },
-            { "notify.lockdown", "区域封锁" }
+            { "notify.lockdown", "区域封锁" },
+
+            // ─── F1-F4 体验内容 + 可访问性 ───
+            { "tutorial.replay", "教程回顾" },
+            { "tutorial.skip", "跳过教程" },
+            { "tutorial.welcome", "欢迎来到九龙港城" },
+            { "setting.volume_bgm", "背景音乐" },
+            { "setting.window_mode", "窗口模式" },
+            { "setting.resolution", "分辨率" },
+            { "room.copy_code", "复制房间码" },
+            { "room.ready", "准备" },
+            { "room.cancel_ready", "取消准备" },
+            { "room.leave_confirm", "确定离开？对局进度将丢失。" },
+            { "a11y.colorblind_mode", "色盲模式" },
+            { "a11y.faction_police", "警蓝" },
+            { "a11y.faction_gang", "匪红" },
+            { "a11y.faction_undercover", "卧绿" },
+            { "a11y.faction_mole", "内黄" },
+            { "a11y.sabotage_blackout", "⚡停电" },
+            { "a11y.sabotage_lockdown", "🔒封锁" },
+            { "a11y.sabotage_comms", "📡断讯" }
         };
 
         private static readonly Dictionary<string, string> English = new Dictionary<string, string>
@@ -301,7 +321,27 @@ namespace GanglandUndercover.Core
             { "notify.sabotage", "Sabotage" },
             { "notify.emergency", "Emergency Meeting" },
             { "notify.blackout", "Blackout" },
-            { "notify.lockdown", "Lockdown" }
+            { "notify.lockdown", "Lockdown" },
+
+            // ─── F1-F4 Experience Content + Accessibility ───
+            { "tutorial.replay", "Replay Tutorial" },
+            { "tutorial.skip", "Skip Tutorial" },
+            { "tutorial.welcome", "Welcome to Kowloon Port" },
+            { "setting.volume_bgm", "Background Music" },
+            { "setting.window_mode", "Window Mode" },
+            { "setting.resolution", "Resolution" },
+            { "room.copy_code", "Copy Room Code" },
+            { "room.ready", "Ready" },
+            { "room.cancel_ready", "Cancel Ready" },
+            { "room.leave_confirm", "Leave? Match progress will be lost." },
+            { "a11y.colorblind_mode", "Colorblind Mode" },
+            { "a11y.faction_police", "Police" },
+            { "a11y.faction_gang", "Gang" },
+            { "a11y.faction_undercover", "UC" },
+            { "a11y.faction_mole", "Mole" },
+            { "a11y.sabotage_blackout", "⚡ Blackout" },
+            { "a11y.sabotage_lockdown", "🔒 Lockdown" },
+            { "a11y.sabotage_comms", "📡 Comms Down" }
         };
 
         /// <summary>当前语言，默认中文</summary>

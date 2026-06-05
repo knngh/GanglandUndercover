@@ -1,6 +1,7 @@
 using GanglandUndercover.Audio;
 using GanglandUndercover.Gameplay;
 using GanglandUndercover.SocialDeduction;
+using GanglandUndercover.Tutorial;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -206,6 +207,13 @@ namespace GanglandUndercover.UI
             Center(enterBtn, 0f, -250f, 280f, ThemeManager.ButtonHeight + 4f);
             enterBtn.GetComponent<Button>().onClick.AddListener(OnEnterLobby);
 
+            // F1: 重看教程按钮
+            var tutorialBtn = BuildButton("ReplayTutorialButton", onlinePanel.transform,
+                "教  程  回  顾", 280f, ThemeManager.ButtonHeight + 4f,
+                MoleTeal, Color.white, ThemeManager.FontSizeButton);
+            Center(tutorialBtn, 0f, -320f, 280f, ThemeManager.ButtonHeight + 4f);
+            tutorialBtn.GetComponent<Button>().onClick.AddListener(OnReplayTutorial);
+
             // ── 底部版本号 ──────────────────────────────────
             var verT = MakeText("Version", _rootPanel.transform,
                 "v0.8  ·  Gangland Undercover  ·  Among Us Inspired",
@@ -291,6 +299,26 @@ namespace GanglandUndercover.UI
         {
             Hide();
             _bootstrap?.StartOnlineGame();
+        }
+
+        /// <summary>F1: 重看新手教程</summary>
+        private void OnReplayTutorial()
+        {
+            AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+            Hide();
+            // 查找 TutorialGateway 并重启教程
+            var gateway = FindAnyObjectByType<TutorialGateway>();
+            if (gateway != null)
+            {
+                gateway.RestartTutorial();
+                Debug.Log("[MainMenu] Tutorial replay started via TutorialGateway.");
+            }
+            else
+            {
+                Debug.LogWarning("[MainMenu] TutorialGateway not found in scene.");
+                // 回退到主菜单
+                Show();
+            }
         }
 
         // ══════════════════════════════════════════════════════

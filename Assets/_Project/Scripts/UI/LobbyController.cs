@@ -31,6 +31,11 @@ namespace GanglandUndercover.UI
         private GameObject _rootPanel;
         private InputField _roomCodeInput;
         private Text _roomCodeDisplay;       // M7.1: 显示生成后的房间码
+        private Button _copyCodeButton;       // F3: 一键复制房间码
+        private Button _readyButton;          // F3: 准备/取消准备
+        private bool _isReady;                // F3: 本地玩家准备状态
+        private Button _leaveButton;          // F3: 离开房间确认
+        private GameObject _leaveConfirmPanel; // F3: 离开确认弹窗
         private Transform _playerListRoot;
         private Text _statusText;
         private Button _startButton;
@@ -167,6 +172,16 @@ namespace GanglandUndercover.UI
                 string.Empty, 24, AccentGreen, FontStyle.Bold, TextAnchor.MiddleCenter).GetComponent<Text>();
             CenterTopLabel(GetRect(_roomCodeDisplay.gameObject), -105f, 30f);
 
+            // F3: 复制房间码按钮（房间码旁边）
+            var copyBtn = MakeButton("CopyCodeButton", lobbyPanel.transform,
+                "📋", 40f, 30f, InputBg, MutedColor, 14);
+            GetRect(copyBtn).anchorMin = GetRect(copyBtn).anchorMax = new Vector2(0.5f, 1f);
+            GetRect(copyBtn).pivot = new Vector2(0.5f, 1f);
+            GetRect(copyBtn).anchoredPosition = new Vector2(200f, -105f);
+            GetRect(copyBtn).sizeDelta = new Vector2(40f, 30f);
+            _copyCodeButton = copyBtn.GetComponent<Button>();
+            _copyCodeButton.onClick.AddListener(OnCopyRoomCode);
+
             // 创建 / 加入按钮
             var createBtn = MakeButton("CreateRoomButton", lobbyPanel.transform,
                 "创  建  房  间", 200f, 48f, AccentOrange, Color.white, 18);
@@ -204,6 +219,45 @@ namespace GanglandUndercover.UI
             GetRect(_startButton.gameObject).sizeDelta = new Vector2(220f, 50f);
             _startButton.onClick.AddListener(OnStartOnlineGame);
             _startButton.interactable = false;
+
+            // F3: Ready/取消准备按钮
+            _readyButton = MakeButton("ReadyButton", lobbyPanel.transform,
+                "准  备", 160f, 44f, AccentGreen, Color.white, 16).GetComponent<Button>();
+            CenterTopLabel(GetRect(_readyButton.gameObject), -435f, 44f);
+            GetRect(_readyButton.gameObject).sizeDelta = new Vector2(160f, 44f);
+            GetRect(_readyButton.gameObject).anchoredPosition = new Vector2(-200f, -435f);
+            _readyButton.onClick.AddListener(OnToggleReady);
+
+            // F3: 离开房间按钮
+            _leaveButton = MakeButton("LeaveRoomButton", lobbyPanel.transform,
+                "离  开  房  间", 160f, 44f, AccentRed, Color.white, 16).GetComponent<Button>();
+            CenterTopLabel(GetRect(_leaveButton.gameObject), -435f, 44f);
+            GetRect(_leaveButton.gameObject).sizeDelta = new Vector2(160f, 44f);
+            GetRect(_leaveButton.gameObject).anchoredPosition = new Vector2(200f, -435f);
+            _leaveButton.onClick.AddListener(OnLeaveRoom);
+
+            // F3: 离开确认弹窗（初始隐藏）
+            _leaveConfirmPanel = CreatePanel("LeaveConfirmPanel", lobbyPanel.transform, PanelBg);
+            SetPos(_leaveConfirmPanel, 0f, 0f, 360f, 160f);
+            _leaveConfirmPanel.SetActive(false);
+
+            CenterTopLabel(CreateText("LeaveConfirmText", _leaveConfirmPanel.transform,
+                "确定离开？对局进度将丢失。", 18, TextColor, FontStyle.Normal, TextAnchor.MiddleCenter)
+                .GetComponent<RectTransform>(), -40f, 30f);
+
+            var confirmBtn = MakeButton("ConfirmLeaveBtn", _leaveConfirmPanel.transform,
+                "确  定  离  开", 140f, 40f, AccentRed, Color.white, 16);
+            CenterTopLabel(GetRect(confirmBtn), -90f, 40f);
+            GetRect(confirmBtn).sizeDelta = new Vector2(140f, 40f);
+            GetRect(confirmBtn).anchoredPosition = new Vector2(-80f, -90f);
+            confirmBtn.GetComponent<Button>().onClick.AddListener(OnConfirmLeave);
+
+            var cancelBtn = MakeButton("CancelLeaveBtn", _leaveConfirmPanel.transform,
+                "取  消", 140f, 40f, ButtonNormal, TextColor, 16);
+            CenterTopLabel(GetRect(cancelBtn), -90f, 40f);
+            GetRect(cancelBtn).sizeDelta = new Vector2(140f, 40f);
+            GetRect(cancelBtn).anchoredPosition = new Vector2(80f, -90f);
+            cancelBtn.GetComponent<Button>().onClick.AddListener(OnCancelLeave);
 
             // 返回按钮
             var backBtn = MakeButton("BackButton", lobbyPanel.transform,
@@ -331,6 +385,78 @@ namespace GanglandUndercover.UI
         {
             Hide();
             _bootstrap?.ReturnToMainMenu();
+        }
+
+        // ══════════════════════════════════════════════════════
+        // F3: 新增功能 — 复制房间码 / 准备 / 离开确认 / 踢人
+        // ══════════════════════════════════════════════════════
+
+        /// <summary>一键复制房间码到剪贴板</summary>
+        private void OnCopyRoomCode()
+        {
+            AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+            if (_matchController == null) return;
+            string code = _matchController.RelayJoinCode;
+            if (!string.IsNullOrEmpty(code))
+            {
+                GUIUtility.systemCopyBuffer = code;
+                SetStatus("房间码已复制: " + code, AccentGreen);
+            }
+            else
+            {
+                SetStatus("暂无房间码，请先创建房间", AccentRed);
+            }
+        }
+
+        /// <summary>切换准备/取消准备状态</summary>
+        private void OnToggleReady()
+        {
+            AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+            _isReady = !_isReady;
+
+            if (_readyButton != null)
+            {
+                Text label = _readyButton.GetComponentInChildren<Text>();
+                if (label != null)
+                    label.text = _isReady ? "取消准备" : "准  备";
+
+                ColorBlock cb = _readyButton.colors;
+                cb.normalColor = _isReady ? AccentGreen : ButtonNormal;
+                _readyButton.colors = cb;
+            }
+
+            // 通知服务器准备状态变更
+            _matchController?.SetReady(_isReady);
+            SetStatus(_isReady ? "已准备，等待房主开始..." : "已取消准备", AccentBlue);
+        }
+
+        /// <summary>点击离开房间 — 弹出确认弹窗</summary>
+        private void OnLeaveRoom()
+        {
+            AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+            if (_leaveConfirmPanel != null)
+            {
+                _leaveConfirmPanel.SetActive(true);
+            }
+        }
+
+        /// <summary>确认离开</summary>
+        private void OnConfirmLeave()
+        {
+            AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+            _leaveConfirmPanel?.SetActive(false);
+            _isReady = false;
+            _matchController?.LeaveRoom();
+            Hide();
+            _bootstrap?.ReturnToMainMenu();
+        }
+
+        /// <summary>取消离开</summary>
+        private void OnCancelLeave()
+        {
+            AudioManager.Instance?.PlaySFX(SoundEffect.ButtonHover);
+            if (_leaveConfirmPanel != null)
+                _leaveConfirmPanel.SetActive(false);
         }
 
         // ══════════════════════════════════════════════════════

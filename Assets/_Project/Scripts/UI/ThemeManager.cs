@@ -106,7 +106,7 @@ namespace GanglandUndercover.UI
         public static int FontSizeBody        => 18;
         public static int FontSizeButton      => 18;
         public static int FontSizeSmall       => 14;
-        public static int FontSizeFooter      => 12;
+        public static int FontSizeFooter      => 13; // F4: 最小可读字号 13px (WCAG AA 720p)
 
         // ══════════════════════════════════════════════════════
         // 圆角（面板12px / 按钮8px）

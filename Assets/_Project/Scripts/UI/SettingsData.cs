@@ -30,6 +30,28 @@ namespace GanglandUndercover.UI
             set => _sfxVolume = Mathf.Clamp01(value);
         }
 
+        /// <summary>F2: BGM 独立音量轨</summary>
+        [SerializeField, Range(0f, 1f)]
+        private float _bgmVolume = 0.7f;
+        public float BgmVolume
+        {
+            get => _bgmVolume;
+            set => _bgmVolume = Mathf.Clamp01(value);
+        }
+
+        /// <summary>F4: 窗口模式 0=全屏, 1=窗口, 2=无边框</summary>
+        [SerializeField, Range(0, 2)]
+        private int _windowMode;
+        public int WindowMode
+        {
+            get => _windowMode;
+            set => _windowMode = Mathf.Clamp(value, 0, 2);
+        }
+
+        /// <summary>F2: 分辨率预设 0=自动,1=720p,2=1080p,3=1440p</summary>
+        [SerializeField, Range(0, 3)]
+        private int _resolutionPreset;
+
         [SerializeField, Range(0f, 1f)]
         private float _voiceChatVolume = 0.7f;
         public float VoiceChatVolume
@@ -53,11 +75,17 @@ namespace GanglandUndercover.UI
         /// <summary>分辨率索引，0=使用当前原生分辨率，后续按键入分辨率数组</summary>
         [SerializeField]
         private int _resolutionIndex;
-        public int ResolutionIndex
+        public int ResolutionPreset
         {
-            get => _resolutionIndex;
-            set => _resolutionIndex = Mathf.Max(0, value);
+            get => _resolutionPreset;
+            set => _resolutionPreset = Mathf.Clamp(value, 0, 3);
         }
+
+        /// <summary>分辨率预设显示名称</summary>
+        public static readonly string[] ResolutionPresetNames = { "自动", "1280×720", "1920×1080", "2560×1440" };
+
+        /// <summary>窗口模式显示名称</summary>
+        public static readonly string[] WindowModeNames = { "全屏", "窗口", "无边框" };
 
         [SerializeField]
         private bool _isFullscreen = true;
@@ -166,6 +194,7 @@ namespace GanglandUndercover.UI
             SettingsManager.InvokeVolumeChanged(
                 _masterVolume,
                 _sfxVolume,
+                _bgmVolume,
                 _voiceChatVolume,
                 _micSensitivity
             );
@@ -175,7 +204,14 @@ namespace GanglandUndercover.UI
         private void ApplyGraphics()
         {
             // 全屏模式
-            Screen.fullScreen = _isFullscreen;
+            Screen.fullScreen = _windowMode == 0 || _windowMode == 2;
+            Screen.fullScreenMode = _windowMode switch
+            {
+                0 => FullScreenMode.ExclusiveFullScreen,
+                1 => FullScreenMode.Windowed,
+                2 => FullScreenMode.FullScreenWindow, // 无边框
+                _ => FullScreenMode.ExclusiveFullScreen
+            };
 
             // 画质预设
             QualitySettings.SetQualityLevel(_qualityPreset, applyExpensiveChanges: true);
@@ -186,8 +222,29 @@ namespace GanglandUndercover.UI
             // 垂直同步
             QualitySettings.vSyncCount = _vSync ? 1 : 0;
 
-            // 分辨率（index > 0 时切换分辨率）
-            ApplyResolution();
+            // 分辨率（预设优先）
+            ApplyResolutionPreset();
+        }
+
+        /// <summary>F2: 按预设值设定分辨率</summary>
+        private void ApplyResolutionPreset()
+        {
+            switch (_resolutionPreset)
+            {
+                case 1: // 720p
+                    Screen.SetResolution(1280, 720, Screen.fullScreen);
+                    break;
+                case 2: // 1080p
+                    Screen.SetResolution(1920, 1080, Screen.fullScreen);
+                    break;
+                case 3: // 1440p
+                    Screen.SetResolution(2560, 1440, Screen.fullScreen);
+                    break;
+                case 0: // 自动 → 回退到旧 ResolutionIndex 行为
+                default:
+                    ApplyResolution();
+                    break;
+            }
         }
 
         private void ApplyResolution()
