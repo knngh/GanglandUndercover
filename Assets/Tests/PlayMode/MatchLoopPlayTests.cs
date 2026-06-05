@@ -113,6 +113,55 @@ namespace GanglandUndercover.PlayTests
             Assert.GreaterOrEqual(GetInt("BotCount"), 7, "重开后应仍保有 AI 补位");
         }
 
+        [UnityTest]
+        public IEnumerator ClientDisconnect_ReleasesTaskLocksVotesAndKeepsBodyReportable()
+        {
+            yield return null;
+
+            Type playerStateType = RuntimeType("GanglandUndercover.Online.OnlinePlayerState");
+            Type bodyStateType = RuntimeType("GanglandUndercover.Online.OnlineBodyState");
+            Type roleType = RuntimeType("GanglandUndercover.Online.OnlineRole");
+            Type professionType = RuntimeType("GanglandUndercover.Online.OnlineProfession");
+            Type phaseType = RuntimeType("GanglandUndercover.Online.OnlineMatchPhase");
+
+            object connectedPlayer = Activator.CreateInstance(playerStateType, 12UL, "断线玩家",
+                Vector3.zero, true, true, Enum.Parse(roleType, "Police"), Enum.Parse(professionType, "Inspector"), 0, false);
+            object otherPlayer = Activator.CreateInstance(playerStateType, 13UL, "留场玩家",
+                Vector3.right, true, true, Enum.Parse(roleType, "Police"), Enum.Parse(professionType, "Inspector"), 0, false);
+            object body = Activator.CreateInstance(bodyStateType, 1, 12UL, Vector3.one, false);
+
+            object players = GetField("players");
+            Invoke(players, "Clear");
+            Invoke(players, "Add", 12UL, connectedPlayer);
+            Invoke(players, "Add", 13UL, otherPlayer);
+
+            object bodies = GetField("bodies");
+            Invoke(bodies, "Clear");
+            Invoke(bodies, "Add", body);
+
+            object votes = GetField("votes");
+            Invoke(votes, "Clear");
+            Invoke(votes, "Add", 12UL, 13UL);
+            Invoke(votes, "Add", 13UL, 12UL);
+
+            Invoke("MarkTaskActive", 12UL, 7);
+            Invoke("MarkTaskActive", 13UL, 8);
+            SetField("phase", Enum.Parse(phaseType, "Voting"));
+            SetField("matchStarted", false);
+
+            InvokePrivate("HandleClientDisconnected", 12UL);
+            yield return null;
+
+            Assert.IsFalse(DictionaryContainsKey(players, 12UL), "断线玩家应从玩家表移除");
+            Assert.IsTrue(DictionaryContainsKey(players, 13UL), "未断线玩家必须保留");
+            Assert.IsFalse(DictionaryContainsKey(votes, 12UL), "断线玩家已投的票应移除");
+            Assert.IsFalse(DictionaryContainsValue(votes, 12UL), "投给断线玩家的票应移除，避免会议票型卡住");
+            Assert.IsTrue(TaskLockOwnedBy(8, 13UL), "其他玩家正在处理的任务锁不能被误清");
+            Assert.IsFalse(TaskLockOwnedBy(7, 12UL), "断线玩家占用的任务/修复锁必须释放");
+
+            Assert.AreEqual(1, GetCollectionCount(bodies), "断线玩家的尸体应保留，仍可被其他玩家报案");
+        }
+
         // ──────────────────────────────────────────────────────────
         //  帧驱动辅助
         // ──────────────────────────────────────────────────────────
@@ -152,6 +201,88 @@ namespace GanglandUndercover.PlayTests
             Assert.IsNotNull(pi, $"找不到属性 {name}");
             return pi.GetValue(_controller);
         }
+
+        private object GetField(string name)
+        {
+            FieldInfo fi = _controllerType.GetField(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(fi, $"找不到字段 {name}");
+            return fi.GetValue(_controller);
+        }
+
+        private void SetField(string name, object value)
+        {
+            FieldInfo fi = _controllerType.GetField(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(fi, $"找不到字段 {name}");
+            fi.SetValue(_controller, value);
+        }
+
+        private void Invoke(string method, params object[] args)
+        {
+            MethodInfo mi = _controllerType.GetMethod(method,
+                BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(mi, $"找不到方法 {method}");
+            mi.Invoke(_controller, args);
+        }
+
+        private void InvokePrivate(string method, params object[] args)
+        {
+            MethodInfo mi = _controllerType.GetMethod(method,
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(mi, $"找不到私有方法 {method}");
+            mi.Invoke(_controller, args);
+        }
+
+        private static void Invoke(object target, string method, params object[] args)
+        {
+            MethodInfo mi = target.GetType().GetMethod(method);
+            Assert.IsNotNull(mi, $"找不到方法 {target.GetType().Name}.{method}");
+            mi.Invoke(target, args);
+        }
+
+        private bool TaskLockOwnedBy(int taskId, ulong ownerId)
+        {
+            object locks = GetField("activeTaskUsers");
+            if (locks == null)
+            {
+                return false;
+            }
+
+            MethodInfo tryGetValue = locks.GetType().GetMethod("TryGetValue");
+            object[] args = { taskId, null };
+            bool found = (bool)tryGetValue.Invoke(locks, args);
+            return found && Convert.ToUInt64(args[1]) == ownerId;
+        }
+
+        private static bool DictionaryContainsKey(object dictionary, ulong key)
+        {
+            MethodInfo containsKey = dictionary.GetType().GetMethod("ContainsKey");
+            return (bool)containsKey.Invoke(dictionary, new object[] { key });
+        }
+
+        private static bool DictionaryContainsValue(object dictionary, ulong value)
+        {
+            foreach (object entry in (System.Collections.IEnumerable)dictionary)
+            {
+                object entryValue = entry.GetType().GetProperty("Value").GetValue(entry);
+                if (Convert.ToUInt64(entryValue) == value)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int GetCollectionCount(object collection)
+        {
+            PropertyInfo count = collection.GetType().GetProperty("Count");
+            return Convert.ToInt32(count.GetValue(collection));
+        }
+
+        private static Type RuntimeType(string fullName)
+            => Type.GetType(fullName + ", " + RuntimeAssemblyName, throwOnError: true);
 
         private int GetInt(string name) => Convert.ToInt32(GetProp(name));
         private bool GetBool(string name) => (bool)GetProp(name);

@@ -49,3 +49,4 @@ Assets/_Project/Resources/AssetStore/
 # Resources/ 目录仅在构建时存在，用于承载 build_info.json，整目录及其 .meta 都不入仓库
 /Assets/Resources/
 /Assets/Resources.meta
+.asset_cache/

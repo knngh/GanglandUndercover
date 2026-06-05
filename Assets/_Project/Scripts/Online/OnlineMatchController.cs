@@ -2182,28 +2182,73 @@ namespace GanglandUndercover.Online
             // 主机迁移管理：通知迁移管理器检测主机断连
             migrationManager?.OnClientDisconnected(clientId);
 
+            ReleaseTasksHeldByClient(clientId);
+            RemoveDisconnectedPlayerVotes(clientId);
+
             players.Remove(clientId);
             privateRoles.Remove(clientId);
-            votes.Remove(clientId);
             killCooldowns.Remove(clientId);
             abilityCooldowns.Remove(clientId);
             botThinkTimers.Remove(clientId);
             botVoteTimers.Remove(clientId);
             botTargets.Remove(clientId);
 
-            for (int i = bodies.Count - 1; i >= 0; i--)
-            {
-                if (bodies[i].VictimClientId == clientId)
-                {
-                    bodies.RemoveAt(i);
-                }
-            }
-
             if (networkManager != null && networkManager.IsServer)
             {
                 AddCaseLog("玩家" + clientId + " 已离开房间。");
+
+                int aliveCount = CountAlivePlayers();
+                if ((phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
+                    && aliveCount > 0
+                    && votes.Count >= aliveCount)
+                {
+                    ResolveVotes();
+                    return;
+                }
+
                 EvaluateWinConditions();
                 BroadcastSnapshot();
+            }
+        }
+
+        private void ReleaseTasksHeldByClient(ulong clientId)
+        {
+            if (activeTaskUsers == null || activeTaskUsers.Count == 0)
+            {
+                return;
+            }
+
+            List<int> taskIdsToRelease = new List<int>();
+            foreach (KeyValuePair<int, ulong> pair in activeTaskUsers)
+            {
+                if (pair.Value == clientId)
+                {
+                    taskIdsToRelease.Add(pair.Key);
+                }
+            }
+
+            for (int i = 0; i < taskIdsToRelease.Count; i++)
+            {
+                activeTaskUsers.Remove(taskIdsToRelease[i]);
+            }
+        }
+
+        private void RemoveDisconnectedPlayerVotes(ulong clientId)
+        {
+            votes.Remove(clientId);
+
+            List<ulong> votersToClear = new List<ulong>();
+            foreach (KeyValuePair<ulong, ulong> vote in votes)
+            {
+                if (vote.Value == clientId)
+                {
+                    votersToClear.Add(vote.Key);
+                }
+            }
+
+            for (int i = 0; i < votersToClear.Count; i++)
+            {
+                votes.Remove(votersToClear[i]);
             }
         }
 
