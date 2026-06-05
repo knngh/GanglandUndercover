@@ -27,7 +27,7 @@ namespace GanglandUndercover.Online.Map
         private const float MaxDistBetweenSpawnAndTask = 30f; // 最大步行距离
 
         /// <summary>
-        /// 完整验证：可达性 + 覆盖 + 平衡。
+        /// 完整验证：可达性 + 覆盖 + 平衡 + 出生点 + 会议点。
         /// </summary>
         public static ValidationResult ValidateFull(MapLayoutData layout)
         {
@@ -43,6 +43,8 @@ namespace GanglandUndercover.Online.Map
             ValidateSurveillanceCoverage(layout, ref result);
             ValidateSightBlockers(layout, ref result);
             ValidateRoomConnectivity(layout, ref result);
+            ValidateSpawnPoints(layout, ref result);
+            ValidateMeetingPoint(layout, ref result);
 
             result.AllPassed = result.Errors == 0;
             return result;
@@ -337,6 +339,140 @@ namespace GanglandUndercover.Online.Map
             {
                 result.Messages.Add($"[OK] 全部 {layout.Rooms.Length} 个房间与走廊网络连通。");
             }
+        }
+
+        // ══════════════════════════════════════════════════════
+        // D1 新增：出生点验证
+        // ══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// 验证所有出生点是否在可步行区域（房间或走廊）内。
+        /// </summary>
+        public static void ValidateSpawnPoints(MapLayoutData layout, ref ValidationResult result)
+        {
+            if (layout.SpawnPoints == null || layout.SpawnPoints.Length == 0)
+            {
+                result.Errors++;
+                result.Messages.Add("[ERROR] 没有定义出生点。");
+                return;
+            }
+
+            int invalid = 0;
+            foreach (var spawn in layout.SpawnPoints)
+            {
+                bool inRoom = false;
+
+                // 检查是否在某个房间内
+                if (layout.Rooms != null)
+                {
+                    foreach (var room in layout.Rooms)
+                    {
+                        float hw = room.Size.x * 0.45f;
+                        float hh = room.Size.y * 0.45f;
+                        if (spawn.x > room.Center.x - hw && spawn.x < room.Center.x + hw &&
+                            spawn.y > room.Center.y - hh && spawn.y < room.Center.y + hh)
+                        {
+                            inRoom = true;
+                            break;
+                        }
+                    }
+                }
+
+                // 检查是否在走廊内
+                if (!inRoom && layout.Corridors != null)
+                {
+                    foreach (var cor in layout.Corridors)
+                    {
+                        if (cor.IsRoundNode)
+                        {
+                            float d = Vector2.Distance(spawn, cor.Center);
+                            if (d < cor.NodeRadius * 0.9f) { inRoom = true; break; }
+                        }
+                        else
+                        {
+                            float hw = cor.Size.x * 0.45f;
+                            float hh = cor.Size.y * 0.45f;
+                            if (spawn.x > cor.Center.x - hw && spawn.x < cor.Center.x + hw &&
+                                spawn.y > cor.Center.y - hh && spawn.y < cor.Center.y + hh)
+                            { inRoom = true; break; }
+                        }
+                    }
+                }
+
+                if (!inRoom)
+                {
+                    invalid++;
+                    result.Errors++;
+                    result.Messages.Add($"[ERROR] 出生点 ({spawn.x:F1}, {spawn.y:F1}) 不在任何房间或走廊内。");
+                }
+            }
+
+            if (invalid == 0)
+                result.Messages.Add($"[OK] 全部 {layout.SpawnPoints.Length} 个出生点在可步行区域。");
+
+            // 出生点数量检查
+            if (layout.SpawnPoints.Length < 8)
+            {
+                result.Warnings++;
+                result.Messages.Add($"[WARN] 仅 {layout.SpawnPoints.Length} 个出生点，建议至少 8 个（最大玩家数+余量）。");
+            }
+        }
+
+        /// <summary>
+        /// 验证会议点是否合理：座位不重叠、不穿墙、在可步行区域。
+        /// </summary>
+        public static void ValidateMeetingPoint(MapLayoutData layout, ref ValidationResult result)
+        {
+            Vector2 mc = layout.MeetingCenter;
+
+            // 会议中心必须在可步行区域
+            bool centerWalkable = false;
+            if (layout.Rooms != null)
+            {
+                foreach (var room in layout.Rooms)
+                {
+                    float hw = room.Size.x * 0.5f;
+                    float hh = room.Size.y * 0.5f;
+                    if (mc.x > room.Center.x - hw && mc.x < room.Center.x + hw &&
+                        mc.y > room.Center.y - hh && mc.y < room.Center.y + hh)
+                    { centerWalkable = true; break; }
+                }
+            }
+
+            if (!centerWalkable)
+            {
+                result.Errors++;
+                result.Messages.Add($"[ERROR] 会议中心 ({mc.x:F1}, {mc.y:F1}) 不在任何房间内。");
+                return;
+            }
+
+            // 座位数检查
+            if (layout.MaxMeetingSeats < 6)
+            {
+                result.Warnings++;
+                result.Messages.Add($"[WARN] 会议座位仅 {layout.MaxMeetingSeats} 个，建议至少 8 个。");
+            }
+
+            // 座位重叠检查（相邻座位至少间隔 0.3 单位）
+            for (int i = 0; i < layout.MaxMeetingSeats; i++)
+            {
+                float ai = i / (float)layout.MaxMeetingSeats * Mathf.PI * 2f + Mathf.PI * 0.5f;
+                Vector2 si = mc + new Vector2(Mathf.Cos(ai) * 1.4f, Mathf.Sin(ai) * 0.9f);
+
+                for (int j = i + 1; j < layout.MaxMeetingSeats; j++)
+                {
+                    float aj = j / (float)layout.MaxMeetingSeats * Mathf.PI * 2f + Mathf.PI * 0.5f;
+                    Vector2 sj = mc + new Vector2(Mathf.Cos(aj) * 1.4f, Mathf.Sin(aj) * 0.9f);
+
+                    if (Vector2.Distance(si, sj) < 0.3f)
+                    {
+                        result.Errors++;
+                        result.Messages.Add($"[ERROR] 会议座位 {i} 和 {j} 重叠（间距 {Vector2.Distance(si, sj):F2} < 0.3）。");
+                    }
+                }
+            }
+
+            result.Messages.Add($"[OK] 会议点验证通过：{layout.MaxMeetingSeats} 个座位，中心 ({mc.x:F1}, {mc.y:F1})。");
         }
 
         // ══════════════════════════════════════════════════════

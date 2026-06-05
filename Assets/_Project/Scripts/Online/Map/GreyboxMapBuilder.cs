@@ -1,13 +1,14 @@
 using System.Collections.Generic;
 using UnityEngine;
+using GanglandUndercover.Art;
 
 namespace GanglandUndercover.Online.Map
 {
     /// <summary>
-    /// M6.1 灰盒地图建造器。
+    /// M6.1+E3 灰盒地图建造器。
     ///
-    /// 从 MapLayoutData 生成纯灰盒地图：地面、墙壁、碰撞、可步行区域。
-    /// 与垂直切片视觉层（VerticalSlice）完全解耦 —— 灰盒模式不加载任何美术资源。
+    /// 从 MapLayoutData 生成地图：地面、墙壁、碰撞、可步行区域。
+    /// E3 增强：每个房间建造后调用 RoomDecorator 添加美术道具和装饰。
     ///
     /// 坐标系：内部使用设计坐标，建造时通过 OnlineMapService 转换为世界坐标。
     /// </summary>
@@ -17,6 +18,7 @@ namespace GanglandUndercover.Online.Map
         private readonly OnlineWorldBuilder _worldBuilder;
         private readonly MapLayoutData _layout;
         private readonly GameObject _worldRoot;
+        private RoomDecorator _decorator;
 
         // 运行中收集的 POI 引用
         public readonly List<GameObject> BuiltWalls = new List<GameObject>();
@@ -26,15 +28,28 @@ namespace GanglandUndercover.Online.Map
         public readonly List<GameObject> BuiltCameras = new List<GameObject>();
         public readonly List<Rect> WalkableRects = new List<Rect>();
 
-        // 颜色常量（灰盒调色板）
+        // 颜色常量
         private static readonly Color FloorColor = new Color(0.12f, 0.13f, 0.14f, 1f);
-        private static readonly Color WallColor = new Color(0.18f, 0.19f, 0.20f, 1f);
         private static readonly Color CorridorColor = new Color(0.10f, 0.11f, 0.12f, 1f);
         private static readonly Color VentColor = new Color(0.25f, 0.20f, 0.30f, 1f);
         private static readonly Color MeetingColor = new Color(0.15f, 0.18f, 0.22f, 1f);
         private static readonly Color CameraColor = new Color(0.08f, 0.45f, 0.65f, 0.6f);
         private static readonly Color SeatColor = new Color(0.25f, 0.28f, 0.32f, 1f);
         private static readonly Color TaskSpotColor = new Color(0.92f, 0.72f, 0.12f, 0.5f);
+
+        /// <summary>按地图类型获取墙壁颜色</summary>
+        private Color WallColorForMap(OnlineMapService.OnlineMapType mapType)
+        {
+            switch (mapType)
+            {
+                case OnlineMapService.OnlineMapType.PoliceStation:
+                    return MapTilePalette.WallPolice;
+                case OnlineMapService.OnlineMapType.KowloonWalledCity:
+                    return MapTilePalette.WallKowloon;
+                default:
+                    return MapTilePalette.WallLight;
+            }
+        }
 
         public GreyboxMapBuilder(OnlineMapService mapService, OnlineWorldBuilder worldBuilder,
             MapLayoutData layout, GameObject worldRoot)
@@ -134,6 +149,9 @@ namespace GanglandUndercover.Online.Map
         {
             if (_layout.Rooms == null) return;
 
+            _decorator = new RoomDecorator(_worldBuilder, _mapService, _worldRoot);
+            Color wallColor = WallColorForMap(_mapService.ActiveMapType);
+
             for (int i = 0; i < _layout.Rooms.Length; i++)
             {
                 var room = _layout.Rooms[i];
@@ -141,22 +159,22 @@ namespace GanglandUndercover.Online.Map
                 Vector3 size = new Vector3(room.Size.x, room.Size.y, room.Size.z);
 
                 // E3: 使用 MapTilePalette 按地图类型+房间索引查地板色
-                Color floorColor = GanglandUndercover.Art.MapTilePalette.FloorColor(
+                Color floorColor = MapTilePalette.FloorColor(
                     _mapService.ActiveMapType, i);
                 // 如果布局数据中已有自定义颜色，优先使用
                 if (room.FloorColor.a > 0.1f) floorColor = room.FloorColor;
 
                 GameObject floor = _worldBuilder.CreateShapeProp(
-                    $"Greybox Room {room.Name}",
-                    GanglandUndercover.Art.Sprite2DAssetCache.FloorTileAlt,
+                    $"Room {room.Name}",
+                    Sprite2DAssetCache.FloorTileAlt,
                     center + new Vector3(0f, 0f, -0.05f),
                     size,
                     floorColor);
-                floor.name = $"Greybox Room {room.Name}";
+                floor.name = $"Room {room.Name}";
                 BuiltRooms.Add(floor);
 
-                // 墙壁（四边框，入口方向留缺口）
-                BuildRoomWalls(center, size, room.Entrance);
+                // 墙壁（四边框，入口方向留缺口）—— E3: 使用地图专属墙壁颜色
+                BuildRoomWalls(center, size, room.Entrance, wallColor);
 
                 // 可步行区域
                 WalkableRects.Add(new Rect(
@@ -164,10 +182,17 @@ namespace GanglandUndercover.Online.Map
                     center.y - size.y * 0.45f,
                     size.x * 0.8f,
                     size.y * 0.9f));
+
+                // E3: 房间美术装饰
+                _decorator.DecorateRoom(room, i);
             }
+
+            Debug.Log($"[GreyboxMapBuilder] E3 decorated {_layout.Rooms.Length} rooms, " +
+                      $"{_decorator.DecoratedProps.Count} props, " +
+                      $"{_decorator.EntranceMarkers.Count} entrance markers.");
         }
 
-        private void BuildRoomWalls(Vector3 center, Vector3 size, OnlineMapService.MapEntrance entrance)
+        private void BuildRoomWalls(Vector3 center, Vector3 size, OnlineMapService.MapEntrance entrance, Color wallColor)
         {
             float hw = size.x * 0.5f;
             float hh = size.y * 0.5f;
@@ -177,46 +202,45 @@ namespace GanglandUndercover.Online.Map
             if (entrance != OnlineMapService.MapEntrance.North)
             {
                 var w = CreateSolidGreyboxWall(
-                    $"Greybox Wall {center.x:F1},{center.y:F1} N",
+                    $"Wall {center.x:F1},{center.y:F1} N",
                     center + new Vector3(0f, hh, 0f),
-                    new Vector3(size.x, wallThick, wallDepth));
+                    new Vector3(size.x, wallThick, wallDepth), wallColor);
                 BuiltWalls.Add(w);
             }
 
             if (entrance != OnlineMapService.MapEntrance.South)
             {
                 var w = CreateSolidGreyboxWall(
-                    $"Greybox Wall {center.x:F1},{center.y:F1} S",
+                    $"Wall {center.x:F1},{center.y:F1} S",
                     center + new Vector3(0f, -hh, 0f),
-                    new Vector3(size.x, wallThick, wallDepth));
+                    new Vector3(size.x, wallThick, wallDepth), wallColor);
                 BuiltWalls.Add(w);
             }
 
             if (entrance != OnlineMapService.MapEntrance.West)
             {
                 var w = CreateSolidGreyboxWall(
-                    $"Greybox Wall {center.x:F1},{center.y:F1} W",
+                    $"Wall {center.x:F1},{center.y:F1} W",
                     center + new Vector3(-hw, 0f, 0f),
-                    new Vector3(wallThick, size.y, wallDepth));
+                    new Vector3(wallThick, size.y, wallDepth), wallColor);
                 BuiltWalls.Add(w);
             }
 
             if (entrance != OnlineMapService.MapEntrance.East)
             {
                 var w = CreateSolidGreyboxWall(
-                    $"Greybox Wall {center.x:F1},{center.y:F1} E",
+                    $"Wall {center.x:F1},{center.y:F1} E",
                     center + new Vector3(hw, 0f, 0f),
-                    new Vector3(wallThick, size.y, wallDepth));
+                    new Vector3(wallThick, size.y, wallDepth), wallColor);
                 BuiltWalls.Add(w);
             }
         }
 
-        private GameObject CreateSolidGreyboxWall(string name, Vector3 center, Vector3 size)
+        private GameObject CreateSolidGreyboxWall(string name, Vector3 center, Vector3 size, Color wallColor)
         {
-            // E3: 使用砖纹/水泥墙壁 sprite
             return _worldBuilder.CreateShapeProp(name,
-                GanglandUndercover.Art.Sprite2DAssetCache.WallBrick,
-                center, size, WallColor);
+                Sprite2DAssetCache.WallBrick,
+                center, size, wallColor);
         }
 
         private void BuildTaskSpots()
@@ -309,11 +333,12 @@ namespace GanglandUndercover.Online.Map
         {
             if (_layout.SightBlockers == null) return;
 
+            Color wallColor = WallColorForMap(_mapService.ActiveMapType);
             foreach (var blocker in _layout.SightBlockers)
             {
                 Vector3 center = new Vector3(blocker.Center.x, blocker.Center.y, 0.18f);
                 Vector3 size = new Vector3(blocker.Size.x, blocker.Size.y, 0.32f);
-                CreateSolidGreyboxWall($"Greybox Blocker {blocker.Name}", center, size);
+                CreateSolidGreyboxWall($"Blocker {blocker.Name}", center, size, wallColor);
             }
         }
 
@@ -323,11 +348,12 @@ namespace GanglandUndercover.Online.Map
             float hh = _layout.DesignHalfHeight;
             float thick = 0.2f;
             float tall = 0.5f;
+            Color wallColor = WallColorForMap(_mapService.ActiveMapType);
 
-            CreateSolidGreyboxWall("Greybox Boundary N", new Vector3(0f, hh, 0f), new Vector3(hw * 2f + 1f, thick, tall));
-            CreateSolidGreyboxWall("Greybox Boundary S", new Vector3(0f, -hh, 0f), new Vector3(hw * 2f + 1f, thick, tall));
-            CreateSolidGreyboxWall("Greybox Boundary W", new Vector3(-hw, 0f, 0f), new Vector3(thick, hh * 2f + 1f, tall));
-            CreateSolidGreyboxWall("Greybox Boundary E", new Vector3(hw, 0f, 0f), new Vector3(thick, hh * 2f + 1f, tall));
+            CreateSolidGreyboxWall("Boundary N", new Vector3(0f, hh, 0f), new Vector3(hw * 2f + 1f, thick, tall), wallColor);
+            CreateSolidGreyboxWall("Boundary S", new Vector3(0f, -hh, 0f), new Vector3(hw * 2f + 1f, thick, tall), wallColor);
+            CreateSolidGreyboxWall("Boundary W", new Vector3(-hw, 0f, 0f), new Vector3(thick, hh * 2f + 1f, tall), wallColor);
+            CreateSolidGreyboxWall("Boundary E", new Vector3(hw, 0f, 0f), new Vector3(thick, hh * 2f + 1f, tall), wallColor);
         }
     }
 }

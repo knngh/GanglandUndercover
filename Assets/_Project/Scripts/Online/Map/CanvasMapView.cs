@@ -37,6 +37,7 @@ namespace GanglandUndercover.Online.Map
         [SerializeField] private Color bodyColor = new Color(0.9f, 0.2f, 0.2f, 0.8f);
         [SerializeField] private Color taskColor = new Color(0.3f, 0.7f, 0.9f, 0.7f);
         [SerializeField] private Color sabotagedColor = new Color(1f, 0.4f, 0.1f, 0.8f);
+        [SerializeField] private Color meetingActiveColor = new Color(1f, 0.85f, 0.1f, 0.9f);
 
         // 运行时引用
         private OnlineMatchController _controller;
@@ -45,6 +46,7 @@ namespace GanglandUndercover.Online.Map
         private GameObject _rootPanel;
         private RectTransform _mapArea;
         private RectTransform _mapContent;     // 可平移的容器
+        private Text _titleText;
         private readonly List<GameObject> _dynamicMarkers = new List<GameObject>();
 
         // 拖拽/缩放状态
@@ -134,14 +136,24 @@ namespace GanglandUndercover.Online.Map
             // 绘制房间和走廊（静态）
             DrawStaticMap();
 
-            // 固定标题
-            var title = CreateText("MapTitle", _rootPanel.transform,
-                isLargeMap ? "港区地图" : "", 14, Color.white, FontStyle.Bold, TextAnchor.MiddleCenter);
-            var titleRT = title.GetComponent<RectTransform>();
+            // 固定标题（D3: 根据地图类型动态更新）
+            string mapName = GetMapName();
+            var titleGO = CreateText("MapTitle", _rootPanel.transform,
+                isLargeMap ? mapName + " 地图" : "", 14, Color.white, FontStyle.Bold, TextAnchor.MiddleCenter);
+            var titleRT = titleGO.GetComponent<RectTransform>();
             titleRT.anchorMin = titleRT.anchorMax = new Vector2(0.5f, 1f);
             titleRT.pivot = new Vector2(0.5f, 1f);
             titleRT.anchoredPosition = isLargeMap ? new Vector2(0f, -8f) : new Vector2(0f, -2f);
             titleRT.sizeDelta = new Vector2(200f, 24f);
+            _titleText = titleGO.GetComponent<Text>();
+
+            // 小地图上常显地图名称缩写
+            if (!isLargeMap)
+            {
+                _titleText.text = GetMapAbbr();
+                _titleText.fontSize = 10;
+                _titleText.color = new Color(1, 1, 1, 0.6f);
+            }
 
             // 拖拽事件
             AddDragHandler(mapAreaGO);
@@ -202,6 +214,10 @@ namespace GanglandUndercover.Online.Map
 
             // 绘制尸体
             DrawBodyMarkers();
+
+            // D3: 会议/破坏区域指示器
+            DrawMeetingIndicator();
+            DrawSabotageIndicators();
         }
 
         private void DrawTaskMarkers()
@@ -254,6 +270,82 @@ namespace GanglandUndercover.Online.Map
                 return playerAllyColor;
 
             return playerNeutralColor;
+        }
+
+        // ══════════════════════════════════════════════════════
+        // D3 新增：会议和破坏指示器
+        // ══════════════════════════════════════════════════════
+
+        private void DrawMeetingIndicator()
+        {
+            if (_controller == null || _mapService == null) return;
+
+            // 如果当前在会议阶段，高亮会议点
+            if (_controller.IsMeetingPhase)
+            {
+                Vector2 meetingPos = _mapService.CurrentMeetingCenter;
+                Vector2 pixelPos = WorldToCanvas(meetingPos);
+                float pulseSize = 14f + Mathf.Sin(Time.time * 4f) * 4f;
+                CreateMarker("MeetingPulse", _mapContent, pixelPos, pulseSize,
+                    meetingActiveColor);
+            }
+        }
+
+        private void DrawSabotageIndicators()
+        {
+            if (_controller == null) return;
+
+            // 检查破坏状态并在对应区域画指示器
+            bool blackout = _controller.BlackoutTimer > 0f;
+            bool lockdown = _controller.LockdownTimer > 0f;
+            bool commJam  = _controller.CommunicationJamTimer > 0f;
+
+            if (blackout && _mapService != null)
+            {
+                // 在电房位置标记
+                Vector2 elecPos = _mapService.PowerRoomCenter;
+                Vector2 pixelPos = WorldToCanvas(elecPos);
+                float size = 10f + Mathf.Sin(Time.time * 6f) * 3f;
+                CreateMarker("Sabotage_Blackout", _mapContent, pixelPos, size, sabotagedColor);
+            }
+
+            if (lockdown && _mapService != null)
+            {
+                Vector2 lockPos = _mapService.MainCorridorCenter;
+                Vector2 pixelPos = WorldToCanvas(lockPos);
+                CreateMarker("Sabotage_Lockdown", _mapContent, pixelPos, 12f,
+                    new Color(0.9f, 0.1f, 0.1f, 0.8f));
+            }
+
+            if (commJam && _mapService != null)
+            {
+                Vector2 commPos = _mapService.CommsRoomCenter;
+                Vector2 pixelPos = WorldToCanvas(commPos);
+                CreateMarker("Sabotage_CommJam", _mapContent, pixelPos, 10f,
+                    new Color(0.6f, 0.2f, 0.9f, 0.8f));
+            }
+        }
+
+        private string GetMapName()
+        {
+            if (_mapService == null) return "港区";
+            switch (_mapService.ActiveMapType)
+            {
+                case OnlineMapService.OnlineMapType.PoliceStation: return "警署";
+                case OnlineMapService.OnlineMapType.KowloonWalledCity: return "九龙城寨";
+                default: return "港区";
+            }
+        }
+
+        private string GetMapAbbr()
+        {
+            if (_mapService == null) return "HK";
+            switch (_mapService.ActiveMapType)
+            {
+                case OnlineMapService.OnlineMapType.PoliceStation: return "警署";
+                case OnlineMapService.OnlineMapType.KowloonWalledCity: return "城寨";
+                default: return "港区";
+            }
         }
 
         private void DrawBodyMarkers()

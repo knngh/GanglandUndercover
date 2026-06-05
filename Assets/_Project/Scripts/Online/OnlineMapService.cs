@@ -288,6 +288,42 @@ namespace GanglandUndercover.Online
             return ScaleMapPosition(MeetingSeatDesignPosition(seatIndex, seatCount));
         }
 
+        // ---- D3 地图上位置指示器 ----
+
+        /// <summary>当前地图的会议中心（设计坐标）</summary>
+        public Vector2 CurrentMeetingCenter => new Vector2(0f, 0f);
+
+        /// <summary>电力房中心（破坏-停电）</summary>
+        public Vector2 PowerRoomCenter
+        {
+            get
+            {
+                var rooms = ShipRooms();
+                // 默认电房是最后一个索引-1的房间（或 index 6 for harbour）
+                int idx = activeMapType == OnlineMapType.HarbourDistrict ? 6 :
+                          activeMapType == OnlineMapType.PoliceStation ? 3 : 0;
+                if (idx < rooms.Length) return rooms[idx].Center;
+                return Vector2.zero;
+            }
+        }
+
+        /// <summary>通讯房中心（破坏-通讯干扰）</summary>
+        public Vector2 CommsRoomCenter
+        {
+            get
+            {
+                var rooms = ShipRooms();
+                // 通讯房 = 监控室
+                int idx = activeMapType == OnlineMapType.HarbourDistrict ? 2 :
+                          activeMapType == OnlineMapType.PoliceStation ? 3 : 2;
+                if (idx < rooms.Length) return rooms[idx].Center;
+                return Vector2.zero;
+            }
+        }
+
+        /// <summary>主走廊中心（封锁-锁门）</summary>
+        public Vector2 MainCorridorCenter => new Vector2(0f, 2f);
+
         // ---- 地图区域定义（房间） ----
 
         /// <summary>获取所有房间/区域定义（设计坐标），根据 ActiveMapType 返回对应地图的房间</summary>

@@ -353,6 +353,8 @@ namespace GanglandUndercover.Online
         public float CommunicationJamTimer => taskService.CommunicationJamTimer;
         public float EvidenceLeakTimer => taskService.EvidenceLeakTimer;
         public float PatrolAlertTimer => taskService.PatrolAlertTimer;
+        /// <summary>D3: 当前是否在会议/投票阶段</summary>
+        public bool IsMeetingPhase => phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting;
         public bool TacticalMapOpen => tacticalMapOpen;
         public bool IntelBoardOpen => intelBoardOpen;
         // M1 收尾：语音已移除，以下三个属性转为聊天通道状态映射
