@@ -1,0 +1,24 @@
+{
+  "source": "Kenney Roguelike Characters + Desert Shooter (CC0)",
+  "sprite_size": "16\u00d716",
+  "frame_count": {
+    "Inspector": "Cop",
+    "Forensics": "Cop",
+    "Tech": "Cop",
+    "UndercoverAgent": "Triad",
+    "Enforcer": "Thug",
+    "Fixer": "Dealer",
+    "Driver": "Informant",
+    "Mole": "CorpSec"
+  },
+  "profession_map": {
+    "Inspector": "Cop",
+    "Forensics": "Cop",
+    "Tech": "Cop",
+    "UndercoverAgent": "Triad",
+    "Enforcer": "Thug",
+    "Fixer": "Dealer",
+    "Driver": "Informant",
+    "Mole": "CorpSec"
+  }
+}

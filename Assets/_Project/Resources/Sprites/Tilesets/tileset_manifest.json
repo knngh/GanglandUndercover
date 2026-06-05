@@ -1,0 +1,80 @@
+{
+  "source": "Kenney CC0 tileset packs",
+  "total_imported": 26,
+  "themes": {
+    "Harbour": {
+      "count": 7,
+      "files": {
+        "floors": [
+          "cargo-bay.png",
+          "metal-grid.png"
+        ],
+        "walls": [
+          "indtech_000_000.png",
+          "indtech_000_000.png"
+        ],
+        "props": [
+          "tile_0000.png"
+        ],
+        "decorations": [
+          "industrial-district.png",
+          "industrial-district.png"
+        ]
+      }
+    },
+    "PoliceStation": {
+      "count": 7,
+      "files": {
+        "floors": [
+          "clean-room.png",
+          "command-deck.png",
+          "lab-floor.png"
+        ],
+        "walls": [
+          "darktech_000_000.png",
+          "display-screen.png"
+        ],
+        "props": [
+          "blast-door.png"
+        ],
+        "decorations": [
+          "circuit-board.png"
+        ]
+      }
+    },
+    "KowloonWalledCity": {
+      "count": 9,
+      "files": {
+        "floors": [
+          "neon-light.png",
+          "neon-light.png",
+          "neon-light.png"
+        ],
+        "walls": [
+          "alien-tech.png",
+          "residential-alley.png"
+        ],
+        "props": [
+          "chinatown-gate.png",
+          "chinatown-gate.png"
+        ],
+        "decorations": [
+          "hacker-cafe.png",
+          "hacker-cafe.png"
+        ]
+      }
+    },
+    "Shared": {
+      "count": 3,
+      "files": {
+        "walls": [
+          "energy-shield.png",
+          "hull-panel.png"
+        ],
+        "props": [
+          "airlock.png"
+        ]
+      }
+    }
+  }
+}
