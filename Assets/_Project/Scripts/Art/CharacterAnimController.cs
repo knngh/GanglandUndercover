@@ -43,7 +43,7 @@ namespace GanglandUndercover.Art
 
         private void LateUpdate()
         {
-            if (State == null) return;
+            if (State.ClientId == 0) return;
 
             // 死亡 → 尸体 sprite
             if (!State.Alive)

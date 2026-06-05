@@ -3669,6 +3669,14 @@ namespace GanglandUndercover.Online
             return localPlayerName;
         }
 
+        /// <summary>获取玩家显示名称（按 clientId 查字典）</summary>
+        public string GetPlayerDisplayName(ulong clientId)
+        {
+            if (players.TryGetValue(clientId, out OnlinePlayerState state))
+                return state.DisplayName;
+            return "玩家" + clientId;
+        }
+
         private void UpsertLocalPlayer()
         {
             if (localPreviewMode)
@@ -4175,7 +4183,9 @@ namespace GanglandUndercover.Online
                         {
                             if (GetPrivateRole(kv.Key) == OnlineRole.Gang)
                             {
-                                kv.Value.Suspicion += 2;
+                                var s = kv.Value;
+                                s.Suspicion += 2;
+                                players[kv.Key] = s;
                             }
                         }
                         UpdateEvidenceMilestone();
@@ -12649,6 +12659,7 @@ namespace GanglandUndercover.Online
             VentCooldown = 0f;
             Suspicion = suspicion;
             IsBot = isBot;
+            IsGhost = false;
             CharacterAnimator = null;
             SocialChar = null;
             Character2DDirectionIndicator = null;
@@ -12661,6 +12672,7 @@ namespace GanglandUndercover.Online
         public Vector2 Input;
         public bool Ready;
         public bool Alive;
+        public bool IsGhost;
         public bool IsBot;
         public OnlineRole PublicRole;
         public OnlineProfession Profession;
