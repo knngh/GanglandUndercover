@@ -180,6 +180,7 @@ namespace GanglandUndercover.Online
         private float actionCooldown;
         private float phaseTimer;
         private float emergencyCooldownTimer;
+        private float reportCooldownTimer;
         private float aiActionGraceTimer;
         private float matchElapsedSeconds;
         private int activeTaskId = -1;
@@ -337,6 +338,7 @@ namespace GanglandUndercover.Online
         public bool RelayOperationInProgress => relayOperationInProgress;
         public int EmergencyMeetingsLeft => emergencyMeetingsLeft;
         public float EmergencyCooldownTimer => emergencyCooldownTimer;
+        public float ReportCooldownTimer => reportCooldownTimer;
         internal int NextBodyId => nextBodyId;
         internal void IncrementNextBodyId() { nextBodyId++; }
         internal void DecrementEmergencyMeetings() { emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1); }
@@ -353,6 +355,11 @@ namespace GanglandUndercover.Online
         public float CommunicationJamTimer => taskService.CommunicationJamTimer;
         public float EvidenceLeakTimer => taskService.EvidenceLeakTimer;
         public float PatrolAlertTimer => taskService.PatrolAlertTimer;
+        /// <summary>B3: 通用破坏计时器设置（替代反射）</summary>
+        public void ApplySabotageTimer(SabotageType type)
+        {
+            taskService.ApplySabotageEffect(type, type.ToString());
+        }
         /// <summary>D3: 当前是否在会议/投票阶段</summary>
         public bool IsMeetingPhase => phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting;
         public bool TacticalMapOpen => tacticalMapOpen;
@@ -2491,6 +2498,11 @@ namespace GanglandUndercover.Online
                 emergencyCooldownTimer = Mathf.Max(0f, emergencyCooldownTimer - deltaTime);
             }
 
+            if (reportCooldownTimer > 0f)
+            {
+                reportCooldownTimer = Mathf.Max(0f, reportCooldownTimer - deltaTime);
+            }
+
             if (aiActionGraceTimer > 0f)
             {
                 aiActionGraceTimer = Mathf.Max(0f, aiActionGraceTimer - deltaTime);
@@ -2560,6 +2572,9 @@ namespace GanglandUndercover.Online
                     {
                         Vector3 direction = new Vector3(state.Input.x, state.Input.y, 0f);
                         float speedMultiplier = taskService.LockdownTimer > 0f ? 0.72f : taskService.PatrolAlertTimer > 0f && GetPrivateRole(clientId) == OnlineRole.Gang ? 0.9f : 1f;
+                        // C1: 被动能力 MoveSpeedBonus (Driver 1.08x)
+                        if (ruleSet != null && ruleSet.HasAbility(state.Profession, AbilityType.MoveSpeedBonus))
+                            speedMultiplier *= ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.MoveSpeedBonus);
                         state.Position = ResolveMapCollision(state.Position, state.Position + direction * MoveSpeed * speedMultiplier * deltaTime);
                     }
                     else
@@ -2575,6 +2590,8 @@ namespace GanglandUndercover.Online
                     }
                 }
             }
+
+            TickMoleExposureCheck();
 
             TickSurveillanceCameras();
             TickCooldowns(deltaTime);
@@ -2631,6 +2648,7 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(taskService.PatrolAlertTimer);
             writer.WriteValueSafe(taskService.EvidenceLeakAccumulator);
             writer.WriteValueSafe(emergencyCooldownTimer);
+            writer.WriteValueSafe(reportCooldownTimer);
             writer.WriteValueSafe(aiActionGraceTimer);
             writer.WriteValueSafe(matchElapsedSeconds);
             writer.WriteValueSafe(players.Count);
@@ -2726,6 +2744,7 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out float snapshotPatrolAlertTimer);
             reader.ReadValueSafe(out float snapshotEvidenceLeakAccumulator);
             reader.ReadValueSafe(out float snapshotEmergencyCooldownTimer);
+            reader.ReadValueSafe(out float snapshotReportCooldownTimer);
             reader.ReadValueSafe(out float snapshotAiActionGraceTimer);
             reader.ReadValueSafe(out float snapshotMatchElapsedSeconds);
             reader.ReadValueSafe(out int count);
@@ -2751,6 +2770,7 @@ namespace GanglandUndercover.Online
                 snapshotBlackoutTimer, snapshotLockdownTimer, snapshotCommunicationJamTimer,
                 snapshotEvidenceLeakTimer, snapshotEvidenceLeakAccumulator, snapshotPatrolAlertTimer);
             emergencyCooldownTimer = snapshotEmergencyCooldownTimer;
+            reportCooldownTimer = snapshotReportCooldownTimer;
             aiActionGraceTimer = snapshotAiActionGraceTimer;
             matchElapsedSeconds = snapshotMatchElapsedSeconds;
             status = "同步在线局：" + PhaseName(phase) + "。";
@@ -4234,6 +4254,58 @@ namespace GanglandUndercover.Online
                     }
 
                     break;
+                case OnlineProfession.Mole:
+                    if (player.Suspicion >= 60)
+                    {
+                        // Betray: Mole publicly switches to Gang faction
+                        player.PublicRole = OnlineRole.Gang;
+                        // All non-Gang players get suspicion +2
+                        foreach (var kv in players)
+                        {
+                            OnlineRole kvRole = GetPrivateRole(kv.Key);
+                            if (kvRole != OnlineRole.Gang && kvRole != OnlineRole.Mole && kv.Value.Alive)
+                            {
+                                var s = kv.Value;
+                                s.Suspicion += 2;
+                                players[kv.Key] = s;
+                            }
+                        }
+                        // Mole gets a one-time kill cooldown reset
+                        killCooldowns[senderClientId] = 0f;
+                        player.KillCooldown = 0f;
+                        // Cooldown override: use standard 13s for betrayal
+                        abilityCooldowns[senderClientId] = ruleSet.AbilityCooldownSeconds;
+                        player.AbilityCooldown = ruleSet.AbilityCooldownSeconds;
+                        status = "内鬼暴露! " + player.DisplayName + "背叛了警方!";
+                        AddCaseLog(status);
+                        // Global chat message
+                        chatSystem?.ReceiveMessage("system", "系统", "内鬼暴露! " + player.DisplayName + "背叛了警方!", false, Faction.Police, ChatChannel.Meeting);
+                    }
+                    else
+                    {
+                        // Sabotage Intel: secretly reduce EvidenceScore by 2
+                        taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - 2);
+                        // All Gang players including self get suspicion -1 (covering tracks)
+                        player.Suspicion = Mathf.Max(0, player.Suspicion - 1);
+                        foreach (var kv in players)
+                        {
+                            OnlineRole kvRole = GetPrivateRole(kv.Key);
+                            if ((kvRole == OnlineRole.Gang || kvRole == OnlineRole.Mole) && kv.Value.Alive && kv.Key != senderClientId)
+                            {
+                                var s = kv.Value;
+                                s.Suspicion = Mathf.Max(0, s.Suspicion - 1);
+                                players[kv.Key] = s;
+                            }
+                        }
+                        // Override cooldown to 20s for Sabotage Intel
+                        abilityCooldowns[senderClientId] = 20f;
+                        player.AbilityCooldown = 20f;
+                        status = player.DisplayName + " 暗中破坏情报，证据链 -2。";
+                        lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
+                        UpdateEvidenceMilestone();
+                    }
+
+                    break;
                 default:
                     if ((role == OnlineRole.Gang || role == OnlineRole.Mole) && TryUseUnderworldPassage(ref player))
                     {
@@ -4248,10 +4320,18 @@ namespace GanglandUndercover.Online
                     break;
             }
 
-            abilityCooldowns[senderClientId] = ruleSet.AbilityCooldownSeconds;
-            player.AbilityCooldown = ruleSet.AbilityCooldownSeconds;
+            // Mole case handles its own cooldown (20s for Sabotage Intel, standard for Betray)
+            if (player.Profession != OnlineProfession.Mole)
+            {
+                abilityCooldowns[senderClientId] = ruleSet.AbilityCooldownSeconds;
+                player.AbilityCooldown = ruleSet.AbilityCooldownSeconds;
+            }
             players[senderClientId] = player;
-            AddCaseLog(status);
+            // Mole Betray already logged inside the case; avoid double-logging
+            if (player.Profession != OnlineProfession.Mole || player.Suspicion < 60)
+            {
+                AddCaseLog(status);
+            }
             PlayCue("ability");
             EvaluateWinConditions();
             BroadcastSnapshot();
@@ -4278,6 +4358,12 @@ namespace GanglandUndercover.Online
 
         private void TryReportOrEmergency(ulong senderClientId, OnlinePlayerState player)
         {
+            if (reportCooldownTimer > 0f)
+            {
+                status = "报案冷却中：" + Mathf.CeilToInt(reportCooldownTimer) + "s，请稍后再试。";
+                BroadcastSnapshot();
+                return;
+            }
             if (TryFindNearestBody(player.Position, out int bodyIndex))
             {
                 OnlineBodyState body = bodies[bodyIndex];
@@ -4334,6 +4420,7 @@ namespace GanglandUndercover.Online
             phase = OnlineMatchPhase.Meeting;
             phaseTimer = ruleSet.MeetingIntroSeconds;
             taskService.RepairSabotageEffect(SabotageType.Blackout);
+            reportCooldownTimer = ruleSet.ReportCooldownSeconds;
             activeTaskId = -1;
             activeTaskStep = 0;
             activeTaskCharge = 0f;
@@ -4410,7 +4497,16 @@ namespace GanglandUndercover.Online
             phase = OnlineMatchPhase.Voting;
             phaseTimer = Mathf.Max(phaseTimer, 6f);
             votes[voterClientId] = targetClientId;
-            status = voter.DisplayName + (targetClientId == SkipVoteTarget ? " 已投票跳过。" : " 已投票给 " + players[targetClientId].DisplayName + "。");
+            // SecretVote: hide who the voter voted for
+            bool hasSecretVote = ruleSet != null && ruleSet.HasAbility(voter.Profession, AbilityType.SecretVote);
+            if (hasSecretVote)
+            {
+                status = voter.DisplayName + " 秘密投票";
+            }
+            else
+            {
+                status = voter.DisplayName + (targetClientId == SkipVoteTarget ? " 已投票跳过。" : " 已投票给 " + players[targetClientId].DisplayName + "。");
+            }
             AddCaseLog(status);
             syncManager?.OnVoteCast(voterClientId, targetClientId);
 
@@ -5727,12 +5823,16 @@ namespace GanglandUndercover.Online
                 gain++;
             }
 
+            // C1: Tech EvidenceChainBonus 1.3x
+            if (ruleSet != null && ruleSet.HasAbility(profession, AbilityType.EvidenceChainBonus))
+                gain = Mathf.RoundToInt(gain * ruleSet.GetAbilityMultiplier(profession, AbilityType.EvidenceChainBonus));
+
             if (role == OnlineRole.Undercover || profession == OnlineProfession.UndercoverAgent)
             {
                 gain++;
             }
 
-            return Mathf.Clamp(gain, 1, 4);
+            return Mathf.Clamp(gain, 1, 5);
         }
 
         private static int TaskEvidenceValue(int taskId)
@@ -7629,12 +7729,32 @@ namespace GanglandUndercover.Online
 
             string lead = skipVotes > 0 ? "跳过 " + skipVotes : "跳过 0";
 
+            // Mark SecretVote voters
+            StringBuilder secretVoters = new StringBuilder();
+            foreach (var kv in votes)
+            {
+                if (players.TryGetValue(kv.Key, out OnlinePlayerState voterState)
+                    && ruleSet != null && ruleSet.HasAbility(voterState.Profession, AbilityType.SecretVote))
+                {
+                    if (secretVoters.Length > 0)
+                    {
+                        secretVoters.Append(" | ");
+                    }
+                    secretVoters.Append(voterState.DisplayName).Append(" 秘密投票");
+                }
+            }
+
             foreach (KeyValuePair<ulong, int> pair in tally)
             {
                 if (players.TryGetValue(pair.Key, out OnlinePlayerState state))
                 {
                     lead += " | " + state.DisplayName + " " + pair.Value;
                 }
+            }
+
+            if (secretVoters.Length > 0)
+            {
+                lead += " | " + secretVoters.ToString();
             }
 
             return lead;
@@ -7649,6 +7769,21 @@ namespace GanglandUndercover.Online
 
             StringBuilder builder = new StringBuilder();
 
+            // Show SecretVote voters separately
+            StringBuilder secretBuilder = new StringBuilder();
+            foreach (var kv in votes)
+            {
+                if (players.TryGetValue(kv.Key, out OnlinePlayerState voterState)
+                    && ruleSet != null && ruleSet.HasAbility(voterState.Profession, AbilityType.SecretVote))
+                {
+                    if (secretBuilder.Length > 0)
+                    {
+                        secretBuilder.Append(" | ");
+                    }
+                    secretBuilder.Append(voterState.DisplayName).Append(" 秘密投票");
+                }
+            }
+
             foreach (KeyValuePair<ulong, int> pair in tally)
             {
                 if (!players.TryGetValue(pair.Key, out OnlinePlayerState state))
@@ -7662,6 +7797,15 @@ namespace GanglandUndercover.Online
                 }
 
                 builder.Append(state.DisplayName).Append(" ").Append(pair.Value);
+            }
+
+            if (secretBuilder.Length > 0)
+            {
+                if (builder.Length > 0)
+                {
+                    builder.Append(" | ");
+                }
+                builder.Append(secretBuilder);
             }
 
             return builder.Length == 0 ? "无人得票" : builder.ToString();
@@ -9399,6 +9543,42 @@ namespace GanglandUndercover.Online
             surveillanceCameras.Add(camera);
 
             netObj.Spawn();
+        }
+
+        /// <summary>
+        /// C1: Periodic check for Mole auto-exposure.
+        /// If a Mole player's Suspicion >= 90, automatically expose them:
+        /// set PublicRole to Gang and broadcast a chat notification.
+        /// </summary>
+        private void TickMoleExposureCheck()
+        {
+            if (phase != OnlineMatchPhase.Action || !matchStarted)
+            {
+                return;
+            }
+
+            List<ulong> ids = new List<ulong>(players.Keys);
+            foreach (ulong clientId in ids)
+            {
+                OnlinePlayerState state = players[clientId];
+                if (state.Profession != OnlineProfession.Mole || !state.Alive)
+                {
+                    continue;
+                }
+
+                // Only trigger if Mole hasn't already been exposed (PublicRole still Police)
+                if (state.Suspicion >= 90 && state.PublicRole == OnlineRole.Police)
+                {
+                    state.PublicRole = OnlineRole.Gang;
+                    players[clientId] = state;
+                    string msg = "内鬼" + state.DisplayName + "被警方锁定，身份暴露!";
+                    status = msg;
+                    AddCaseLog(status);
+                    chatSystem?.ReceiveMessage("system", "系统", msg, false, Faction.Police, ChatChannel.Meeting);
+                    PlayCue("meeting");
+                    BroadcastSnapshot();
+                }
+            }
         }
 
         private void TickSurveillanceCameras()

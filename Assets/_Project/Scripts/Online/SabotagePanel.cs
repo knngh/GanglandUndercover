@@ -41,15 +41,27 @@ namespace GanglandUndercover.Online
         [Tooltip("紧急破坏（O2/Reactor）冷却时间")]
         public float criticalCooldown = 60f;
 
+        [Tooltip("EvidenceLeak 冷却时间")]
+        public float evidenceLeakCooldown = 50f;
+
+        [Tooltip("PatrolAlert 冷却时间")]
+        public float patrolAlertCooldown = 45f;
+
         [Header("持续时间（秒）")]
         [Tooltip("Blackout 持续时间")]
-        public float blackoutDuration = 10f;
+        public float blackoutDuration = 28f;
 
         [Tooltip("Lockdown 持续时间")]
-        public float lockdownDuration = 15f;
+        public float lockdownDuration = 32f;
 
         [Tooltip("Communications 持续时间")]
-        public float communicationsDuration = 10f;
+        public float communicationsDuration = 30f;
+
+        [Tooltip("EvidenceLeak 持续时间")]
+        public float evidenceLeakDuration = 36f;
+
+        [Tooltip("PatrolAlert 持续时间")]
+        public float patrolAlertDuration = 30f;
 
         [Header("UI 引用")]
         [SerializeField] private GameObject panelRoot;
@@ -81,6 +93,8 @@ namespace GanglandUndercover.Online
             cooldownTimers[SabotageType.Blackout] = 0f;
             cooldownTimers[SabotageType.Lockdown] = 0f;
             cooldownTimers[SabotageType.Communications] = 0f;
+            cooldownTimers[SabotageType.EvidenceLeak] = 0f;
+            cooldownTimers[SabotageType.PatrolAlert] = 0f;
             cooldownTimers[SabotageType.CriticalO2] = 0f;
             cooldownTimers[SabotageType.CriticalReactor] = 0f;
 
@@ -155,12 +169,14 @@ namespace GanglandUndercover.Online
             }
             spawnedButtons.Clear();
 
-            // 默认三种破坏
+            // 默认破坏类型（含所有5种标准型 + 2种紧急型）
             var defaultConfigs = new[]
             {
-                new SabotageButtonConfig { type = SabotageType.Blackout, displayName = "熄灯", description = "全图视野降低 10s" },
-                new SabotageButtonConfig { type = SabotageType.Lockdown, displayName = "封锁", description = "随机区域门封锁 15s" },
-                new SabotageButtonConfig { type = SabotageType.Communications, displayName = "断讯", description = "禁用会议按钮 10s" },
+                new SabotageButtonConfig { type = SabotageType.Blackout, displayName = "熄灯", description = "全图视野降低 28s" },
+                new SabotageButtonConfig { type = SabotageType.Lockdown, displayName = "封锁", description = "全员减速 32s" },
+                new SabotageButtonConfig { type = SabotageType.Communications, displayName = "断讯", description = "禁用会议按钮 30s" },
+                new SabotageButtonConfig { type = SabotageType.EvidenceLeak, displayName = "证据泄露", description = "证据链持续衰减 36s" },
+                new SabotageButtonConfig { type = SabotageType.PatrolAlert, displayName = "巡逻警报", description = "黑帮暴露风险 30s" },
                 new SabotageButtonConfig { type = SabotageType.CriticalO2, displayName = "O2中毒", description = "紧急：氧气泄漏 30s" },
                 new SabotageButtonConfig { type = SabotageType.CriticalReactor, displayName = "反应堆", description = "紧急：熔毁 30s" },
             };
@@ -269,16 +285,8 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            // 普通破坏：反射设置计时器
-            Type controllerType = controller.GetType();
-            System.Reflection.FieldInfo fi = controllerType.GetField(type.ToString() + "Timer",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            if (fi != null)
-            {
-                float duration = GetDuration(type);
-                fi.SetValue(controller, duration);
-            }
+            // 普通破坏：直接通过 taskService 设置计时器
+            controller.ApplySabotageTimer(type);
 
             // 播放破坏音效
             controller.RequestAction(OnlineActionType.Ability);
@@ -348,6 +356,8 @@ namespace GanglandUndercover.Online
                 case SabotageType.Blackout: return blackoutCooldown;
                 case SabotageType.Lockdown: return lockdownCooldown;
                 case SabotageType.Communications: return communicationsCooldown;
+                case SabotageType.EvidenceLeak: return evidenceLeakCooldown;
+                case SabotageType.PatrolAlert: return patrolAlertCooldown;
                 case SabotageType.CriticalO2:
                 case SabotageType.CriticalReactor: return criticalCooldown;
                 default: return 30f;
@@ -361,9 +371,11 @@ namespace GanglandUndercover.Online
                 case SabotageType.Blackout: return blackoutDuration;
                 case SabotageType.Lockdown: return lockdownDuration;
                 case SabotageType.Communications: return communicationsDuration;
+                case SabotageType.EvidenceLeak: return evidenceLeakDuration;
+                case SabotageType.PatrolAlert: return patrolAlertDuration;
                 case SabotageType.CriticalO2:
                 case SabotageType.CriticalReactor: return 0f; // 紧急任务不由 duration 控制
-                default: return 10f;
+                default: return 28f;
             }
         }
 
@@ -380,8 +392,7 @@ namespace GanglandUndercover.Online
         private OnlineRole GetLocalRole()
         {
             if (controller == null) return OnlineRole.Unassigned;
-            // 通过 controller.localRole 或 privateRoles
-            return OnlineRole.Unassigned; // 由 HUD 层处理
+            return controller.LocalRole;
         }
 
         private ulong GetLocalClientId()

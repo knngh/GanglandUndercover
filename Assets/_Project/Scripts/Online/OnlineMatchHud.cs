@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using GanglandUndercover.Core;
+using GanglandUndercover.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -136,6 +137,58 @@ namespace GanglandUndercover.Online
         public int TaskMiniGameCanvasElementCount => taskMiniGameRoot == null ? 0 : CountNamedChildren(taskMiniGameRoot, "Task MiniGame");
         public int MeetingSeatCanvasElementCount => meetingSeatRoot == null ? 0 : CountNamedChildren(meetingSeatRoot, "Meeting Seat");
         public bool HasCompleteLayout => HasRequiredLayoutReferences();
+
+        private void Awake()
+        {
+            // E6: Chinese font fallback check
+            Font builtinFont = LoadBuiltinFont();
+            if (builtinFont != null)
+            {
+                string testText = "港区潜线";
+                builtinFont.RequestCharactersInTexture(testText, 18);
+                bool hasCjk = true;
+                foreach (char c in testText)
+                {
+                    if (!builtinFont.GetCharacterInfo(c, out _, 18))
+                    {
+                        hasCjk = false;
+                        break;
+                    }
+                }
+
+                if (!hasCjk)
+                {
+                    Debug.LogWarning($"[UnifiedGameUI] Built-in font '{builtinFont.name}' does not have full CJK coverage. Consider assigning a CJK-compatible font (e.g. Noto Sans SC) in the Text component or via Font Asset override for best Chinese rendering.");
+                }
+            }
+
+            SimpleResolutionGuard();
+        }
+
+        /// <summary>
+        /// E6: Checks current resolution against the common reference list and logs
+        /// a warning when the resolution is non‑standard so QA can verify layout.
+        /// </summary>
+        private void SimpleResolutionGuard()
+        {
+            int w = Screen.width;
+            int h = Screen.height;
+
+            bool matched = false;
+            foreach (Vector2Int res in UnifiedGameUI.CommonResolutions)
+            {
+                if (w == res.x && h == res.y)
+                {
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                Debug.LogWarning($"[UnifiedGameUI] Non‑standard resolution detected: {UnifiedGameUI.ResolutionLabel(w, h)}. Layout verified at 1280x720, 1920x1080, 2560x1440. Some elements may appear clipped or misaligned.");
+            }
+        }
 
         public void Bind(OnlineMatchController matchController)
         {
@@ -913,10 +966,11 @@ namespace GanglandUndercover.Online
         private void RefreshTexts()
         {
             string relayCode = string.IsNullOrWhiteSpace(controller.RelayJoinCode) ? string.Empty : " | Relay " + controller.RelayJoinCode;
+            string accessibilitySuffix = BuildAccessibilitySuffix();
             titleText.text = "港区潜线 | " + controller.RoomName + relayCode;
-            phaseText.text = controller.PhaseDisplayName + " | " + controller.MatchTimeText + "/20:00 | 证据 " + controller.EvidenceScore + "/" + controller.EvidenceTarget + " | 存活 " + controller.AlivePlayerCount + "/" + Mathf.Max(1, controller.Players.Count);
+            phaseText.text = controller.PhaseDisplayName + " | " + controller.MatchTimeText + "/20:00 | 证据 " + controller.EvidenceScore + "/" + controller.EvidenceTarget + " | 存活 " + controller.AlivePlayerCount + "/" + Mathf.Max(1, controller.Players.Count) + accessibilitySuffix;
             voiceText.text = controller.VoiceHudLine;
-            statusText.text = controller.Status;
+            statusText.text = controller.Status + accessibilitySuffix;
 
             connectionStatusText.text = controller.RelayStatus
                 + "\n" + controller.LobbyReadinessSummary
@@ -2059,6 +2113,53 @@ namespace GanglandUndercover.Online
             }
 
             objects.Clear();
+        }
+
+        // ══════════════════════════════════════════════════════
+        // E6 颜色无障碍状态标签
+        // ══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Builds a color-blind safe suffix that uses text/emoji labels
+        /// instead of relying solely on indicator colors.
+        /// </summary>
+        private string BuildAccessibilitySuffix()
+        {
+            if (controller == null) return string.Empty;
+
+            var parts = new System.Collections.Generic.List<string>();
+
+            // 身份标签
+            string roleLabel = UnifiedGameUI.StatusLabel(controller.LocalRole.ToString().ToLowerInvariant());
+            if (!string.IsNullOrEmpty(roleLabel))
+            {
+                parts.Add(roleLabel);
+            }
+
+            // 阶段危险标签
+            if (controller.HazardSummary != null)
+            {
+                string hazards = controller.HazardSummary;
+                if (hazards.Contains("停电") || hazards.Contains("outage"))
+                {
+                    parts.Add("⚡停电");
+                }
+                if (hazards.Contains("封锁") || hazards.Contains("lockdown"))
+                {
+                    parts.Add("🔒封锁");
+                }
+                if (hazards.Contains("静默") || hazards.Contains("silence"))
+                {
+                    parts.Add("🔇静默");
+                }
+                if (hazards.Contains("暴露") || hazards.Contains("exposed"))
+                {
+                    parts.Add("⚠暴露");
+                }
+            }
+
+            if (parts.Count == 0) return string.Empty;
+            return " " + string.Join(" ", parts);
         }
 
         // ══════════════════════════════════════════════════════

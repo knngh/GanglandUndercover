@@ -47,6 +47,7 @@ namespace GanglandUndercover.Online
         public float EvidenceLeakAccumulator;
         public float PatrolAlertTimer;
         public float EmergencyCooldownTimer;
+        public float ReportCooldownTimer;
         public float AiActionGraceTimer;
         public float MatchElapsedSeconds;
 
@@ -195,6 +196,7 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(EvidenceLeakAccumulator);
             writer.WriteValueSafe(PatrolAlertTimer);
             writer.WriteValueSafe(EmergencyCooldownTimer);
+            writer.WriteValueSafe(ReportCooldownTimer);
             writer.WriteValueSafe(AiActionGraceTimer);
             writer.WriteValueSafe(MatchElapsedSeconds);
 
@@ -324,6 +326,7 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out float evidenceLeakAccumulator);
             reader.ReadValueSafe(out float patrolAlertTimer);
             reader.ReadValueSafe(out float emergencyCooldownTimer);
+            reader.ReadValueSafe(out float reportCooldownTimer);
             reader.ReadValueSafe(out float aiActionGraceTimer);
             reader.ReadValueSafe(out float matchElapsedSeconds);
 
@@ -353,6 +356,7 @@ namespace GanglandUndercover.Online
             snap.EvidenceLeakAccumulator = evidenceLeakAccumulator;
             snap.PatrolAlertTimer = patrolAlertTimer;
             snap.EmergencyCooldownTimer = emergencyCooldownTimer;
+            snap.ReportCooldownTimer = reportCooldownTimer;
             snap.AiActionGraceTimer = aiActionGraceTimer;
             snap.MatchElapsedSeconds = matchElapsedSeconds;
 
