@@ -208,6 +208,11 @@ namespace GanglandUndercover.Online
         public bool IsOnline => localPreviewMode || networkManager != null && (networkManager.IsHost || networkManager.IsClient);
         public bool IsHost => localPreviewMode || networkManager != null && networkManager.IsHost;
         public bool IsLocalPreview => localPreviewMode;
+        /// <summary>当前已连接的客户端数（仅 Server/Host 有意义；用于 Relay 双进程联调断言）。</summary>
+        public int ConnectedClientCount => networkManager != null ? networkManager.ConnectedClientsList.Count : 0;
+        /// <summary>NGO 是否已建立监听（Host）或已连接（Client）。</summary>
+        public bool IsListeningOrConnected => networkManager != null && networkManager.IsListening;
+        public bool IsClientConnected => networkManager != null && networkManager.IsConnectedClient;
         public bool MatchStarted => matchStarted;
         public OnlineMatchPhase Phase => phase;
         public float PhaseTimer => phaseTimer;
@@ -1273,6 +1278,16 @@ namespace GanglandUndercover.Online
                 }
 
                 networkManager.NetworkConfig.NetworkTransport = transport;
+            }
+
+            // 本作世界完全由 PrototypeBootstrap 程序化生成，对局不依赖 NGO 的场景同步。
+            // 若保留默认开启的场景管理，远端 Client 接入时 NGO 会尝试按场景哈希同步当前
+            // 活动场景（Prototype），而该哈希不在 Client 的 build scene 表里，导致抛出
+            // "Scene Hash ... does not exist in the HashToBuildIndex table"。关闭它既消除该
+            // 异常，也符合"程序化生成、无需场景同步"的实际架构。
+            if (networkManager.NetworkConfig != null)
+            {
+                networkManager.NetworkConfig.EnableSceneManagement = false;
             }
 
             networkManager.OnClientConnectedCallback += HandleClientConnected;

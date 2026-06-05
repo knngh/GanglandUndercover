@@ -36,6 +36,11 @@ Assets/_Project/Resources/AssetStore/
 /unity-playmode.log
 /unity-build.log
 /player-launch.log
+/relay-host.log
+/relay-client.log
+/relay-probe.log
+/relay-host-results.xml
+/relay-client-results.xml
 
 # 构建期生成的版本信息（每次构建重写，不入仓库）
 # Resources/ 目录仅在构建时存在，用于承载 build_info.json，整目录及其 .meta 都不入仓库
