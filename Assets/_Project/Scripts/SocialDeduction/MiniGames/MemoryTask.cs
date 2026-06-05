@@ -148,7 +148,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
                 txt.fontSize = 36;
                 txt.color = new Color(0.92f, 0.94f, 0.96f);
                 txt.alignment = TextAnchor.MiddleCenter;
-                txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 txt.text = "";  // 初始隐藏
 
                 RectTransform labelRT = labelObj.GetComponent<RectTransform>();
@@ -285,7 +285,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             txt.fontSize = (int)fontSize;
             txt.color = new Color(0.88f, 0.90f, 0.92f);
             txt.alignment = TextAnchor.MiddleCenter;
-            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
             RectTransform rt = labelObj.GetComponent<RectTransform>();
             rt.anchorMin = anchorMin;

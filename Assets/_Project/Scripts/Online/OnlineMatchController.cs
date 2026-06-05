@@ -183,6 +183,9 @@ namespace GanglandUndercover.Online
         private bool activeTaskStepThreeDone;
         private bool activeTaskFeedbackPositive;
         private bool submittingActiveTask;
+        // Task#7：现场任务接入真·Among Us 风格小游戏（连线/刷卡/记忆/扫描…共 11 种）。
+        // 非空时由小游戏自建的 ScreenSpaceOverlay Canvas 接管交互，OnGUI 经典任务面板让位。
+        private GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase activeMiniGame;
         private OnlineCameraRig _cameraRig;
         private float nextVoiceRetryTime;
         private float nextVoicePositionUpdateTime;
@@ -213,6 +216,12 @@ namespace GanglandUndercover.Online
         /// <summary>NGO 是否已建立监听（Host）或已连接（Client）。</summary>
         public bool IsListeningOrConnected => networkManager != null && networkManager.IsListening;
         public bool IsClientConnected => networkManager != null && networkManager.IsConnectedClient;
+        /// <summary>Task#7：当前是否有现场小游戏在前台（供联机自动化断言小游戏确实接入）。</summary>
+        public bool HasActiveMiniGame => activeMiniGame != null;
+        /// <summary>Task#7：当前激活小游戏的类型名（WireTask/KeypadTask…），无则空串。</summary>
+        public string ActiveMiniGameName => activeMiniGame != null ? activeMiniGame.GetType().Name : string.Empty;
+        /// <summary>Task#7：当前正在处理的任务 Id（无则 -1）。</summary>
+        public int ActiveTaskId => activeTaskId;
         public bool MatchStarted => matchStarted;
         public OnlineMatchPhase Phase => phase;
         public float PhaseTimer => phaseTimer;
@@ -700,6 +709,31 @@ namespace GanglandUndercover.Online
             return phase == OnlineMatchPhase.Result;
         }
 
+        /// <summary>
+        /// Task#7 自动化：按 taskId 打开现场小游戏（无头环境无法点击，故提供驱动钩子）。
+        /// 返回当前激活的小游戏类型名（如 WireTask），未能打开则返回空串。
+        /// </summary>
+        public string EditorOpenTaskMiniGameForSmokeTest(int taskId)
+        {
+            BeginActiveTask(taskId);
+            return ActiveMiniGameName;
+        }
+
+        /// <summary>
+        /// Task#7 自动化：强制完成当前激活的小游戏，走与真实完成一致的 CompleteActiveTask 路径。
+        /// 完成后 activeTaskId 应回到 -1。返回是否确有小游戏被完成。
+        /// </summary>
+        public bool EditorForceCompleteActiveMiniGameForSmokeTest()
+        {
+            if (activeMiniGame == null)
+            {
+                return false;
+            }
+
+            OnActiveMiniGameComplete();
+            return true;
+        }
+
         public void EditorStartLocalPlayablePreview()
         {
             if (!Application.isPlaying)
@@ -881,7 +915,18 @@ namespace GanglandUndercover.Online
 
             if (activeTaskId >= 0)
             {
-                ReadActiveTaskInput();
+                // 小游戏接管时（activeMiniGame 非空）由其自己的 UI 处理输入，
+                // 不再走 OnGUI 经典蓄力面板的键盘输入。
+                if (activeMiniGame == null)
+                {
+                    ReadActiveTaskInput();
+                }
+            }
+            else if (activeMiniGame != null)
+            {
+                // 任务在别处被重置（阶段切换/死亡/会议等共 12 处把 activeTaskId 置 -1），
+                // 这里统一回收悬挂的小游戏对象，无需逐点修改各重置位。
+                DestroyActiveMiniGame();
             }
 
             if (activeTaskFeedbackTimer > 0f)
@@ -3680,8 +3725,87 @@ namespace GanglandUndercover.Online
             activeTaskMistakes = 0;
             activeTaskFeedbackTimer = 0f;
             activeTaskFeedbackPositive = false;
+
+            // Task#7：优先打开 Among Us 风格小游戏（成功后走与经典面板一致的服务器提交路径）。
+            // 打开失败（如缺 UI 环境）时 activeMiniGame 保持 null，自动回退到 OnGUI 经典面板。
+            TryOpenActiveMiniGame(taskId);
+
             status = "开始处理任务：" + task.Name + "。";
             AddCaseLog(status);
+        }
+
+        /// <summary>
+        /// 按 taskId 创建并显示对应的小游戏（11 种轮转），把完成/取消回调接到既有的
+        /// CompleteActiveTask（服务器提交）与取消逻辑上。任何异常都降级为经典任务面板。
+        /// </summary>
+        private void TryOpenActiveMiniGame(int taskId)
+        {
+            DestroyActiveMiniGame();
+
+            try
+            {
+                GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase mini =
+                    OnlineMiniGameBridge.CreateDefaultMinigame(taskId, transform);
+                if (mini == null)
+                {
+                    return;
+                }
+
+                mini.OnComplete = _ => OnActiveMiniGameComplete();
+                mini.OnCancel = _ => OnActiveMiniGameCancel();
+                mini.Show();
+                activeMiniGame = mini;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[OnlineMatch] 小游戏打开失败，回退经典任务面板：" + e.Message);
+                DestroyActiveMiniGame();
+            }
+        }
+
+        private void OnActiveMiniGameComplete()
+        {
+            // CompleteActiveTask 会把 activeTaskId 置 -1 并提交现场结果；
+            // Update 下一帧检测到 activeTaskId<0 即回收 activeMiniGame（延迟销毁更安全）。
+            CompleteActiveTask();
+        }
+
+        private void OnActiveMiniGameCancel()
+        {
+            activeTaskId = -1;
+            activeTaskStep = 0;
+            activeTaskCharge = 0f;
+            activeTaskStepOneDone = false;
+            activeTaskStepTwoDone = false;
+            activeTaskStepThreeDone = false;
+            activeTaskMistakes = 0;
+            activeTaskFeedbackTimer = 0f;
+            activeTaskFeedbackPositive = false;
+            status = "已退出任务面板。";
+        }
+
+        private void DestroyActiveMiniGame()
+        {
+            if (activeMiniGame == null)
+            {
+                return;
+            }
+
+            GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase mini = activeMiniGame;
+            activeMiniGame = null;
+            try
+            {
+                mini.Hide();
+            }
+            catch (Exception)
+            {
+                // Hide 的清理失败不应阻断对象销毁。
+            }
+
+            if (mini != null)
+            {
+                UnityEngine.Object.Destroy(mini.gameObject);
+            }
         }
 
         private void ReadActiveTaskInput()
@@ -6351,7 +6475,8 @@ namespace GanglandUndercover.Online
 
         private void DrawActiveTaskPanel()
         {
-            if (activeTaskId < 0)
+            // 小游戏接管时由其自建 Canvas 呈现，OnGUI 经典面板让位，避免双层叠加。
+            if (activeTaskId < 0 || activeMiniGame != null)
             {
                 return;
             }

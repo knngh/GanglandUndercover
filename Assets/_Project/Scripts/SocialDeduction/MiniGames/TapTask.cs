@@ -304,7 +304,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             txt.fontSize = (int)fontSize;
             txt.color = new Color(0.88f, 0.90f, 0.92f);
             txt.alignment = TextAnchor.MiddleCenter;
-            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
             RectTransform rt = labelObj.GetComponent<RectTransform>();
             rt.anchorMin = anchorMin;
