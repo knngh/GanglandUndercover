@@ -91,39 +91,39 @@ namespace GanglandUndercover.Art
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // 职业角色生成器（64×64 像素，4向×3帧+死亡）
+        // E2 职业角色生成器（64×64 像素，4向×3帧+死亡+头像）
         // ═══════════════════════════════════════════════════════════════
 
         private static void GenerateAllCharacterSets()
         {
             foreach (Online.OnlineProfession prof in System.Enum.GetValues(typeof(Online.OnlineProfession)))
             {
-                Color main = ProfessionPalette.MainColor(prof);
-                Color accent = ProfessionPalette.AccentColor(prof);
+                Color main  = ProfessionPalette.MainColor(prof);
+                Color accent= ProfessionPalette.AccentColor(prof);
                 var set = new ProfSpriteSet();
 
-                // 正面：3帧行走
-                set.Front_Frame0 = DrawCharFront(main, accent, 0);
-                set.Front_Frame1 = DrawCharFront(main, accent, -1);
-                set.Front_Frame2 = DrawCharFront(main, accent, 1);
-                // 背面
-                set.Back_Frame0  = DrawCharBack(main, accent, 0);
-                set.Back_Frame1  = DrawCharBack(main, accent, -1);
-                set.Back_Frame2  = DrawCharBack(main, accent, 1);
-                // 侧面（左右镜像）
-                set.Left_Frame0  = DrawCharSide(main, accent, 0, true);
-                set.Left_Frame1  = DrawCharSide(main, accent, -1, true);
-                set.Left_Frame2  = DrawCharSide(main, accent, 1, true);
-                set.Right_Frame0 = DrawCharSide(main, accent, 0, false);
-                set.Right_Frame1 = DrawCharSide(main, accent, -1, false);
-                set.Right_Frame2 = DrawCharSide(main, accent, 1, false);
-                // 死亡
-                set.Dead = DrawCharDead(main);
+                // 正面：3帧行走（-1左腿前, 0站立, 1右腿前）
+                set.Front_Frame0 = DrawCharFront(prof, main, accent, 0);
+                set.Front_Frame1 = DrawCharFront(prof, main, accent, -1);
+                set.Front_Frame2 = DrawCharFront(prof, main, accent, 1);
+                // 背面：3帧行走
+                set.Back_Frame0  = DrawCharBack(prof, main, accent, 0);
+                set.Back_Frame1  = DrawCharBack(prof, main, accent, -1);
+                set.Back_Frame2  = DrawCharBack(prof, main, accent, 1);
+                // 侧面：左右各3帧
+                set.Left_Frame0  = DrawCharSide(prof, main, accent, 0, true);
+                set.Left_Frame1  = DrawCharSide(prof, main, accent, -1, true);
+                set.Left_Frame2  = DrawCharSide(prof, main, accent, 1, true);
+                set.Right_Frame0 = DrawCharSide(prof, main, accent, 0, false);
+                set.Right_Frame1 = DrawCharSide(prof, main, accent, -1, false);
+                set.Right_Frame2 = DrawCharSide(prof, main, accent, 1, false);
+                // 死亡+头像
+                set.Dead     = DrawCharDead(prof, main);
+                set.Avatar   = DrawCharAvatar(prof, main, accent);
 
                 CharacterSets[prof] = set;
             }
 
-            // 默认fallback
             var def = CharacterSets[Online.OnlineProfession.Inspector];
             CharBody_Front = def.Front_Frame0;
             CharBody_Back  = def.Back_Frame0;
@@ -131,94 +131,454 @@ namespace GanglandUndercover.Art
             CharBody_Right = def.Right_Frame0;
         }
 
-        // ─── 正面角色（64×64）───
-        static Sprite DrawCharFront(Color body, Color accent, int walkOffset)
+        // ═══════════════════════════════════════════════════
+        // 职业专属头饰绘制
+        // ═══════════════════════════════════════════════════
+        static void DrawProfHeadwear(Texture2D t, Online.OnlineProfession prof, Color main, Color accent, int cx, bool isBack)
         {
-            var t = NewTex(64); var s = 64; int cx = 32, footY = 48 + walkOffset;
-            Color dark = Dark(body, 0.4f), skin = Hex("#e8c39e"), clear = Color.clear;
-            // 头
-            FillCircle(t, cx, 12, 8, skin);
-            FillCircle(t, cx, 10, 6, skin);
-            // 帽子/头盔
-            FillRect(t, cx-7, 3, 15, 6, body);
-            FillRect(t, cx-5, 8, 11, 4, accent);
-            // 身体
-            FillRect(t, cx-6, 18, 12, 20, body);
-            // 腰带
-            FillRect(t, cx-7, 35, 14, 4, accent);
-            // 手臂
-            FillRect(t, cx-10, 20, 3, 14, dark);
-            FillRect(t, cx+7, 20, 3, 14, dark);
-            // 手
-            FillRect(t, cx-11, 31 + walkOffset, 5, 4, skin);
-            FillRect(t, cx+6, 31 - walkOffset, 5, 4, skin);
-            // 腿
-            int legSep = walkOffset;
-            FillRect(t, cx-4 + legSep, 38, 4, 12, dark);
-            FillRect(t, cx+1 - legSep, 38, 4, 12, dark);
-            // 靴子
-            FillRect(t, cx-5 + legSep, 48, 6, 4, Color.black);
-            FillRect(t, cx+0 - legSep, 48, 6, 4, Color.black);
+            if (isBack)
+            {
+                switch (prof)
+                {
+                case Online.OnlineProfession.Inspector:
+                    FillRect(t, cx-6, 2, 13, 5, main); break; // 警帽后
+                case Online.OnlineProfession.Tech:
+                    FillRect(t, cx-8, 3, 17, 4, main); break; // 安全帽
+                case Online.OnlineProfession.Forensics:
+                    FillRect(t, cx-5, 4, 11, 3, Color.white); break; // 白帽
+                case Online.OnlineProfession.Enforcer:
+                    FillRect(t, cx-6, 2, 13, 4, Dark(main, 0.3f)); break;
+                case Online.OnlineProfession.Fixer:
+                    FillRect(t, cx-9, 0, 19, 4, Dark(main, 0.5f)); FillRect(t, cx-7, 4, 15, 3, main); break; // 礼帽
+                case Online.OnlineProfession.Driver:
+                    FillRect(t, cx-6, 3, 13, 3, main); FillRect(t, cx-4, 0, 9, 3, accent); break; // 棒球帽
+                case Online.OnlineProfession.UndercoverAgent:
+                    FillRect(t, cx-5, 2, 11, 4, accent); break;
+                case Online.OnlineProfession.Mole:
+                    FillRect(t, cx-8, 2, 17, 4, Dark(main, 0.4f)); break;
+                default:
+                    FillRect(t, cx-6, 3, 13, 4, main); break;
+                }
+                return;
+            }
+
+            // 正面头饰
+            switch (prof)
+            {
+            case Online.OnlineProfession.Inspector:
+                // 警帽：宽帽檐+帽徽
+                FillRect(t, cx-10, 1, 21, 4, Dark(main, 0.3f)); // 帽檐
+                FillRect(t, cx-6, 4, 13, 5, main);               // 帽身
+                FillRect(t, cx-2, 5, 5, 3, accent);              // 帽徽
+                FillRect(t, cx-3, 3, 7, 1, accent);              // 帽徽横条
+                break;
+            case Online.OnlineProfession.Tech:
+                // 安全帽+耳机
+                FillRect(t, cx-8, 1, 17, 5, accent);             // 安全帽
+                FillRect(t, cx-9, 8, 3, 3, Dark(main, 0.5f));    // 左耳机
+                FillRect(t, cx+7, 8, 3, 3, Dark(main, 0.5f));    // 右耳机
+                FillRect(t, cx-8, 11, 2, 5, Dark(main, 0.5f));   // 麦克风臂
+                FillRect(t, cx-6, 14, 2, 2, Hex("#333333"));     // 麦克风
+                break;
+            case Online.OnlineProfession.Forensics:
+                // 眼镜+白帽
+                FillRect(t, cx-4, 6, 10, 2, Color.white);        // 帽
+                FillRect(t, cx-6, 12, 3, 2, Hex("#444444"));     // 左镜框
+                FillRect(t, cx+4, 12, 3, 2, Hex("#444444"));     // 右镜框
+                FillRect(t, cx-1, 12, 3, 1, Hex("#444444"));     // 鼻梁
+                break;
+            case Online.OnlineProfession.Enforcer:
+                // 寸头+伤疤
+                FillRect(t, cx-5, 2, 11, 3, Dark(main, 0.6f));
+                FillRect(t, cx-4, 8, 8, 1, Hex("#cc3333"));      // 伤痕
+                break;
+            case Online.OnlineProfession.Fixer:
+                // 礼帽+墨镜
+                FillRect(t, cx-10, 0, 21, 3, Dark(main, 0.6f));  // 帽檐
+                FillRect(t, cx-6, 3, 13, 4, main);               // 帽身
+                FillRect(t, cx-5, 9, 11, 2, Hex("#111111"));     // 墨镜
+                break;
+            case Online.OnlineProfession.UndercoverAgent:
+                // 半遮面罩
+                FillRect(t, cx-5, 6, 11, 4, accent);
+                FillRect(t, cx-6, 10, 13, 2, Dark(accent, 0.3f));
+                break;
+            case Online.OnlineProfession.Driver:
+                // 棒球帽
+                FillRect(t, cx-7, 1, 15, 3, main);
+                FillRect(t, cx-5, 4, 11, 3, accent);
+                FillRect(t, cx+4, 0, 5, 4, main);                // 帽舌
+                break;
+            case Online.OnlineProfession.Mole:
+                // 兜帽
+                FillRect(t, cx-7, 0, 15, 7, Dark(main, 0.5f));
+                FillRect(t, cx-2, 7, 5, 2, accent);
+                break;
+            default:
+                FillRect(t, cx-6, 3, 13, 4, main);
+                break;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════
+        // 职业专属制服细节（正面）
+        // ═══════════════════════════════════════════════════
+        static void DrawProfUniformFront(Texture2D t, Online.OnlineProfession prof, Color main, Color accent, int cx)
+        {
+            switch (prof)
+            {
+            case Online.OnlineProfession.Inspector:
+                // 警服：领带+警徽
+                FillRect(t, cx-1, 20, 3, 8, accent);             // 领带
+                FillRect(t, cx-2, 18, 5, 2, Color.white);        // 领口
+                FillRect(t, cx-3, 28, 7, 4, Hex("#ffd700"));     // 警徽
+                FillRect(t, cx-1, 29, 3, 2, Dark(Hex("#ffd700"), 0.3f)); // 警徽细节
+                break;
+            case Online.OnlineProfession.Tech:
+                // 工具背心
+                FillRect(t, cx-7, 18, 15, 2, accent);            // 肩带
+                FillRect(t, cx-6, 28, 4, 3, Hex("#555555"));     // 左工具袋
+                FillRect(t, cx+3, 28, 4, 3, Hex("#555555"));     // 右工具袋
+                FillRect(t, cx+4, 31, 2, 2, Hex("#ff4444"));     // 红灯
+                break;
+            case Online.OnlineProfession.Forensics:
+                // 白大褂
+                FillRect(t, cx-7, 18, 15, 1, Color.white);       // 领口白边
+                FillRect(t, cx-6, 25, 13, 6, Color.white);       // 白大褂
+                FillRect(t, cx-3, 28, 7, 4, Hex("#2e8b57"));     // 证件
+                break;
+            case Online.OnlineProfession.Enforcer:
+                // 肌肉线条
+                FillRect(t, cx-3, 18, 7, 2, Dark(main, 0.3f));   // 领口深色
+                FillRect(t, cx-8, 28, 3, 5, Color.black);        // 左臂带
+                FillRect(t, cx+6, 28, 3, 5, Color.black);        // 右臂带
+                FillRect(t, cx-2, 30, 5, 1, Hex("#ff3333"));     // 红线
+                break;
+            case Online.OnlineProfession.Fixer:
+                // 西装马甲
+                FillRect(t, cx-2, 19, 5, 8, Color.white);        // 衬衫
+                FillRect(t, cx-7, 20, 3, 10, Dark(main, 0.2f));  // 左西装
+                FillRect(t, cx+5, 20, 3, 10, Dark(main, 0.2f));  // 右西装
+                FillRect(t, cx-1, 27, 3, 2, Hex("#ffd700"));     // 扣子
+                break;
+            case Online.OnlineProfession.UndercoverAgent:
+                // 普通衣服+隐藏设备
+                FillRect(t, cx-5, 20, 11, 1, accent);            // 领口
+                FillRect(t, cx+3, 28, 3, 3, Dark(accent, 0.3f)); // 隐藏口袋
+                break;
+            case Online.OnlineProfession.Driver:
+                // 夹克
+                FillRect(t, cx-6, 18, 13, 1, accent);            // 领口
+                FillRect(t, cx-7, 27, 3, 5, Dark(main, 0.3f));   // 左口袋
+                FillRect(t, cx+5, 27, 3, 5, Dark(main, 0.3f));   // 右口袋
+                break;
+            case Online.OnlineProfession.Mole:
+                // 藏匿武器
+                FillRect(t, cx-7, 20, 3, 10, Dark(main, 0.4f));
+                FillRect(t, cx+6, 26, 2, 6, Hex("#555555"));     // 隐藏刀柄
+                break;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════
+        // E2 正面角色（64×64，含职业细节）
+        // ═══════════════════════════════════════════════════
+        static Sprite DrawCharFront(Online.OnlineProfession prof, Color body, Color accent, int walkOffset)
+        {
+            var t = NewTex(64); int cx = 32, cy = 12;
+            Color dark  = Dark(body, 0.4f);
+            Color dark2 = Dark(body, 0.6f);
+            Color skin  = Hex("#e8c39e");
+            Color skinShadow = Dark(skin, 0.2f);
+
+            // ── 头（圆形+肤色）──
+            FillCircle(t, cx, cy, 8, skin);
+            FillCircle(t, cx, cy-1, 6, skin);
+            // 眼睛
+            FillRect(t, cx-4, cy-1, 2, 2, Hex("#2b2118"));
+            FillRect(t, cx+3, cy-1, 2, 2, Hex("#2b2118"));
+            // 嘴
+            FillRect(t, cx-1, cy+3, 3, 1, Hex("#c4956a"));
+
+            // ── 职业头饰 ──
+            DrawProfHeadwear(t, prof, body, accent, cx, false);
+
+            // ── 脖子 ──
+            FillRect(t, cx-2, 18, 5, 3, skinShadow);
+
+            // ── 身体（梯形：上窄下宽）──
+            FillRect(t, cx-7, 20, 4, 18, dark);
+            FillRect(t, cx-3, 20, 7, 18, body);
+            FillRect(t, cx+4, 20, 4, 18, dark);
+            // 身体阴影边缘
+            FillRect(t, cx-7, 20, 1, 18, dark2);
+            FillRect(t, cx+7, 20, 1, 18, dark2);
+
+            // ── 职业制服细节 ──
+            DrawProfUniformFront(t, prof, body, accent, cx);
+
+            // ── 腰带 ──
+            FillRect(t, cx-7, 35, 15, 3, accent);
+            FillRect(t, cx-1, 35, 3, 3, Dark(accent, 0.4f)); // 腰带扣
+
+            // ── 手臂（带行走摆动）──
+            int armSwingL = walkOffset < 0 ? -2 : walkOffset > 0 ? 2 : 0;
+            int armSwingR = walkOffset < 0 ? 2 : walkOffset > 0 ? -2 : 0;
+            // 左臂
+            FillRect(t, cx-11, 20, 3, 12, dark);
+            FillRect(t, cx-11+armSwingL, 20, 1, 12, dark2); // 阴影
+            FillRect(t, cx-12, 30+armSwingL, 5, 4, skin);    // 左手
+            // 右臂
+            FillRect(t, cx+9, 20, 3, 12, dark);
+            FillRect(t, cx+11+armSwingR, 20, 1, 12, dark2);
+            FillRect(t, cx+8, 30+armSwingR, 5, 4, skin);     // 右手
+
+            // ── 腿（带行走摆动）──
+            int legSep = walkOffset * 2;
+            // 左腿
+            FillRect(t, cx-6 + legSep, 38, 5, 12, dark);
+            FillRect(t, cx-6 + legSep, 38, 1, 12, dark2);
+            // 右腿
+            FillRect(t, cx+2 - legSep, 38, 5, 12, dark);
+            FillRect(t, cx+2 - legSep, 38, 1, 12, dark2);
+
+            // ── 靴子 ──
+            Color boot = Dark(body, 0.7f);
+            FillRect(t, cx-7 + legSep, 49, 7, 3, boot);
+            FillRect(t, cx+1 - legSep, 49, 7, 3, boot);
+            // 靴底
+            FillRect(t, cx-7 + legSep, 52, 7, 2, Color.black);
+            FillRect(t, cx+1 - legSep, 52, 7, 2, Color.black);
+
+            // ── 职业手持物（仅站立帧显示）──
+            if (walkOffset == 0) DrawProfHeldItem(t, prof, body, accent, cx);
 
             t.Apply(); return Spr(t, 64);
         }
 
-        static Sprite DrawCharBack(Color body, Color accent, int walkOffset)
+        static void DrawProfHeldItem(Texture2D t, Online.OnlineProfession prof, Color body, Color accent, int cx)
+        {
+            switch (prof)
+            {
+            case Online.OnlineProfession.Inspector:
+                FillRect(t, cx+10, 27, 2, 6, Hex("#ffd700")); break; // 手铐
+            case Online.OnlineProfession.Tech:
+                FillRect(t, cx+10, 28, 3, 5, Hex("#666666")); break; // 扳手
+            case Online.OnlineProfession.Forensics:
+                FillRect(t, cx+10, 26, 4, 5, Color.white); break;    // 证据袋
+            case Online.OnlineProfession.Enforcer:
+                FillRect(t, cx+10, 26, 2, 8, Hex("#555555")); break; // 警棍
+            }
+        }
+
+        // ═══════════════════════════════════════════════════
+        // E2 背面角色（64×64）
+        // ═══════════════════════════════════════════════════
+        static Sprite DrawCharBack(Online.OnlineProfession prof, Color body, Color accent, int walkOffset)
         {
             var t = NewTex(64); int cx = 32;
-            Color dark = Dark(body, 0.4f), clear = Color.clear;
+            Color dark  = Dark(body, 0.4f);
+            Color dark2 = Dark(body, 0.6f);
+
+            // 头后
             FillCircle(t, cx, 12, 8, body);
-            FillRect(t, cx-7, 3, 15, 6, body);
-            FillRect(t, cx-6, 18, 12, 20, dark);
-            FillRect(t, cx-7, 35, 14, 4, accent);
-            int l = walkOffset;
-            FillRect(t, cx-4 + l, 38, 4, 12, dark);
-            FillRect(t, cx+1 - l, 38, 4, 12, dark);
-            FillRect(t, cx-5 + l, 48, 6, 4, Color.black);
-            FillRect(t, cx+0 - l, 48, 6, 4, Color.black);
+            FillCircle(t, cx, 11, 6, Dark(body, 0.2f));
+            // 职业头饰
+            DrawProfHeadwear(t, prof, body, accent, cx, true);
+
+            // 脖子
+            FillRect(t, cx-2, 18, 5, 3, Dark(body, 0.3f));
+
+            // 身体（背面统一深色）
+            FillRect(t, cx-7, 20, 4, 18, dark2);
+            FillRect(t, cx-3, 20, 7, 18, dark);
+            FillRect(t, cx+4, 20, 4, 18, dark2);
+
+            // 腰带
+            FillRect(t, cx-7, 35, 15, 3, accent);
+            FillRect(t, cx-1, 35, 3, 3, Dark(accent, 0.4f));
+
+            // 手臂
+            int swing = walkOffset;
+            FillRect(t, cx-11+swing, 20, 3, 14, dark2);
+            FillRect(t, cx+9-swing, 20, 3, 14, dark2);
+
+            // 腿
+            int l = walkOffset * 2;
+            FillRect(t, cx-6 + l, 38, 5, 12, dark2);
+            FillRect(t, cx+2 - l, 38, 5, 12, dark2);
+
+            // 靴子
+            Color boot = Dark(body, 0.7f);
+            FillRect(t, cx-7 + l, 49, 7, 3, boot);
+            FillRect(t, cx+1 - l, 49, 7, 3, boot);
+            FillRect(t, cx-7 + l, 52, 7, 2, Color.black);
+            FillRect(t, cx+1 - l, 52, 7, 2, Color.black);
+
             t.Apply(); return Spr(t, 64);
         }
 
-        static Sprite DrawCharSide(Color body, Color accent, int walkOffset, bool facingLeft)
+        // ═══════════════════════════════════════════════════
+        // E2 侧面角色（64×64，职业专属轮廓）
+        // ═══════════════════════════════════════════════════
+        static Sprite DrawCharSide(Online.OnlineProfession prof, Color body, Color accent, int walkOffset, bool facingLeft)
         {
             var t = NewTex(64); int cx = 32;
-            Color dark = Dark(body, 0.4f), skin = Hex("#e8c39e");
-            // 头
+            Color dark  = Dark(body, 0.4f);
+            Color dark2 = Dark(body, 0.6f);
+            Color skin  = Hex("#e8c39e");
+            int dir = facingLeft ? -1 : 1;
+
+            // ── 头（侧面）──
             FillCircle(t, cx, 12, 8, skin);
-            if (facingLeft) FillCircle(t, cx-3, 10, 3, skin); // 鼻子
-            else FillCircle(t, cx+3, 10, 3, skin);
-            // 帽
-            FillRect(t, cx-6, 3, 13, 6, body);
-            FillRect(t, cx-4, 8, 9, 4, accent);
-            // 身体
-            FillRect(t, cx-5, 18, 10, 20, body);
-            FillRect(t, cx-6, 35, 12, 4, accent);
-            // 手臂（朝向侧）
-            if (facingLeft) { FillRect(t, cx-12, 20, 4, 14, dark); FillRect(t, cx+5, 20, 3, 14, dark); }
-            else { FillRect(t, cx+8, 20, 4, 14, dark); FillRect(t, cx-8, 20, 3, 14, dark); }
-            // 腿
-            int l = walkOffset;
-            FillRect(t, cx-3 + l, 38, 4, 12, dark);
-            FillRect(t, cx-1 - l, 38, 4, 12, dark);
-            FillRect(t, cx-4 + l, 48, 6, 4, Color.black);
-            FillRect(t, cx-2 - l, 48, 6, 4, Color.black);
+            FillCircle(t, cx+dir, 10, 5, skin);                    // 面部突出
+            FillCircle(t, cx+dir*3, 10, 3, skin);                  // 鼻子
+            // 眼
+            FillRect(t, cx+dir*2, 10, 2, 1, Hex("#2b2118"));
+            // 嘴
+            FillRect(t, cx+dir, 14, 2, 1, Hex("#c4956a"));
+
+            // ── 职业头饰（侧面）──
+            if (prof == Online.OnlineProfession.Inspector)
+            {
+                FillRect(t, cx-5, 2, 14, 4, Dark(body, 0.3f));    // 帽檐
+                FillRect(t, cx-4, 5, 12, 4, body);                 // 帽身
+                FillRect(t, cx+dir*4, 2, 5, 2, accent);            // 帽徽
+            }
+            else if (prof == Online.OnlineProfession.Fixer)
+            {
+                FillRect(t, cx-9, 0, 20, 3, Dark(body, 0.6f));    // 帽檐
+                FillRect(t, cx-5, 3, 12, 4, body);
+            }
+            else if (prof == Online.OnlineProfession.Driver)
+            {
+                FillRect(t, cx-4, 1, 10, 3, body);
+                FillRect(t, cx+dir*3, 0, 6, 3, body);              // 帽舌
+            }
+            else
+            {
+                FillRect(t, cx-5, 3, 12, 4, body);
+            }
+
+            // ── 脖子 ──
+            FillRect(t, cx+dir, 18, 4, 3, Dark(skin, 0.2f));
+
+            // ── 身体（侧面比正面窄）──
+            FillRect(t, cx-4, 20, 4, 18, dark2);                  // 后半身
+            FillRect(t, cx,   20, 5, 18, body);                   // 前半身
+            FillRect(t, cx+5, 20, 1, 18, dark);                   // 前边缘
+
+            // ── 腰带 ──
+            FillRect(t, cx-5, 35, 11, 3, accent);
+
+            // ── 前臂（伸向移动方向）──
+            int armExt = walkOffset;
+            if (facingLeft)
+            {
+                FillRect(t, cx-11-armExt, 20, 4, 12, dark);       // 后臂
+                FillRect(t, cx+6+armExt,  20, 3, 12, dark);       // 前臂
+                FillRect(t, cx+7+armExt,  30, 4, 4, skin);        // 手
+            }
+            else
+            {
+                FillRect(t, cx-11+armExt, 20, 4, 12, dark);       // 后臂
+                FillRect(t, cx+6-armExt,  20, 3, 12, dark);       // 前臂
+                FillRect(t, cx+7-armExt,  30, 4, 4, skin);        // 手
+            }
+
+            // ── 腿（侧面一前一后）──
+            int l = walkOffset * 2;
+            FillRect(t, cx-2 + l, 38, 5, 12, dark2);             // 后腿
+            FillRect(t, cx+2 - l, 38, 5, 12, dark);              // 前腿
+
+            // ── 靴子 ──
+            Color boot = Dark(body, 0.7f);
+            FillRect(t, cx-3 + l, 49, 7, 3, boot);
+            FillRect(t, cx+1 - l, 49, 7, 3, boot);
+            FillRect(t, cx-3 + l, 52, 7, 2, Color.black);
+            FillRect(t, cx+1 - l, 52, 7, 2, Color.black);
+
             t.Apply(); return Spr(t, 64);
         }
 
-        static Sprite DrawCharDead(Color body)
+        // ═══════════════════════════════════════════════════
+        // E2 死亡/尸体（职业专属）
+        // ═══════════════════════════════════════════════════
+        static Sprite DrawCharDead(Online.OnlineProfession prof, Color body)
         {
             var t = NewTex(64);
-            Color dark = Dark(body, 0.5f), blood = Hex("#8b0000");
+            Color dark  = Dark(body, 0.5f);
+            Color blood = Hex("#8b0000");
+            Color skin  = Hex("#e8c39e");
+            Color boot  = Dark(body, 0.7f);
+
             // 身体横躺
-            FillRect(t, 12, 28, 40, 12, dark);
-            FillRect(t, 10, 26, 42, 4, body);
-            // 头
-            FillCircle(t, 48, 30, 7, Hex("#e8c39e"));
-            // 血迹
-            for (int i = 0; i < 80; i++)
-            { int x = RandomRange(15, 55, i), y = RandomRange(25, 38, i+7);
-              if (t.GetPixel(x, y).a > 0.1f) t.SetPixel(x, y, blood); }
+            FillRect(t, 10, 28, 44, 10, dark);
+            FillRect(t, 12, 26, 40, 3, body);
+
+            // 头部（右侧）
+            FillCircle(t, 50, 30, 7, skin);
+            FillCircle(t, 52, 28, 4, skin);
+
+            // 职业制服标识（保持可辨识）
+            FillRect(t, 30, 32, 20, 3, ProfessionPalette.AccentColor(prof));
+
+            // 靴子（左侧）
+            FillRect(t, 10, 30, 8, 4, boot);
+
+            // 血迹（散布在身体周围）
+            for (int i = 0; i < 60; i++)
+            {
+                int x = RandomRange(8, 57, i);
+                int y = RandomRange(24, 40, i + 13);
+                if (t.GetPixel(x, y).a > 0.05f && t.GetPixel(x, y).a < 0.9f)
+                    t.SetPixel(x, y, blood);
+            }
+            // 血泊
+            for (int i = 0; i < 30; i++)
+            {
+                int x = RandomRange(20, 45, i + 37);
+                int y = RandomRange(36, 48, i + 41);
+                FillRect(t, x, y, 2, 2, new Color(blood.r, blood.g, blood.b, 0.5f));
+            }
+
             t.Apply(); return Spr(t, 64);
+        }
+
+        // ═══════════════════════════════════════════════════
+        // E2 会议头像（32×32，圆框内）
+        // ═══════════════════════════════════════════════════
+        static Sprite DrawCharAvatar(Online.OnlineProfession prof, Color body, Color accent)
+        {
+            var t = NewTex(32); int cx = 16, cy = 14;
+            Color skin = Hex("#e8c39e");
+
+            // 圆形头像背景
+            FillCircle(t, cx, cy, 14, Dark(body, 0.3f));
+            FillCircle(t, cx, cy, 12, body);
+
+            // 头
+            FillCircle(t, cx, cy-4, 7, skin);
+            // 眼
+            FillRect(t, cx-3, cy-6, 2, 1, Hex("#2b2118"));
+            FillRect(t, cx+2, cy-6, 2, 1, Hex("#2b2118"));
+
+            // 职业标识色条
+            FillRect(t, cx-6, cy+2, 13, 3, accent);
+
+            // 身体
+            FillRect(t, cx-5, cy+5, 11, 6, body);
+
+            // 圆框
+            for (int x = 0; x < 32; x++)
+                for (int y = 0; y < 32; y++)
+                {
+                    float d = Mathf.Sqrt((x-cx)*(x-cx) + (y-cy)*(y-cy));
+                    if (d > 14 && d < 16)
+                        t.SetPixel(x, y, accent);
+                }
+
+            t.Apply(); return Spr(t, 32, 32);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -503,6 +863,7 @@ namespace GanglandUndercover.Art
 
         static Texture2D NewTex(int sz) => new Texture2D(sz, sz, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point };
         static Sprite Spr(Texture2D t, int ppu) => Sprite.Create(t, new Rect(0, 0, t.width, t.height), new Vector2(0.5f, 0.5f), ppu);
+        static Sprite Spr(Texture2D t, int w, int ppu) => Sprite.Create(t, new Rect(0, 0, w, w), new Vector2(0.5f, 0.5f), ppu);
 
         static void FillRect(Texture2D t, int x, int y, int w, int h, Color c)
         { for (int j=y;j<y+h&&j<t.height;j++) for (int i=x;i<x+w&&i<t.width;i++) if(i>=0&&j>=0)t.SetPixel(i,j,c); }
@@ -529,6 +890,7 @@ namespace GanglandUndercover.Art
             public Sprite Left_Frame0, Left_Frame1, Left_Frame2;
             public Sprite Right_Frame0, Right_Frame1, Right_Frame2;
             public Sprite Dead;
+            public Sprite Avatar;
         }
     }
 }
