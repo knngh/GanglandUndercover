@@ -4,9 +4,11 @@ Unity project for **港区潜线 / Harbor Undercover**, an original online 2.5D 
 
 The current playable build is now online-first and structured as a large-map release-candidate skeleton. It includes a Host / Client flow through Netcode for GameObjects and Unity Transport, synchronized players and tasks, opening role briefing, hidden role assignment, police evidence chains, gang sabotage and knockdowns, body reports, emergency meetings, voting, results, restart flow, room rules, player names, professions, suspicion pressure, generated runtime audio cues, and a case log. A Host can also auto-fill AI players, so one local Unity instance can play a full police-and-gang deduction match while real clients are still supported.
 
-Full production plan:
+当前权威开发计划：
 
-`Assets/_Project/Docs/ProductionPlan.zh-CN.md`
+`output/master_development_plan_20260605.md`
+
+（`Assets/_Project/Docs/` 中为历史开发文档，以 `output/` 目录中的最新计划为准）
 
 ## Open In Unity
 
@@ -31,7 +33,7 @@ Chinese setup notes are in `Assets/_Project/Docs/UnitySetup.zh-CN.md`.
 - Gang wins by knocking down enough investigators, sabotaging evidence, or reaching parity with non-gang survivors.
 - Professions include Inspector, Forensics, Tech, Undercover Agent, Enforcer, Fixer, and Driver. `F` triggers each profession's match ability.
 - The runtime map uses Unity built-in models and lights for a large Hong Kong harbor city district: container yard, customs gate, night market, cha chaan teng, command van, evidence room, clinic, power room, rooftop route, CCTV room, finance alley, back-lane food stalls, police van, roadblocks, neon signage, and emergency bell.
-- The map is intentionally procedural and replaceable: a real Hong Kong port 3D tile / OSM / Cesium base can later be plugged under the same gameplay zones.
+- The map is data-driven and replaceable: a real Hong Kong port 2D pixel-art base can later be plugged under the same gameplay zones.
 - Runtime audio cues are generated in Unity for match start, task completion, ability, blackout, knockdown, meeting, vote, and result.
 - AI players move around the harbor, work tasks, sabotage evidence, report bodies, trigger meetings, and vote.
 - Meetings support manual voting, skip vote, synchronized vote counts, ejection, and role reveal on result.
