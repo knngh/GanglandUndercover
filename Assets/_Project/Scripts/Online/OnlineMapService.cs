@@ -16,8 +16,9 @@ namespace GanglandUndercover.Online
         /// <summary>联机地图类型</summary>
         public enum OnlineMapType
         {
-            HarbourDistrict,  // 港区（12 房间，默认）
-            PoliceStation,    // 警署（6 房间）
+            HarbourDistrict,   // 港区（12 房间，默认）
+            PoliceStation,     // 警署（6 房间）
+            KowloonWalledCity, // 九龙城寨（8 房间）D4 新增
         }
 
         [Header("地图类型")]
@@ -52,6 +53,10 @@ namespace GanglandUndercover.Online
         [Header("警署地图专用设置")]
         [SerializeField, Tooltip("警署地图缩放因子（警署比港区小，需更大缩放）")]
         private float policeStationScale = 3.0f;
+
+        [Header("九龙城寨地图专用设置")]
+        [SerializeField, Tooltip("九龙城寨地图缩放因子")]
+        private float kowloonWalledCityScale = 2.5f;
 
         // ---- 运行时配置缓存 ----
         private float _runtimeScaleX;
@@ -90,6 +95,15 @@ namespace GanglandUndercover.Online
                 _runtimeScaleY = policeStationScale;
                 _runtimeHalfWidth = psHalfW * policeStationScale;
                 _runtimeHalfHeight = psHalfH * policeStationScale;
+            }
+            else if (activeMapType == OnlineMapType.KowloonWalledCity)
+            {
+                float kwcHalfW = Map.KowloonWalledCityMapLayout.DesignHalfWidth;
+                float kwcHalfH = Map.KowloonWalledCityMapLayout.DesignHalfHeight;
+                _runtimeScaleX = kowloonWalledCityScale;
+                _runtimeScaleY = kowloonWalledCityScale;
+                _runtimeHalfWidth = kwcHalfW * kowloonWalledCityScale;
+                _runtimeHalfHeight = kwcHalfH * kowloonWalledCityScale;
             }
             else
             {
@@ -281,6 +295,8 @@ namespace GanglandUndercover.Online
         {
             if (activeMapType == OnlineMapType.PoliceStation)
                 return PoliceStationRooms();
+            if (activeMapType == OnlineMapType.KowloonWalledCity)
+                return KowloonWalledCityRooms();
             return HarbourDistrictRooms();
         }
 
@@ -318,6 +334,22 @@ namespace GanglandUndercover.Online
             };
         }
 
+        /// <summary>九龙城寨 8 个房间定义（设计坐标）D4</summary>
+        public ShipRoomSpec[] KowloonWalledCityRooms()
+        {
+            return new[]
+            {
+                new ShipRoomSpec("茶餐厅",     "Cafe",          new Vector3(0f, 0.8f, 0f),    new Vector3(2.2f, 1.8f, 0.16f), new Color(0.32f, 0.18f, 0.10f, 1f), MapEntrance.South),
+                new ShipRoomSpec("药材铺",     "HerbShop",      new Vector3(-4.5f, 2.5f, 0f),  new Vector3(2.0f, 1.6f, 0.16f), new Color(0.18f, 0.28f, 0.14f, 1f), MapEntrance.East),
+                new ShipRoomSpec("麻将馆",     "Mahjong",       new Vector3(4.2f, 2.5f, 0f),   new Vector3(2.2f, 1.6f, 0.16f), new Color(0.28f, 0.22f, 0.12f, 1f), MapEntrance.West),
+                new ShipRoomSpec("天井",       "Courtyard",     new Vector3(0f, -1.0f, 0f),    new Vector3(2.8f, 2.0f, 0.16f), new Color(0.15f, 0.17f, 0.22f, 1f), MapEntrance.North),
+                new ShipRoomSpec("后巷",       "BackAlley",     new Vector3(-4.0f, -2.8f, 0f), new Vector3(2.4f, 1.6f, 0.16f), new Color(0.25f, 0.14f, 0.09f, 1f), MapEntrance.East),
+                new ShipRoomSpec("天台",       "Rooftop",       new Vector3(-0.5f, 3.8f, 0f),  new Vector3(2.6f, 1.4f, 0.16f), new Color(0.18f, 0.19f, 0.30f, 1f), MapEntrance.South),
+                new ShipRoomSpec("地下钱庄",   "Vault",         new Vector3(4.0f, -2.8f, 0f),  new Vector3(2.4f, 1.6f, 0.16f), new Color(0.22f, 0.16f, 0.10f, 1f), MapEntrance.West),
+                new ShipRoomSpec("暗渠",       "Drain",         new Vector3(0f, -4.2f, 0f),    new Vector3(2.6f, 1.4f, 0.16f), new Color(0.10f, 0.15f, 0.18f, 1f), MapEntrance.North),
+            };
+        }
+
         // ══════════════════════════════════════════════════════
         // M6.1 监控摄像头布点
         // ══════════════════════════════════════════════════════
@@ -346,6 +378,8 @@ namespace GanglandUndercover.Online
         {
             if (activeMapType == OnlineMapType.PoliceStation)
                 return PoliceStationSurveillanceZones();
+            if (activeMapType == OnlineMapType.KowloonWalledCity)
+                return KowloonWalledCitySurveillanceZones();
             return HarbourDistrictSurveillanceZones();
         }
 
@@ -372,6 +406,19 @@ namespace GanglandUndercover.Online
                 new SurveillanceZoneSpec("审讯室监控",   new Vector3(-3.2f, 1.6f, 0f),  new Vector3(2.8f, 2.2f, 0f), 1),  // 审讯室（房间1）
                 new SurveillanceZoneSpec("证物室监控",   new Vector3(-3.0f, -1.8f, 0f), new Vector3(3.0f, 2.2f, 0f), 2),  // 证物室（房间2）
                 new SurveillanceZoneSpec("监控室监控",   new Vector3(3.1f, -1.6f, 0f),  new Vector3(2.6f, 2.0f, 0f), 3),  // 监控室（房间3）
+            };
+        }
+
+        /// <summary>九龙城寨 5 个监控摄像头布点（设计坐标）D4</summary>
+        public SurveillanceZoneSpec[] KowloonWalledCitySurveillanceZones()
+        {
+            return new[]
+            {
+                new SurveillanceZoneSpec("茶餐厅监控",   new Vector3(0f, 0.8f, 0f),    new Vector3(2.6f, 2.2f, 0f), 0),
+                new SurveillanceZoneSpec("天井监控",     new Vector3(0f, -1.0f, 0f),   new Vector3(3.2f, 2.4f, 0f), 3),
+                new SurveillanceZoneSpec("西走廊监控",   new Vector3(-2.25f, 1.65f, 0f), new Vector3(4.8f, 1.2f, 0f), -1),
+                new SurveillanceZoneSpec("东走廊监控",   new Vector3(2.1f, 1.65f, 0f),  new Vector3(4.6f, 1.2f, 0f), -1),
+                new SurveillanceZoneSpec("暗渠监控",     new Vector3(0f, -4.2f, 0f),   new Vector3(3.0f, 1.8f, 0f), 7),
             };
         }
     }

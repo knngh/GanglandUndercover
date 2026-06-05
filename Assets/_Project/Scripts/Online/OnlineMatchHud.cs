@@ -159,6 +159,8 @@ namespace GanglandUndercover.Online
                 controller.RequestChargeActiveTask();
             }
 
+            HandleMapSelectInput(); // D5
+
             Refresh(false);
         }
 
@@ -922,7 +924,8 @@ namespace GanglandUndercover.Online
 
             lobbyStatusText.text = controller.LobbyReadinessSummary
                 + "\n" + controller.LobbyRoadmap
-                + "\n房间: " + controller.HumanPlayerCount + " 真人 / " + controller.BotCount + " AI";
+                + "\n房间: " + controller.HumanPlayerCount + " 真人 / " + controller.BotCount + " AI"
+                + "\n\n【地图】← → 切换" + (controller.IsHost ? "（房主可选）" : "") + " | 当前: " + MapSelectLabel();
 
             actionStatusText.text = controller.LocalObjectiveSummary
                 + "\n" + controller.LocalActionHint
@@ -2056,6 +2059,42 @@ namespace GanglandUndercover.Online
             }
 
             objects.Clear();
+        }
+
+        // ══════════════════════════════════════════════════════
+        // D5 地图选择 UI
+        // ══════════════════════════════════════════════════════
+
+        private string MapSelectLabel()
+        {
+            return controller.MapService.ActiveMapType switch
+            {
+                OnlineMapService.OnlineMapType.HarbourDistrict => "港区",
+                OnlineMapService.OnlineMapType.PoliceStation => "警署",
+                OnlineMapService.OnlineMapType.KowloonWalledCity => "九龙城寨",
+                _ => "未知",
+            };
+        }
+
+        // 键盘 ← → 切换地图（房主在 Lobby 阶段可用）
+        public void HandleMapSelectInput()
+        {
+            if (!controller.IsHost || controller.Phase != OnlineMatchPhase.Lobby) return;
+
+            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A))
+            {
+                var types = System.Enum.GetValues(typeof(OnlineMapService.OnlineMapType));
+                int current = (int)controller.MapService.ActiveMapType;
+                int prev = (current - 1 + types.Length) % types.Length;
+                controller.SetActiveMapType((OnlineMapService.OnlineMapType)prev);
+            }
+            else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D))
+            {
+                var types = System.Enum.GetValues(typeof(OnlineMapService.OnlineMapType));
+                int current = (int)controller.MapService.ActiveMapType;
+                int next = (current + 1) % types.Length;
+                controller.SetActiveMapType((OnlineMapService.OnlineMapType)next);
+            }
         }
     }
 }

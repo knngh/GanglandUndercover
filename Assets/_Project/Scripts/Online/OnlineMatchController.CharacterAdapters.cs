@@ -180,40 +180,49 @@ namespace GanglandUndercover.Online
         private void Create2DCharacterView(Transform parent, OnlinePlayerState state)
         {
             if (worldBuilder == null) return;
+            GanglandUndercover.Art.Sprite2DAssetCache.Ensure();
 
             Color bodyColor = PlayerAccentColor(state);
 
-            // --- Body circle ---
-            // Use circleSprite for round, soften color slightly for readability。
-            // 命名前缀沿用 "FreeCharacterAdapter"：2D 主路径下它就是每位玩家的角色适配层，
-            // 让 FreeCharacterAdapterCount 计数对 2D 后端同样成立。
+            // --- Body（E1: 使用人形剪影 sprite 替代纯色圆形）--- 
             GameObject body = new GameObject("FreeCharacterAdapter 2D " + state.Profession);
             SpriteRenderer bodyRenderer = body.AddComponent<SpriteRenderer>();
-            bodyRenderer.sprite = worldBuilder.CircleSprite;
+            bodyRenderer.sprite = GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Front;
             bodyRenderer.color = new Color(bodyColor.r * 0.85f, bodyColor.g * 0.85f, bodyColor.b * 0.85f, 1f);
-            bodyRenderer.sortingOrder = 100; // Players always on top of world props
+            bodyRenderer.sortingOrder = 100;
 
             body.transform.SetParent(parent, false);
             body.transform.localPosition = Vector3.zero;
-            body.transform.localScale = new Vector3(0.64f, 0.64f, 1f);
+            body.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
 
-            // --- Direction indicator (arrow) ---
+            // --- Direction indicator (E1: 使用箭头 sprite) ---
             GameObject dir = new GameObject("2DDir_" + state.Profession);
             SpriteRenderer dirRenderer = dir.AddComponent<SpriteRenderer>();
-            dirRenderer.sprite = worldBuilder.DiamondSprite;
+            dirRenderer.sprite = GanglandUndercover.Art.Sprite2DAssetCache.CharDirectionArrow;
             dirRenderer.color = Color.white;
-            dirRenderer.sortingOrder = 101; // Above body
+            dirRenderer.sortingOrder = 101;
 
             dir.transform.SetParent(body.transform, false);
-            dir.transform.localPosition = new Vector3(0f, 0.42f, 0f);
-            dir.transform.localScale = new Vector3(0.20f, 0.30f, 1f);
+            dir.transform.localPosition = new Vector3(0f, 0.45f, 0f);
+            dir.transform.localScale = new Vector3(0.25f, 0.35f, 1f);
 
-            // Store the direction indicator so movement rotation can update it
             state.Character2DDirectionIndicator = dir;
 
-            // --- Stub SocialChar for compatibility with existing systems ---
             var socialChar = body.AddComponent<GanglandUndercover.SocialDeduction.SocialCharacter>();
             state.SocialChar = socialChar;
+
+            // E2: 挂载角色动画控制器，使用职业专属 sprite
+            var animCtrl = body.AddComponent<GanglandUndercover.Art.CharacterAnimController>();
+            GanglandUndercover.Art.Sprite2DAssetCache.Ensure();
+            var profSet = GanglandUndercover.Art.Sprite2DAssetCache.CharacterSets.TryGetValue(state.Profession, out var set)
+                ? set : null;
+            animCtrl.Initialize(state,
+                profSet?.Front_Frame0 ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Front,
+                profSet?.Back_Frame0  ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Back,
+                profSet?.Left_Frame0  ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Left,
+                profSet?.Right_Frame0 ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Right,
+                profSet?.Dead         ?? GanglandUndercover.Art.Sprite2DAssetCache.CorpseMarker,
+                GanglandUndercover.Art.Sprite2DAssetCache.CharDirectionArrow);
         }
     }
 }

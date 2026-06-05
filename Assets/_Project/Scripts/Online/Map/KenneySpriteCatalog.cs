@@ -125,6 +125,38 @@ namespace GanglandUndercover.Online.Map
                 bag.Detail = FindFuzzy("detail-awning");
             }
 
+            // ── D4 九龙城寨房间映射 ──
+            else if (lower.Contains("herbshop") || lower.Contains("药材"))
+            {
+                bag.Main = FindFuzzy("building-b") ?? FindFuzzy("building-c");
+                bag.Detail = FindFuzzy("detail-rack-shelves");
+            }
+            else if (lower.Contains("mahjong") || lower.Contains("麻将"))
+            {
+                bag.Main = FindFuzzy("building-g") ?? FindFuzzy("building-h");
+                bag.Detail = FindFuzzy("detail-parasol-a");
+            }
+            else if (lower.Contains("courtyard") || lower.Contains("天井"))
+            {
+                bag.Main = FindFuzzy("building-d") ?? FindFuzzy("building-e");
+                bag.Detail = FindFuzzy("detail-tree");
+            }
+            else if (lower.Contains("rooftop") || lower.Contains("天台"))
+            {
+                bag.Main = FindFuzzy("building-skyscraper-e") ?? FindFuzzy("building-n");
+                bag.Detail = FindFuzzy("detail-overhang");
+            }
+            else if (lower.Contains("vault") || lower.Contains("钱庄"))
+            {
+                bag.Main = FindFuzzy("building-k") ?? FindFuzzy("building-f");
+                bag.Detail = null;
+            }
+            else if (lower.Contains("drain") || lower.Contains("暗渠"))
+            {
+                bag.Main = FindFuzzy("building-a") ?? FindFuzzy("building-c");
+                bag.Detail = null;
+            }
+
             // ── 港区房间映射（原有 12 个） ──
             else if (lower.Contains("货柜") || lower.Contains("码头"))
             {

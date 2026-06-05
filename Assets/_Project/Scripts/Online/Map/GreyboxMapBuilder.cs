@@ -83,8 +83,8 @@ namespace GanglandUndercover.Online.Map
         {
             float hw = _layout.DesignHalfWidth + 1f;
             float hh = _layout.DesignHalfHeight + 1f;
-            _worldBuilder.CreateShapeProp("Greybox Ground",
-                _worldBuilder.RoundedRectSprite,
+            _worldBuilder.CreateShapeProp("Ground Plane",
+                GanglandUndercover.Art.Sprite2DAssetCache.FloorConcrete,
                 new Vector3(0f, 0f, -0.5f),
                 new Vector3(hw * 2f, hh * 2f, 0.1f),
                 FloorColor);
@@ -134,18 +134,24 @@ namespace GanglandUndercover.Online.Map
         {
             if (_layout.Rooms == null) return;
 
-            foreach (var room in _layout.Rooms)
+            for (int i = 0; i < _layout.Rooms.Length; i++)
             {
+                var room = _layout.Rooms[i];
                 Vector3 center = new Vector3(room.Center.x, room.Center.y, 0.06f);
                 Vector3 size = new Vector3(room.Size.x, room.Size.y, room.Size.z);
 
-                // 房间地板
+                // E3: 使用 MapTilePalette 按地图类型+房间索引查地板色
+                Color floorColor = GanglandUndercover.Art.MapTilePalette.FloorColor(
+                    _mapService.ActiveMapType, i);
+                // 如果布局数据中已有自定义颜色，优先使用
+                if (room.FloorColor.a > 0.1f) floorColor = room.FloorColor;
+
                 GameObject floor = _worldBuilder.CreateShapeProp(
                     $"Greybox Room {room.Name}",
-                    _worldBuilder.RoundedRectSprite,
+                    GanglandUndercover.Art.Sprite2DAssetCache.FloorTileAlt,
                     center + new Vector3(0f, 0f, -0.05f),
                     size,
-                    room.FloorColor);
+                    floorColor);
                 floor.name = $"Greybox Room {room.Name}";
                 BuiltRooms.Add(floor);
 
@@ -207,7 +213,10 @@ namespace GanglandUndercover.Online.Map
 
         private GameObject CreateSolidGreyboxWall(string name, Vector3 center, Vector3 size)
         {
-            return _worldBuilder.CreateSolidProp(name, center, size, WallColor);
+            // E3: 使用砖纹/水泥墙壁 sprite
+            return _worldBuilder.CreateShapeProp(name,
+                GanglandUndercover.Art.Sprite2DAssetCache.WallBrick,
+                center, size, WallColor);
         }
 
         private void BuildTaskSpots()

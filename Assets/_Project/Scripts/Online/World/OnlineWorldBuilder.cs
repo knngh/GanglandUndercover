@@ -79,11 +79,14 @@ namespace GanglandUndercover.Online
                 _diamondSprite != null && _capsuleSprite != null)
                 return;
 
-            _roundedRectSprite = CreateRoundedRectSprite("Runtime Rounded Rect", 32, 6);
-            _circleSprite = CreateCircleSprite("Runtime Circle", 32, false);
-            _softCircleSprite = CreateCircleSprite("Runtime Soft Circle", 32, true);
-            _diamondSprite = CreateDiamondSprite("Runtime Diamond", 32);
-            _capsuleSprite = CreateRoundedRectSprite("Runtime Capsule", 32, 14);
+            // E1: 使用美术增强版程序化 sprite 替代纯色矩形
+            GanglandUndercover.Art.Sprite2DAssetCache.Ensure();
+
+            _roundedRectSprite = GanglandUndercover.Art.Sprite2DAssetCache.WallBlock;
+            _circleSprite       = GanglandUndercover.Art.Sprite2DAssetCache.FloorTile;
+            _softCircleSprite   = GanglandUndercover.Art.Sprite2DAssetCache.TaskGlow;
+            _diamondSprite      = GanglandUndercover.Art.Sprite2DAssetCache.CharDirectionArrow;
+            _capsuleSprite      = GanglandUndercover.Art.Sprite2DAssetCache.CorridorTile;
         }
 
         private GameObject CreateSpriteObject(string objectName, Sprite sprite, Color color)

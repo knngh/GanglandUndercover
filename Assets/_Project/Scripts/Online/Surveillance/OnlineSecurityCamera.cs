@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 using Unity.Netcode;
 
@@ -12,9 +13,26 @@ namespace GanglandUndercover.Online.Surveillance
     public class OnlineSecurityCamera : NetworkBehaviour
     {
         [Header("Camera Zone (world-space)")]
-        public Vector2 ZoneCenter;
-        public Vector2 ZoneSize = new Vector2(6f, 4f);
-        public string CameraLabel = "监控摄像头";
+        public NetworkVariable<Vector2> ZoneCenterNet = new NetworkVariable<Vector2>();
+        public NetworkVariable<Vector2> ZoneSizeNet = new NetworkVariable<Vector2>(new Vector2(6f, 4f));
+        public NetworkVariable<FixedString32Bytes> CameraLabelNet = new NetworkVariable<FixedString32Bytes>("监控摄像头");
+
+        /// <summary>世界坐标快捷访问（NetworkVariable 读写代理）</summary>
+        public Vector2 ZoneCenter
+        {
+            get => ZoneCenterNet.Value;
+            set { if (IsServer) ZoneCenterNet.Value = value; }
+        }
+        public Vector2 ZoneSize
+        {
+            get => ZoneSizeNet.Value;
+            set { if (IsServer) ZoneSizeNet.Value = value; }
+        }
+        public string CameraLabel
+        {
+            get => CameraLabelNet.Value.ToString();
+            set { if (IsServer) CameraLabelNet.Value = new FixedString32Bytes(value ?? "监控摄像头"); }
+        }
 
         /// <summary>
         /// 哪些玩家当前在此摄像头的可视区域内（仅服务器维护）。
