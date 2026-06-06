@@ -43,9 +43,9 @@ namespace GanglandUndercover.Online
             if (_criticalTaskSystem.State != CriticalTaskState.Inactive) return;
 
             // 条件 1: 证据销毁 — Police 证据分 ≥ 75%
-            if (evidenceDossier != null)
+            if (taskService != null && taskService.EvidenceTarget > 0)
             {
-                float evidencePct = (float)evidenceDossier.EvidenceScore / ruleSet.DefaultEvidenceTarget;
+                float evidencePct = (float)taskService.EvidenceScore / taskService.EvidenceTarget;
                 if (evidencePct >= 0.75f)
                 {
                     TriggerCriticalTask(CriticalTaskType.EvidenceDestruction);
@@ -98,10 +98,10 @@ namespace GanglandUndercover.Online
             {
                 case CriticalTaskType.EvidenceDestruction:
                     // 证据分 -40%
-                    if (evidenceDossier != null)
+                    if (taskService != null)
                     {
-                        int penalty = Mathf.RoundToInt(evidenceDossier.EvidenceScore * 0.4f);
-                        evidenceDossier.ReduceEvidence(penalty);
+                        int penalty = Mathf.RoundToInt(taskService.EvidenceScore * 0.4f);
+                        taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - penalty);
                     }
                     status = "✗ 证据销毁失败 — 证据分 -40%";
                     break;
