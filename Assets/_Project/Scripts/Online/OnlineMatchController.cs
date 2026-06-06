@@ -161,6 +161,11 @@ namespace GanglandUndercover.Online
         private int roomMinPlayers;
         private int roomMaxPlayers;
         private int emergencyMeetingsLeft;
+        private bool tacticalMapDisabled;         // Phase 4: Communications 破坏效果
+        private bool _blackoutVisionReduced;       // Phase 4: Blackout 破坏效果
+        private bool _blackoutInteractionHalved;   // Phase 4: Blackout 交互减半
+        private bool _patrolAlertActive;           // Phase 4: PatrolAlert 破坏效果
+        private readonly HashSet<int> _lockedRoomIndices = new HashSet<int>(); // Phase 4: Lockdown 封锁房间
         private Vector2 localInput;
         private Vector3 localPosition;
         private float clientSnapshotTimer;
@@ -3212,23 +3217,34 @@ namespace GanglandUndercover.Online
                     status = "黑帮切断电闸，港区进入黑灯。";
                     AddCaseLog(status);
                     PlayCue("blackout");
+                    // Phase 4: 视野缩小 + 交互范围减半
+                    _blackoutVisionReduced = true;
+                    _blackoutInteractionHalved = true;
                     break;
                 case SabotageType.Lockdown:
                     status = taskName + " 引发门禁封锁，部分路线被迫绕行。";
                     AddCaseLog(status);
+                    // Phase 4: 随机封锁3个房间
+                    LockRandomRooms(3);
                     break;
                 case SabotageType.Communications:
                     status = taskName + " 被干扰，紧急会议暂时无法呼叫。";
                     AddCaseLog(status);
+                    // Phase 4: 小地图禁用
+                    tacticalMapDisabled = true;
+                    emergencyCooldownTimer = Mathf.Max(emergencyCooldownTimer, 30f);
                     break;
                 case SabotageType.EvidenceLeak:
                     status = taskName + " 泄露证据，证据链持续受损。";
                     AddCaseLog(status);
+                    // Phase 4: 证据分每秒-1 (由 taskService.TickSabotageTimers 已有)
                     break;
                 case SabotageType.PatrolAlert:
                     MarkNearbyGangSuspicion(mapService.ScaleMapPosition(Vector3.zero), 1);
                     status = taskName + " 触发巡逻警戒，靠近指挥区的嫌疑上升。";
                     AddCaseLog(status);
+                    // Phase 4: 激活额外巡逻路线
+                    _patrolAlertActive = true;
                     break;
             }
         }
@@ -3236,6 +3252,23 @@ namespace GanglandUndercover.Online
         private void RepairSabotageEffect(SabotageType sabotageType)
         {
             taskService.RepairSabotageEffect(sabotageType);
+            // Phase 4: 清除深化效果
+            switch (sabotageType)
+            {
+                case SabotageType.Blackout:
+                    _blackoutVisionReduced = false;
+                    _blackoutInteractionHalved = false;
+                    break;
+                case SabotageType.Lockdown:
+                    UnlockAllRooms();
+                    break;
+                case SabotageType.Communications:
+                    tacticalMapDisabled = false;
+                    break;
+                case SabotageType.PatrolAlert:
+                    _patrolAlertActive = false;
+                    break;
+            }
         }
 
         /// <summary>
@@ -3291,6 +3324,45 @@ namespace GanglandUndercover.Online
                 }
             }
         }
+
+        // ============================================================
+        //  Phase 4: 破坏深化 — 房间封锁系统
+        // ============================================================
+
+        /// <summary>随机封锁 N 个房间的入口。</summary>
+        private void LockRandomRooms(int count)
+        {
+            if (mapService == null) return;
+            var rooms = mapService.RoomSpecs;
+            if (rooms == null || rooms.Count == 0) return;
+
+            _lockedRoomIndices.Clear();
+            int attempts = 0;
+            while (_lockedRoomIndices.Count < count && attempts < 20)
+            {
+                int idx = UnityEngine.Random.Range(0, rooms.Count);
+                _lockedRoomIndices.Add(idx);
+                attempts++;
+            }
+        }
+
+        /// <summary>检查房间是否被封锁。</summary>
+        public bool IsRoomLocked(int roomIndex) => _lockedRoomIndices.Contains(roomIndex);
+
+        /// <summary>解除所有房间封锁。</summary>
+        private void UnlockAllRooms() => _lockedRoomIndices.Clear();
+
+        /// <summary>Blackout 视野缩小倍数。</summary>
+        public float BlackoutVisionMultiplier => _blackoutVisionReduced ? 0.4f : 1f;
+
+        /// <summary>Blackout 交互范围倍率。</summary>
+        public float BlackoutInteractionMultiplier => _blackoutInteractionHalved ? 0.5f : 1f;
+
+        /// <summary>通讯干扰是否激活（小地图禁用）。</summary>
+        public bool IsCommunicationsJammed => tacticalMapDisabled;
+
+        /// <summary>巡逻警报是否激活。</summary>
+        public bool IsPatrolAlertActive => _patrolAlertActive;
 
         internal bool TryFindNearestVictim(Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
         {
