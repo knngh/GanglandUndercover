@@ -15,7 +15,11 @@ namespace GanglandUndercover.SocialDeduction
         /// <summary>O2 修复：进度条 + 连点按钮，30 秒限时</summary>
         O2,
         /// <summary>反应堆熔毁：两个同时按下的按钮，需双手操作，30 秒限时</summary>
-        Reactor
+        Reactor,
+        /// <summary>Phase 2.4: 证据销毁 — Police 证据达 75%时，2 处同时修复，60 秒限时</summary>
+        EvidenceDestruction,
+        /// <summary>Phase 2.4: 警方增援 — Gang 人数 ≤ Police 50%时，黑帮单人破坏通讯塔，45 秒限时</summary>
+        PoliceReinforcement
     }
 
     /// <summary>
@@ -48,6 +52,12 @@ namespace GanglandUndercover.SocialDeduction
 
         [Tooltip("反应堆熔毁限时（秒）")]
         public float ReactorTimeLimit = 30f;
+
+        [Tooltip("证据销毁限时（秒）")]
+        public float EvidenceDestructionTimeLimit = 60f;
+
+        [Tooltip("警方增援限时（秒）")]
+        public float PoliceReinforcementTimeLimit = 45f;
 
         [Tooltip("反应堆同时按键窗口（秒）")]
         public float ReactorSimultaneousWindow = 0.6f;
@@ -117,6 +127,17 @@ namespace GanglandUndercover.SocialDeduction
                     break;
                 case CriticalTaskType.Reactor:
                     TotalTime = ReactorTimeLimit;
+                    reactorButtonAHeld = false;
+                    reactorButtonBHeld = false;
+                    reactorSimultaneousTimer = 0f;
+                    reactorSuccessCount = 0;
+                    break;
+                case CriticalTaskType.EvidenceDestruction:
+                    TotalTime = EvidenceDestructionTimeLimit;
+                    O2Progress = 0f; // 复用进度条
+                    break;
+                case CriticalTaskType.PoliceReinforcement:
+                    TotalTime = PoliceReinforcementTimeLimit;
                     reactorButtonAHeld = false;
                     reactorButtonBHeld = false;
                     reactorSimultaneousTimer = 0f;

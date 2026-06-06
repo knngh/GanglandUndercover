@@ -901,6 +901,9 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(killSystem.reportCooldownTimer);
             writer.WriteValueSafe(aiActionGraceTimer);
             writer.WriteValueSafe(matchElapsedSeconds);
+            writer.WriteValueSafe(_criticalTaskActive);
+            writer.WriteValueSafe((byte)_criticalTaskType);
+            writer.WriteValueSafe(_criticalTaskTimeRemaining);
             writer.WriteValueSafe(players.Count);
 
             foreach (OnlinePlayerState state in players.Values)
@@ -998,6 +1001,9 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out float snapshotReportCooldownTimer);
             reader.ReadValueSafe(out float snapshotAiActionGraceTimer);
             reader.ReadValueSafe(out float snapshotMatchElapsedSeconds);
+            reader.ReadValueSafe(out bool snapshotCriticalTaskActive);
+            reader.ReadValueSafe(out byte snapshotCriticalTaskType);
+            reader.ReadValueSafe(out float snapshotCriticalTaskTimeRemaining);
             reader.ReadValueSafe(out int count);
             matchStarted = snapshotMatchStarted;
             phase = (OnlineMatchPhase)phaseValue;
@@ -1024,6 +1030,12 @@ namespace GanglandUndercover.Online
             killSystem.reportCooldownTimer = snapshotReportCooldownTimer;
             aiActionGraceTimer = snapshotAiActionGraceTimer;
             matchElapsedSeconds = snapshotMatchElapsedSeconds;
+
+            // Phase 2.4: 紧急任务状态
+            _criticalTaskActive = snapshotCriticalTaskActive;
+            _criticalTaskType = (SocialDeduction.CriticalTaskType)snapshotCriticalTaskType;
+            _criticalTaskTimeRemaining = snapshotCriticalTaskTimeRemaining;
+
             status = "同步在线局：" + PhaseName(phase) + "。";
 
             HashSet<ulong> seenPlayers = new HashSet<ulong>();

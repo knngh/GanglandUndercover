@@ -51,6 +51,11 @@ namespace GanglandUndercover.Online
         public float AiActionGraceTimer;
         public float MatchElapsedSeconds;
 
+        // ── Phase 2.4: 紧急任务 ──
+        public bool CriticalTaskActive;
+        public byte CriticalTaskType;
+        public float CriticalTaskTimeRemaining;
+
         // ── 玩家状态 ──
         public List<SnapshotPlayerEntry> Players;
 
@@ -199,6 +204,9 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(ReportCooldownTimer);
             writer.WriteValueSafe(AiActionGraceTimer);
             writer.WriteValueSafe(MatchElapsedSeconds);
+            writer.WriteValueSafe(CriticalTaskActive);
+            writer.WriteValueSafe(CriticalTaskType);
+            writer.WriteValueSafe(CriticalTaskTimeRemaining);
 
             // ── 玩家列表 ──
             writer.WriteValueSafe(Players.Count);
@@ -359,6 +367,14 @@ namespace GanglandUndercover.Online
             snap.ReportCooldownTimer = reportCooldownTimer;
             snap.AiActionGraceTimer = aiActionGraceTimer;
             snap.MatchElapsedSeconds = matchElapsedSeconds;
+
+            // ── Phase 2.4: 紧急任务 ──
+            reader.ReadValueSafe(out bool criticalTaskActive);
+            reader.ReadValueSafe(out byte criticalTaskType);
+            reader.ReadValueSafe(out float criticalTaskTimeRemaining);
+            snap.CriticalTaskActive = criticalTaskActive;
+            snap.CriticalTaskType = criticalTaskType;
+            snap.CriticalTaskTimeRemaining = criticalTaskTimeRemaining;
 
             // ── 玩家列表 ──
             reader.ReadValueSafe(out int playerCount);
