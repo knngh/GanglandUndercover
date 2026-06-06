@@ -1,99 +1,369 @@
-# Game Design: Gangland Undercover
+# Gangland Undercover — Game Design Document v2.0
 
-## High Concept
+> **版本**: 2.0  
+> **日期**: 2026-06-05  
+> **游戏类型**: 实时多人社交推理 (Real-time Multiplayer Social Deduction)  
+> **对标**: Among Us  
+> **差异化**: 警匪卧底题材 + 职业能力 + 证据链推理 + 双身份博弈  
 
-A compact district-control and identity-pressure game. The player chooses Gang, Police, or Undercover. Each side uses the same map but has different information, risk, and victory logic.
+---
 
-## First Playable Scope
+## 设计支柱 (Design Pillars)
 
-Map: Port District.
+每个设计决策都必须对以下 5 条支柱中的至少 2 条有正向贡献：
 
-Districts:
+1. **欺骗与推理** — 每一局都是社交博弈。信息不是给定而是被发现、被隐藏、被伪造的。
+2. **职业即玩法** — 不同职业能做的事根本不同。不是数值换皮，是规则差异。
+3. **港味 Noir** — 霓虹灯下的雨夜、灰色地带的信任崩塌。美学服务于氛围。
+4. **高压时刻** — 紧急任务、破坏爆发、会议指证制造让人觉得"这一票必须对"的节点。
+5. **可重复性** — 每局不同的角色分配、证据分布、玩家互动产生不同故事线。
 
-- Dockyard: high crime value, high police pressure.
-- Warehouse Row: gang logistics hub.
-- Night Market: civilian-rich social node.
-- Police Precinct: police base.
-- Clinic: recovery and witness protection node.
-- Tenement Block: rumor and informant node.
+---
 
-## Factions
+## 一、核心循环 (Core Loop)
 
-Gang:
+### 1.1 Moment-to-Moment 循环（0-30 秒）
 
-- Goal: control territory and complete a major shipment.
-- Strength: fast influence gains.
-- Risk: police heat and informants.
+```
+玩家走位 → 发现交互目标 → 按键互动 → 即时反馈
+  │            │                │            │
+  │    任务站/尸体/暗线   任务小游戏/报告   音效+视觉+状态变化
+  │    入口/监控站/破坏点   /穿越/击杀
+```
 
-Police:
+**核心动词**: 走（WASD）→ 看（观察其他玩家行为）→ 做（任务/击杀/报告/暗线）→ 说（会议推理）
 
-- Goal: assemble a complete evidence chain and arrest the boss.
-- Strength: legal pressure and raids.
-- Risk: low public trust from heavy-handed actions.
+### 1.2 Session 循环（10-15 分钟/局）
 
-Undercover:
+```
+┌─────────────────────────────────────────────────────┐
+│                  行动阶段 (Action Phase)              │
+│  警察方: 做任务积累证据 / 监控 / 发现尸体报告            │
+│  黑帮方: 击杀 / 破坏 / 伪装任务 / 躲避嫌疑              │
+│  卧底方: 窃取情报 / 伪装身份 / 寻找背叛时机              │
+│  内鬼方: 窃取情报 / 暗中破坏 / 等待暗杀指令              │
+├─────────────────────────────────────────────────────┤
+│                  会议阶段 (Meeting Phase)              │
+│  尸体报告 / 紧急会议触发                               │
+│  → 讨论 (35s) → 投票 (40s) → 淘汰/跳过                 │
+├─────────────────────────────────────────────────────┤
+│                  结算 (Resolution)                     │
+│  胜负判定 → 阵营揭晓 → 统计数据                         │
+└─────────────────────────────────────────────────────┘
+```
 
-- Goal: preserve cover while passing evidence to police.
-- Strength: access to gang actions and hidden intel.
-- Risk: suspicion exposure.
+**节奏目标**:
+| 人数 | 目标时长 | 会议次数 | 击杀数 |
+|------|---------|---------|--------|
+| 6 人 | 6-8 分钟 | 1-3 次 | 1-3 次 |
+| 8 人 | 8-12 分钟 | 2-4 次 | 2-5 次 |
+| 10 人 | 10-15 分钟 | 3-5 次 | 3-6 次 |
 
-## Core Resources
+### 1.3 Meta 循环（数小时-数周）
 
-- Gang Influence: control over districts.
-- Police Heat: immediate law-enforcement pressure.
-- Evidence: case progress against gang leadership.
-- Cover: undercover credibility inside the gang.
-- Suspicion: risk that the undercover identity is exposed.
-- Public Trust: limits police aggression and affects endgame quality.
+```
+对局完成 → 数据采集 → 玩家档案更新 → 称号/排名变化
+    │                                    │
+    └── 信誉分变化 ──→ 匹配权重调整 ──────┘
+```
 
-## Turn Structure
+---
 
-1. Player chooses a district.
-2. Player chooses an action available to their role.
-3. Action mutates district and global resources.
-4. AI simulates opposing factions.
-5. Story events react to the current board state.
-6. Victory evaluator checks end conditions.
-7. If no winner, the day advances.
+## 二、阵营矩阵 (Faction Matrix)
 
-## Story Events
+### 2.1 阵营定义
 
-Events are one-time pressure beats that make the campaign feel less mechanical:
+| 阵营 | 表面身份 | 实际目标 | 可知信息 |
+|------|---------|---------|---------|
+| **Police（警察）** | 警察 | 收集证据链定罪 OR 淘汰所有黑帮 | 任务列表、所在位置任务进度 |
+| **Gang（黑帮）** | 黑帮 | 消灭卧底 OR 淘汰所有警察 | 任务列表、队友身份、可施放破坏 |
+| **Undercover（卧底）** | **黑帮** | 收集 Gang 内部情报，在适当时机背叛 | 黑帮任务表、双阵营信息 |
+| **Mole（内鬼）** | **警察** | 窃取 Police 情报，达成暗杀目标 | 警察任务表、双阵营信息 |
 
-- Dockyard Witness: after early shipment movement, a witness appears and adds evidence.
-- Public Backlash: excessive police heat damages public trust and cools pressure.
-- Loyalty Test: high suspicion forces the undercover role to absorb cover damage.
-- Boss Convoy: strong gang control accelerates the shipment through Warehouse Row.
+**关键设计原则**: Undercover 和 Mole 形成镜像对抗——双方都是双重身份、都窃取信息、都在等待翻盘时机。
 
-## Initial Victory Conditions
+### 2.2 角色分配规则
 
-Gang wins if:
+| 总人数 | 警察 | 黑帮 | 卧底 | 内鬼 |
+|--------|------|------|------|------|
+| 5 人 | 2 | 1 | 1 | 0 |
+| 6 人 | 3 | 1 | 1 | 1 |
+| 7 人 | 3 | 2 | 1 | 0 |
+| 8 人 | 3 | 2 | 1 | 1 |
+| 9 人 | 3 | 2 | 2 | 1 |
+| 10 人 | 4 | 3 | 2 | 1 |
 
-- Gang controls 4 districts, or
-- shipment progress reaches 3 while evidence is below 5, or
-- undercover suspicion reaches 100.
+- 内鬼 ≥8 人局启用
+- 警察数 ≥ 黑帮数（保证任务进度）
+- 每局至少 1 个卧底
 
-Police wins if:
+### 2.3 胜利条件（双向渗透模型）
 
-- evidence reaches 8 and police heat reaches 6, or
-- gang control drops to 1 or fewer districts after day 4.
+**警察阵营胜**（任一）:
+1. 证据值达标 + 卧底存活 → "收网成功"
+2. 黑帮全员被会议淘汰 → "全数落网"
 
-Undercover wins if:
+**黑帮阵营胜**（任一）:
+1. 内鬼情报达标（识别出卧底）→ "线人立功"
+2. 卧底被淘汰 → "拔除钉子"
+3. 警察全员被会议淘汰 → "港区沦陷"
 
-- evidence reaches 8,
-- cover remains at 35 or more,
-- suspicion remains below 100.
+**僵局**: 超时未决出胜负 → 双方平局
 
-## Next Milestone
+---
 
-Build a vertical slice:
+## 三、信息不对称设计 (Information Asymmetry)
 
-- One generated scene.
-- Clickable district/action UI.
-- Clickable map nodes with controller colors.
-- Role select.
-- Turn log.
-- Simple AI.
-- Win/loss result screen.
+| 信息维度 | Police | Gang | Undercover | Mole | 死灵 |
+|---------|--------|------|-----------|------|------|
+| 自己的职业 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 同阵营队友 | ❌ | ✅ 知道 Gang | ❌ | ❌ | ✅ 知道所有 |
+| 其他玩家表面身份 | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 任务位置 | ✅ | ✅ | ✅ (Gang任务) | ✅ (Police任务) | ✅ |
+| 暗线入口位置 | ❌ | ✅ | ✅ | ❌ | ✅ |
+| 监控画面 | ✅ | ❌ | ❌ | ✅ | ✅ |
+| 当前破坏状态 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 证据链内容 | 自己收集的 | ❌ | 自己收集的 | ❌ | ✅ |
+| 内鬼 Intel 值 | ❌ | ❌ | ❌ | ✅ 自己 | ✅ |
+| 卧底 Intel 值 | ❌ | ❌ | ✅ 自己 | ❌ | ✅ |
 
-After that, replace generated UI with designed screens and add path movement, NPC witnesses, and online lobby support.
+---
+
+## 四、职业系统 (Profession System)
+
+### 4.1 职业列表
+
+#### 警察方（Police）
+
+| 职业 | 能力 1 | 能力 2 | 玩家体验 |
+|------|--------|--------|---------|
+| **Inspector（警探）** | 报告冷却缩短（0.6x） | 足迹追踪（5秒可见） | 信息猎人：更快触发会议，追踪嫌疑人行踪 |
+| **Tech（技术员）** | 任务速度加成（1.3x） | 远程监控（不限位置） | 效率引擎：快速积攒证据，足不出户监控全局 |
+| | 证据链加成（1.25x） | | |
+| **Forensics（法医）** | 尸体检验（+2线索） | 报告范围加成（+0.3） | 情报分析：尸体是最有价值的信息源 |
+
+#### 黑帮方（Gang）
+
+| 职业 | 能力 1 | 能力 2 | 玩家体验 |
+|------|--------|--------|---------|
+| **Enforcer（打手）** | 击杀冷却缩短（0.75x） | 暗视（短暂穿墙轮廓） | 猎人：击杀是主职，暗视帮你找到猎物 |
+| **Fixer（清道夫）** | 拖动尸体 | 破坏冷却缩短（0.8x） | 控制者：清理现场、制造混乱 |
+
+#### 卧底方（Undercover）
+
+| 职业 | 能力 1 | 能力 2 | 信息目标 |
+|------|--------|--------|---------|
+| **UndercoverAgent（卧底）** | 秘密投票 | — | 不被投票行为暴露身份 |
+| **Driver（车手）** | 暗线加速（1.5x） | 移速加成（1.08x） | 高机动性完成伪装任务 |
+
+#### 内鬼方（Mole）
+
+| 职业 | 能力 1 | 能力 2 | 独特目标 |
+|------|--------|--------|---------|
+| **Mole（内鬼）** | 破坏冷却缩短（0.9x） | 秘密投票 | 窃取 Police 任务进度，达成暗杀条件 |
+
+### 4.2 职业选择流程
+开局 → 玩家被随机分配阵营 → 在阵营内随机或偏好选择职业 → 显示职业面板（15s）
+
+---
+
+## 五、证据链系统 (Evidence Chain) ★ 核心差异化
+
+### 5.1 证据生命周期
+
+```
+任务完成 → 产出证据节点 → 玩家 CaseLog 记录 → 
+  会议中关联证据 → 形成证据链 → 指证目标 → 投票权重加成
+```
+
+### 5.2 证据类型
+
+| 类型 | 来源 | 典型产出 |
+|------|------|---------|
+| Footprint（足迹） | Inspector 能力 / 尸体周围 | 显示嫌疑人经过 |
+| Bloodstain（血迹） | 击杀现场 | 指向击杀者职业 |
+| WeaponTrace（武器痕迹） | 法医检验尸体 | 指向击杀者职业 |
+| AlibiBreak（不在场破绽） | 任务站记录 | 某人声称的任务站点被证伪 |
+| TransactionRecord（交易记录） | 任务产出 | 黑帮资金流动 |
+| SurveillanceFootage（监控录像） | 监控摄像头 | 某时刻某房间的人员名单 |
+
+### 5.3 关联规则
+
+| 关联类型 | 权重加成 | 条件 |
+|---------|---------|------|
+| 同类型证据 ×2 | +1 | 两个 Footprint 指向同一区域 |
+| 跨类型证据 ×2 | +2 | Footprint + Bloodstain 在同一位置 |
+| 发现者链 | +1 | 同一玩家发现的多个证据 |
+| 时间线匹配 | +3 | 证据时间 + 嫌疑人位置吻合 |
+
+### 5.4 会议指证
+
+玩家可在会议中提交证据链指证目标：
+- **有链指证**（≥3 关联点）→ 被指证者投票权重 +2（更容易被淘汰）
+- **无链指证**（<3 关联点）→ 无效，不改变投票权重
+- **虚假指证**（伪造链）→ 指证者投票权重 +1（自身风险）
+
+---
+
+## 六、核心机制规格 (Mechanic Specifications)
+
+### 6.1 击杀 (Kill)
+
+| 属性 | 值 |
+|------|-----|
+| **目的** | 黑帮方主要进攻手段，减少 Police 人数 |
+| **玩家体验** | 暗处的猎人——观察、跟踪、在无人时下手 |
+| **输入** | 靠近目标 + 按击杀键 |
+| **输出** | 目标死亡、尸体留下、击杀冷却开启 |
+| **范围** | 1.1m（世界单位） |
+| **冷却** | 25s（可调，Enforcer 0.75x = 18.75s） |
+| **尸体** | 在地面留下可报告的尸体标记 |
+| **失败状态** | 冷却中无法击杀；目标不在范围；被其他玩家目击 |
+| **边缘情况** | 多人同时试图击杀同一目标 → 先到先得；击杀后立即被杀 → 尸体交给后续玩家报告 |
+
+### 6.2 报告与会议 (Report & Meeting)
+
+| 属性 | 值 |
+|------|-----|
+| **触发方式** | 靠近尸体按报告键 OR 紧急会议按钮 |
+| **报告范围** | 1.25m |
+| **报告冷却** | 5s（防连续报案） |
+| **讨论时间** | 35s |
+| **投票时间** | 40s |
+| **淘汰** | 得票最多者出局；平票则无人出局 |
+| **紧急会议冷却** | 75s |
+| **紧急会议上限** | 3 次 |
+
+### 6.3 任务 (Task)
+
+| 属性 | 值 |
+|------|-----|
+| **目的** | 警察方积累证据的主要方式 |
+| **分配** | 每人 4 个任务（可调），从全局任务池随机分配 |
+| **类型** | 11 种小游戏（配线/记忆/刷卡/键盘/扫描/下载/排序/点击/陨石/校准/证据归档） |
+| **完成反馈** | 音效 + 证据分增加 + HUD 进度更新 |
+| **联机同步** | Client 本地完成任务 → ServerRpc 提交 → Server 更新全局状态 |
+| **中断** | 移动离开任务站；被杀；破坏禁用该任务类型 |
+
+### 6.4 破坏 (Sabotage)
+
+| 破坏类型 | 效果 | 持续 | 修复方式 | 施放者 |
+|---------|------|------|---------|--------|
+| **Blackout（停电）** | 全图视野缩小 60% + 交互范围减半 | 28s | 配电房修复小游戏 | Gang/Undercover/Mole |
+| **Lockdown（封锁）** | 随机 3 个房间门封锁 | 32s | 门旁解除小游戏 | Gang/Undercover/Mole |
+| **Communications（通讯干扰）** | 小地图禁用 + 任务列表隐藏 | 30s | 通讯塔修复小游戏 | Gang/Undercover/Mole |
+| **EvidenceLeak（证据泄露）** | 证据分每秒 -1 | 36s | 档案室修复小游戏 | Gang/Undercover/Mole |
+| **PatrolAlert（巡逻警报）** | 额外 NPC 巡逻路线激活 | 30s | 自动恢复 | Gang/Undercover/Mole |
+
+### 6.5 紧急任务 (Critical Task)
+
+| 类型 | 触发条件 | 要求 | 限时 | 失败后果 |
+|------|---------|------|------|---------|
+| **证据销毁** | Police 证据分 ≥ 75% | 2 处同时修复 | 60s | 证据分 -40% |
+| **警方增援** | Gang 人数 ≤ Police 50% | 黑帮单人破坏通讯塔 | 45s | 黑帮位置暴露 30s |
+
+### 6.6 暗线通道 (Underworld Passage)
+
+| 属性 | 值 |
+|------|-----|
+| **目的** | 黑帮方战术机动能力（代替 Among Us 通风管） |
+| **可用阵营** | Gang + Undercover |
+| **不可用阵营** | Police + Mole（看不见入口） |
+| **节点数** | 4 个，连接不相邻房间 |
+| **冷却** | 10s |
+| **过渡时间** | 0.5s |
+| **交互范围** | 1.15m |
+
+### 6.7 监控摄像头 (Surveillance Camera)
+
+| 属性 | 值 |
+|------|-----|
+| **目的** | 警察方信息收集工具 |
+| **可用者** | 监控室终端（任何人可操作）；Tech 职业可远程访问 |
+| **摄像头数** | 每图 4-6 路 |
+| **画面** | RenderTexture 实时画面 |
+| **破坏互斥** | Communications 破坏期间不可用 |
+
+### 6.8 鬼魂模式 (Ghost Mode)
+
+| 属性 | 值 |
+|------|-----|
+| **触发** | 被击杀或被投票淘汰 |
+| **能力** | 穿墙自由飞行、看到所有暗线入口和尸体位置 |
+| **任务** | 可继续完成任务帮助活人 |
+| **通信** | 仅与其他鬼魂聊天 |
+
+---
+
+## 七、地图系统 (Map System)
+
+### 7.1 已实现地图
+
+| 地图 | 房间数 | 监控点 | 暗线节点 | 特色 |
+|------|--------|--------|---------|------|
+| **HarbourDistrict（港区）** | 12 | 6 | 4 | 开放街区，多走廊 |
+| **PoliceStation（警署）** | 6 | 4 | 3 | 紧凑室内，短路径 |
+
+### 7.2 计划地图
+
+| 地图 | 房间数 | 监控点 | 主题 |
+|------|--------|--------|------|
+| **KowloonWalledCity（九龙城寨）** | 12 | 6 | 窄巷、暗楼、天台捷径 |
+
+---
+
+## 八、经济与平衡参数 (Economy)
+
+### 8.1 核心参数表
+
+| 参数 | 默认值 | 范围 | 说明 |
+|------|--------|------|------|
+| 击杀冷却 | 25s | 15-45s | Enforcer 0.75x |
+| 击杀范围 | 1.1m | 0.8-1.5m | 世界单位 |
+| 报告范围 | 1.25m | 1.0-1.5m | 尸体发现距离 |
+| 报告冷却 | 5s | 0-15s | 防报案刷屏 |
+| 讨论时间 | 35s | 20-60s | 会议讨论 |
+| 投票时间 | 40s | 20-60s | 投票倒计时 |
+| 紧急会议冷却 | 75s | 30-120s | — |
+| 紧急会议上限 | 3 | 1-5 | — |
+| 任务数/人 | 4 | 2-6 | 非黑帮玩家 |
+| 证据目标 | 44 | 34-56 | 按人数缩放 |
+| 移动速度 | 3.5 | 2.5-5.0 | Driver 1.08x |
+| 比赛最短 | 600s | — | 10min |
+| 比赛最長 | 1200s | — | 20min |
+
+所有 `[PLACEHOLDER]` 值将在 Phase 2-3 的 PlayMode 实测中校准。调参原则：**每次只改 1-2 个参数，5 场对局后复评。**
+
+---
+
+## 九、技术架构约束 (Architecture)
+
+### 9.1 当前关键技术决策
+
+| 决策 | 选择 | 原因 |
+|------|------|------|
+| 联机框架 | Unity Netcode for GameObjects (NGO) | 已集成，Host/Client 模式 |
+| 渲染模式 | 2D 风格化（正交相机） | 与 .gitignore + 2D Backend 一致 |
+| 地图生成 | 数据驱动（GreyboxMapBuilder） | 保持坐标/碰撞与美术解耦 |
+| UI 框架 | uGUI Canvas（迁移中） | 替代当前 OnGUI |
+| 测试框架 | Unity Test Framework (EditMode + PlayMode) | 已集成 |
+
+### 9.2 架构原则
+
+- OnlineMatchController 逐步拆分为 ≤4,000 行
+- 每个子系统必须可独立测试（不依赖完整联机环境）
+- 所有网络同步使用 NGO RPC/NetworkVariable，禁止反射
+- 美术资源与逻辑完全解耦（替换 sprite 不影响玩法）
+
+---
+
+## 十、版本记录
+
+| 版本 | 日期 | 修改 |
+|------|------|------|
+| v1.0 | 2026-05 | 初版（回合制区域控制） |
+| v2.0 | 2026-06-05 | 完全重写：实时社交推理类型、阵营矩阵、证据链设计、职业能力规格、全部机制参数 |
+
+---
+
+> **使用说明**: 本文为 Gangland Undercover 的唯一权威游戏设计文档。所有新功能的实现必须先在本文登记机制规格（目的/输入/输出/边缘情况/调参杠杆），代码审计以本文为功能正确性的唯一判定标准。

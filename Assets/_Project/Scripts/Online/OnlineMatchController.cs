@@ -47,33 +47,24 @@ namespace GanglandUndercover.Online
         private const float RoleRevealSeconds = 6.5f;
         private const ulong LocalPreviewClientId = 0UL;
         private const uint SurveillanceCameraPrefabHash = 0x47554343; // "GUCC" stable runtime prefab source hash.
-        private const ulong BotClientIdBase = OnlineBotController.BotClientIdBase;
-        private const float BotThinkMinSeconds = 1.2f;
-        private const float BotThinkMaxSeconds = 3.4f;
-        private const float BotInteractDistance = 0.45f;
-
         // Camera constants moved to OnlineCameraRig — use _cameraRig.Configure() for all camera setup.
         private const float PlayerAliveVisualScale = 1.12f;
         private const float PlayerDeadVisualScaleX = 1.04f;
         private const float PlayerDeadVisualScaleY = 0.52f;
-        private const float VoiceRetrySeconds = 4.0f;
-        private const float VoicePositionUpdateSeconds = 0.12f;
 
 
 
         internal readonly Dictionary<ulong, OnlinePlayerState> players = new Dictionary<ulong, OnlinePlayerState>();
         private readonly List<OnlineTaskState> tasks = new List<OnlineTaskState>();
-        internal readonly List<OnlineBodyState> bodies = new List<OnlineBodyState>();
         private readonly List<string> caseLog = new List<string>();
         private readonly Dictionary<ulong, OnlineRole> privateRoles = new Dictionary<ulong, OnlineRole>();
         internal readonly Dictionary<ulong, ulong> votes = new Dictionary<ulong, ulong>();
-        internal readonly Dictionary<ulong, float> killCooldowns = new Dictionary<ulong, float>();
         internal readonly Dictionary<ulong, float> abilityCooldowns = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> ventCooldowns = new Dictionary<ulong, float>();
-        private readonly Dictionary<ulong, float> botThinkTimers = new Dictionary<ulong, float>();
-        private readonly Dictionary<ulong, float> botVoteTimers = new Dictionary<ulong, float>();
-        private readonly Dictionary<ulong, Vector3> botTargets = new Dictionary<ulong, Vector3>();
         private OnlineBotController _botController;
+
+        // 击杀/尸体/报告状态已迁移到 KillSystem（单一数据源）
+        private KillSystem killSystem;
 
         // M8.4: 对局数据采集器
         private MatchStatsCollector _statsCollector;
@@ -85,12 +76,10 @@ namespace GanglandUndercover.Online
         // C4: 内鬼隐藏目标追踪
         private readonly Dictionary<ulong, MoleObjective> _moleObjectives = new Dictionary<ulong, MoleObjective>();
         private int _meetingCount;   // 累计会议次数
-        private int _killCount;        // 累计击杀次数
 
         private readonly Dictionary<ulong, GameObject> playerVisuals = new Dictionary<ulong, GameObject>();
         private readonly Dictionary<ulong, Vector3> playerVisualBaseScales = new Dictionary<ulong, Vector3>();
         private readonly Dictionary<int, GameObject> taskVisuals = new Dictionary<int, GameObject>();
-        private readonly Dictionary<int, GameObject> bodyVisuals = new Dictionary<int, GameObject>();
         private readonly List<OnlineSecurityCamera> surveillanceCameras = new List<OnlineSecurityCamera>();
         private readonly Dictionary<string, AudioClip> audioClips = new Dictionary<string, AudioClip>();
         private readonly List<Rect> solidObstacleRects = new List<Rect>();
@@ -119,7 +108,7 @@ namespace GanglandUndercover.Online
 
                     if (worldRoot != null)
                     {
-                        WorldBuilder.Initialize(worldRoot, mapService, solidObstacleRects, walkableRects, worldLabels);
+                        WorldBuilder.Initialize(worldRoot, mapService, solidObstacleRects, walkableRects, worldLabels, ruleSet.UnderworldPassageCount);
                     }
                 }
 
@@ -151,7 +140,6 @@ namespace GanglandUndercover.Online
         private bool localReady;
         private bool roomAutoFillAi;
         private bool revealRoleOnEject;
-        private bool proximityVoiceEnabled;
         [SerializeField] private bool canvasHudEnabled = true;
         [SerializeField] internal OnlineRuleSet ruleSet;
         [SerializeField] internal OnlineMapService mapService;
@@ -172,7 +160,6 @@ namespace GanglandUndercover.Online
         private bool intelBoardOpen;
         private int roomMinPlayers;
         private int roomMaxPlayers;
-        private int nextBodyId;
         private int emergencyMeetingsLeft;
         private Vector2 localInput;
         private Vector3 localPosition;
@@ -181,7 +168,6 @@ namespace GanglandUndercover.Online
         private float actionCooldown;
         private float phaseTimer;
         private float emergencyCooldownTimer;
-        private float reportCooldownTimer;
         private float aiActionGraceTimer;
         private float matchElapsedSeconds;
         private int activeTaskId = -1;
@@ -199,18 +185,12 @@ namespace GanglandUndercover.Online
         // 非空时由小游戏自建的 ScreenSpaceOverlay Canvas 接管交互，OnGUI 经典任务面板让位。
         private GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase activeMiniGame;
         private OnlineCameraRig _cameraRig;
-        private float nextVoiceRetryTime;
-        private float nextVoicePositionUpdateTime;
-        private bool voiceJoinInProgress;
-        private bool voiceLeaveInProgress;
         private bool relayOperationInProgress;
         // currentCameraSubjectId moved to OnlineCameraRig; use _cameraRig.SetSubject() / _cameraRig.CurrentSubjectId
-        private string desiredVoiceChannel = string.Empty;
-        private string pendingVoiceChannel = string.Empty;
 
         public Dictionary<ulong, OnlinePlayerState> Players => players;
         public IReadOnlyList<OnlineTaskState> Tasks => tasks;
-        public List<OnlineBodyState> Bodies => bodies;
+        public List<OnlineBodyState> Bodies => killSystem != null ? killSystem.killSystem.bodies : null;
         public IReadOnlyList<string> CaseLog => caseLog;
         public OnlineRole LocalRole => localRole;
         public ulong LocalClientIdValue => LocalClientId();
@@ -239,7 +219,7 @@ namespace GanglandUndercover.Online
         public float PhaseTimer => phaseTimer;
         public string Status { get => status; internal set => status = value; }
         public int TaskCount => tasks.Count;
-        public int BodyCount => bodies.Count;
+        public int BodyCount => killSystem != null ? killSystem.killSystem.bodies.Count : 0;
 
         // ── M7.1 Relay 公开 API ───────────────────────────────
         /// <summary>Relay 状态变化事件（供 LobbyController 订阅）</summary>
@@ -253,7 +233,7 @@ namespace GanglandUndercover.Online
             localReady = !localReady;
             SendClientState(true);
         }
-        public int BotCount => CountBotPlayers();
+        public int BotCount => _botController?.BotCount ?? 0;
         public int HumanPlayerCount => CountHumanPlayers();
         public int ReadyPlayerCountValue => ReadyPlayerCount();
         public int AlivePlayerCount => CountAlivePlayers();
@@ -293,63 +273,14 @@ namespace GanglandUndercover.Online
         public int VerticalSliceStageOneEditableAnchorCount => worldRoot == null ? 0 : worldRoot.GetComponentsInChildren<VerticalSliceStageOneAnchor>(true).Length;
         public int FreeCharacterAdapterCount => CountNamedWorldObjects("FreeCharacterAdapter");
         public int StageTwoCharacterStateLayerCount => CountNamedWorldObjects("Stage2 Character");
-        public int StageTwoActiveMeetingPoseCount => CountActiveNamedWorldObjects("Stage2 Meeting");
-        public int StageTwoActiveDownedStateCount => CountActiveNamedWorldObjects("Stage2 Downed");
-        public int StageTwoActiveVoiceRadiusCount => CountActiveNamedWorldObjects("Stage2 VoiceRadius");
-        public int StageTwoActiveReportFeedbackCount => CountActiveNamedWorldObjects("Stage2 Report");
-        public int StageTwoActiveVoteFeedbackCount => CountActiveNamedWorldObjects("Stage2 Vote");
-        public int StageTwoForensicSceneCount => CountNamedWorldObjects("Stage2 Forensic");
-        public int StageTwoRuntimeRigCount => worldRoot == null ? 0 : worldRoot.GetComponentsInChildren<StageTwoCharacterRig>(true).Length;
-        public int StageTwoConfiguredRigCount => CountConfiguredStageTwoRigs();
-        public int TaskMiniGameCanvasElementCount => onlineHud == null ? 0 : onlineHud.TaskMiniGameCanvasElementCount;
-        public int MeetingSeatCanvasElementCount => onlineHud == null ? 0 : onlineHud.MeetingSeatCanvasElementCount;
-        public bool CanvasHudLayoutComplete => onlineHud != null && onlineHud.HasCompleteLayout;
-        public int LargePortVistaCount => CountNamedWorldObjects("大场景港区层");
-        public int UnderworldPassageNodeCount => worldRoot == null ? 0 : CountNamedWorldObjects("暗线节点");
-        public bool HasRuntimeAudio => audioSource != null;
-        public int RoomMinPlayers => roomMinPlayers;
-        public int RoomMaxPlayers => roomMaxPlayers;
-        public int MinimumRoomPlayersValue => ruleSet.MinimumRoomPlayers;
-        public int MaximumRoomPlayersValue => ruleSet.MaximumRoomPlayers;
-        public int EvidenceScore => taskService.EvidenceScore;
-        public int EvidenceTarget => taskService.EvidenceTarget;
-        public float MatchElapsedSeconds => matchElapsedSeconds;
-        public float MapHalfWidthValue => mapService.MapHalfWidth;
-        public float MapHalfHeightValue => mapService.MapHalfHeight;
-        public OnlineMapService MapService => mapService;
-        public OnlineTaskService TaskService => taskService;
-
-        // M8.4: 对局统计数据暴露（供 MatchStatsCollector 读取）
-        public int MeetingCount => _meetingCount;
-        public int KillCount => _killCount;
-        public OnlineBotController BotController => _botController;
-
-        // E4: 破坏 VFX 系统
-        internal GanglandUndercover.Art.SabotageVFX sabotageVFX;
-        public NetworkManager NetworkManager => networkManager;
-        public OnlineRuleSet RuleSet => ruleSet;
-        public int TargetMatchMinutesMin => Mathf.RoundToInt(ruleSet.MatchTargetMinSeconds / 60f);
-        public int TargetMatchMinutesMax => Mathf.RoundToInt(ruleSet.MatchHardLimitSeconds / 60f);
-        public string ResultSummary => resultSummary;
-        public bool AutoFillAi => roomAutoFillAi;
-        public bool RevealRoleOnEject => revealRoleOnEject;
-        public bool ProximityVoiceEnabled => proximityVoiceEnabled;
-        public bool LocalReady => localReady;
-        public bool CanStartMatch => CanStartLobbyMatch();
-        public bool RelayOperationInProgress => relayOperationInProgress;
-        public int EmergencyMeetingsLeft => emergencyMeetingsLeft;
-        public float EmergencyCooldownTimer => emergencyCooldownTimer;
-        public float ReportCooldownTimer => reportCooldownTimer;
-        internal int NextBodyId => nextBodyId;
-        internal void IncrementNextBodyId() { nextBodyId++; }
         internal void DecrementEmergencyMeetings() { emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1); }
         internal void AddBotPlayer(ulong clientId, string displayName, Vector3 spawn, OnlineProfession profession)
         {
             players[clientId] = new OnlinePlayerState(clientId, displayName, spawn, true, true, OnlineRole.Unassigned, profession, 0, true);
         }
-        internal void SetKillCooldown(ulong clientId, float value) { killCooldowns[clientId] = value; }
+        internal void SetKillCooldown(ulong clientId, float value) { if (killSystem != null) killSystem.killSystem.killCooldowns[clientId] = value; }
         internal void SetAbilityCooldown(ulong clientId, float value) { abilityCooldowns[clientId] = value; }
-        internal bool TryGetKillCooldown(ulong clientId, out float value) => killCooldowns.TryGetValue(clientId, out value);
+        internal bool TryGetKillCooldown(ulong clientId, out float value) { if (killSystem != null) return killSystem.killSystem.killCooldowns.TryGetValue(clientId, out value); value = 0f; return false; }
         internal bool HasVoted(ulong clientId) => votes.ContainsKey(clientId);
         public float BlackoutTimer => taskService.BlackoutTimer;
         public float LockdownTimer => taskService.LockdownTimer;
@@ -371,71 +302,6 @@ namespace GanglandUndercover.Online
         public int VoiceParticipantCount => chatSystem != null ? chatSystem.MessageCount : 0;
         public bool VoiceRoutingEnabled => true; // 文本聊天始终可用
         public bool LocalTaskInputGateActive => activeTaskId >= 0;
-        public string MatchPressureSummary => BuildMatchPressureSummary();
-        public string LobbyReadinessSummary => BuildLobbyReadinessSummary();
-        public string LobbyRoadmap => BuildPhaseRoadmap();
-        public string LocalObjectiveSummary => BuildLocalObjectiveSummary();
-        public string LocalProfessionDisplayName => LocalProfessionName();
-        public string PhaseDisplayName => PhaseName(phase);
-        public string MatchTimeText => FormatMatchTime(matchElapsedSeconds);
-        public string HazardSummary => BuildHazardSummary();
-        public string LocalActionHint => BuildLocalActionHint();
-        public string VoiceHudLine => BuildVoiceHudLine();
-        public string FocusedIntelText => BuildFocusedIntel();
-        public string TaskListText => BuildTaskList();
-        public string CaseLogText => BuildCaseLog();
-        public string PlayerListText => BuildPlayerList();
-        public string ReleaseReadinessText => BuildReleaseReadiness();
-        public string MeetingEvidenceDigest => BuildMeetingEvidenceDigest();
-        public string VoteTallySummary => BuildVoteTallySummary();
-        public string ResultRosterLine => BuildResultRosterLine();
-        public string ActiveTaskNameText => activeTaskId >= 0 ? GetTask(activeTaskId).Name : string.Empty;
-        public string ActiveTaskInstructionText => activeTaskId >= 0 ? TaskPanelInstruction(activeTaskId) : string.Empty;
-        public string ActiveTaskTemplateTitleText => activeTaskId >= 0 ? TaskPanelTemplateTitle(activeTaskId) : string.Empty;
-        public string ActiveTaskTemplateSubtitleText => activeTaskId >= 0 ? TaskPanelTemplateSubtitle(activeTaskId) : string.Empty;
-        public string ActiveTaskFooterText => activeTaskId >= 0 ? TaskPanelFooter(activeTaskId) : string.Empty;
-        public string ActiveTaskProgressText => activeTaskId >= 0 ? "证据价值 +" + TaskEvidenceValue(activeTaskId) + " | 错误 " + activeTaskMistakes + "/3" : string.Empty;
-        public int ActiveTaskIdValue => activeTaskId;
-        public int ActiveTaskStepValue => activeTaskStep;
-        public int ActiveTaskMistakesValue => activeTaskMistakes;
-        public float ActiveTaskChargeValue => activeTaskCharge;
-        public int ActiveTaskCorrectStepOne => activeTaskId >= 0 ? CorrectTaskStepInput(activeTaskId, 0) : 1;
-        public int ActiveTaskCorrectStepTwo => activeTaskId >= 0 ? CorrectTaskStepInput(activeTaskId, 1) : 2;
-        public int ActiveTaskCorrectStepThree => activeTaskId >= 0 ? CorrectTaskStepInput(activeTaskId, 2) : 3;
-        public bool ActiveTaskStepOneDone => activeTaskStepOneDone;
-        public bool ActiveTaskStepTwoDone => activeTaskStepTwoDone;
-        public bool ActiveTaskStepThreeDone => activeTaskStepThreeDone;
-        public bool ActiveTaskFeedbackPositiveValue => activeTaskFeedbackPositive;
-        public float ActiveTaskFeedbackTimerValue => activeTaskFeedbackTimer;
-        public string LastMeetingReason => lastMeetingReason;
-        public string LastVoteOutcome => lastVoteOutcome;
-        public string LastEvidenceEvent => lastEvidenceEvent;
-        public string LastSabotageEvent => lastSabotageEvent;
-        public int EvidenceMilestoneIndex => evidenceMilestoneIndex;
-        public int TacticalMapLabelCount => tasks.Count + mapService.ShipRooms().Length + players.Count + bodies.Count + ruleSet.UnderworldPassageCount;
-        public float LocalAbilityCooldown => TryGetLocalPlayer(out OnlinePlayerState localState) ? localState.AbilityCooldown : 0f;
-        public float LocalKillCooldown => TryGetLocalPlayer(out OnlinePlayerState localState2) ? localState2.KillCooldown : 0f;
-        public bool LocalAlive => IsLocalAlive();
-        public string RoleDisplayName(OnlineRole role) => RoleName(role);
-        public string ProfessionDisplayName(OnlineProfession profession) => ProfessionName(profession);
-        public string TaskDisplayName(int id) => TaskNameFor(id);
-        public string TaskDistrictDisplayName(int id) => TaskDistrictName(id);
-        public string TaskMapCodeDisplayName(int id) => TaskMapCode(id);
-        public string PhaseDisplayNameFor(OnlineMatchPhase matchPhase) => PhaseName(matchPhase);
-
-#if UNITY_EDITOR
-        public void EditorSimulateLocalMatch()
-        {
-            EnsureCanvasHud();
-
-            if (players.Count == 0)
-            {
-                players[0] = new OnlinePlayerState(0, "玩家0", mapService.SpawnPosition(0), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
-            }
-
-            EnsureMinimumBots();
-            StartOnlineMatchCore(false);
-        }
 
         public void EditorForceRestartForSmokeTest()
         {
@@ -689,9 +555,9 @@ namespace GanglandUndercover.Online
             victim.Input = Vector2.zero;
             players[victimClientId] = victim;
 
-            if (bodies.Count == 0)
+            if (killSystem.bodies.Count == 0)
             {
-                bodies.Add(new OnlineBodyState(nextBodyId++, victimClientId, victim.Position, false));
+                killSystem.bodies.Add(new OnlineBodyState(killSystem.nextBodyId++, victimClientId, victim.Position, false));
                 if (worldBuilder != null && worldBuilder.Use2DBackend)
                 {
                     worldBuilder.CreateCorpseMarker(victim.Position);
@@ -882,7 +748,14 @@ namespace GanglandUndercover.Online
 
         private void EnsureCameraRig()
         {
-            _cameraRig ??= new OnlineCameraRig();
+            if (_cameraRig == null)
+            {
+                _cameraRig = GetComponent<OnlineCameraRig>();
+                if (_cameraRig == null)
+                {
+                    _cameraRig = gameObject.AddComponent<OnlineCameraRig>();
+                }
+            }
         }
 
         // E4: 破坏 VFX 初始化
@@ -916,9 +789,10 @@ namespace GanglandUndercover.Online
 
             // M8.4: 初始化对局数据采集器
             _statsCollector = new MatchStatsCollector();
+            _botController = new OnlineBotController(this);
             evidenceDossier = new EvidenceDossier(this);
+            killSystem = FindAnyObjectByType<KillSystem>();
             _meetingCount = 0;
-            _killCount = 0;
         }
 
         private void Reset()
@@ -990,7 +864,6 @@ namespace GanglandUndercover.Online
             EnsureAudio();
             EnsureServiceBootstrap();
             EnsureCanvasHud();
-            TickVoiceRouting();
             ConfigureMainCamera();
             UpdateWorldVisuals();
             TickCharacterAnimators();
@@ -1000,912 +873,36 @@ namespace GanglandUndercover.Online
         private static readonly int AnimDeadHash  = Animator.StringToHash("Dead");
         private static readonly int AnimActionHash = Animator.StringToHash("Action");
 
-        private void TickCharacterAnimators()
-        {
-            if (players == null) return;
 
-            foreach (var kv in players)
-            {
-                OnlinePlayerState state = kv.Value;
-                var socialChar = state.SocialChar;
-                if (socialChar == null) continue;
 
-                // 死亡状态（通过 SocialCharacter.Kill 设置 Dead bool）
-                if (!state.Alive)
-                {
-                    socialChar.Kill();
 
-                    // M3: Ghost transparency for 2D characters
-                    if (state.Character2DDirectionIndicator != null)
-                    {
-                        SpriteRenderer bodyRenderer = state.Character2DDirectionIndicator
-                            .transform.parent?.GetComponent<SpriteRenderer>();
-                        SpriteRenderer dirRenderer = state.Character2DDirectionIndicator.GetComponent<SpriteRenderer>();
-                        if (bodyRenderer != null)
-                        {
-                            Color ghostColor = bodyRenderer.color;
-                            ghostColor.a = 0.35f;
-                            bodyRenderer.color = ghostColor;
-                        }
-                        if (dirRenderer != null)
-                        {
-                            Color ghostDir = dirRenderer.color;
-                            ghostDir.a = 0.35f;
-                            dirRenderer.color = ghostDir;
-                        }
-                    }
-                    if (state.HasPendingAction)
-                    {
-                        state.HasPendingAction = false;
-                        players[kv.Key] = state;
-                    }
-                    continue;
-                }
-
-                // 移动速度（通过 SocialCharacter.SetMoveSpeed）
-                float speed = state.Input.magnitude;
-                socialChar.SetMoveSpeed(speed);
-
-                // M3: Update 2D direction indicator rotation based on movement input
-                if (state.Character2DDirectionIndicator != null && speed > 0.01f)
-                {
-                    float angle = Mathf.Atan2(state.Input.y, state.Input.x) * Mathf.Rad2Deg - 90f;
-                    state.Character2DDirectionIndicator.transform.localRotation = Quaternion.Euler(0f, 0f, angle);
-                }
-
-                // Action trigger（通过 SocialCharacter.TriggerAction）
-                if (state.HasPendingAction)
-                {
-                    socialChar.TriggerAction();
-                    state.HasPendingAction = false;
-                    players[kv.Key] = state;
-                }
-            }
-        }
-
-        private void OnGUI()
-        {
-            // M7.3: Canvas 模式已接管全部 UI，OnGUI 保留仅为编辑器调试回退
-#if UNITY_EDITOR
-            if (canvasHudEnabled)
-            {
-                return;
-            }
-#else
-            return;   // M7.3: 发布版永远不走 OnGUI
-#endif
-
-            GUI.depth = -100;
-            ApplyHudSkin();
-
-            bool actionHud = IsOnline && phase == OnlineMatchPhase.Action;
-
-            if (IsOnline && (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting))
-            {
-                DrawMeetingScreen();
-                return;
-            }
-
-            if (IsOnline && phase == OnlineMatchPhase.Result)
-            {
-                DrawResultScreen();
-                return;
-            }
-
-            if (actionHud)
-            {
-                DrawCompactActionHud();
-
-                if (intelBoardOpen)
-                {
-                    DrawActionIntelPanel();
-                }
-
-                if (tacticalMapOpen)
-                {
-                    DrawLargeMapPreview();
-                }
-
-                DrawActiveTaskPanel();
-
-                // 阵营私聊面板（行动阶段）
-                DrawActionChatPanel();
-                return;
-            }
-
-            bool expandedIntel = intelBoardOpen || !actionHud || phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting || phase == OnlineMatchPhase.Result;
-            float leftWidth = actionHud ? Mathf.Clamp(Screen.width * 0.25f, 285f, 360f) : Mathf.Clamp(Screen.width * 0.32f, 360f, 470f);
-            float rightWidth = expandedIntel ? Mathf.Clamp(Screen.width * 0.26f, 300f, 410f) : Mathf.Clamp(Screen.width * 0.2f, 245f, 310f);
-            float leftPanelHeight = actionHud ? Mathf.Clamp(Screen.height * 0.34f, 210f, 310f) : Mathf.Clamp(Screen.height - 36f, 470f, 780f);
-            float rightPanelHeight = expandedIntel ? Mathf.Clamp(Screen.height - 36f, 430f, 760f) : 238f;
-
-            GUILayout.BeginArea(new Rect(18f, 18f, leftWidth, leftPanelHeight), GUI.skin.box);
-            GUILayout.Label("港区潜线 Release Candidate");
-            GUILayout.Label(roomName + " | " + status);
-            GUILayout.Label("阶段: " + PhaseName(phase) + " | 局时: " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链: " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 危机: " + BuildHazardSummary());
-            GUILayout.Label("本机身份: " + RoleName(localRole) + " | 职责: " + LocalProfessionName());
-
-            if (!actionHud)
-            {
-                GUILayout.Label("Unity Services: " + BuildServiceStatus());
-            }
-
-            if (!IsOnline)
-            {
-                DrawModePillars();
-                GUILayout.Space(6f);
-                GUILayout.Label("玩家代号");
-                localPlayerName = LimitText(GUILayout.TextField(localPlayerName), 16, "港区玩家");
-                GUILayout.Label("Host IP / Client 连接地址");
-                joinAddress = GUILayout.TextField(joinAddress);
-                DrawRoomSettings();
-                DrawRelayJoinControls();
-
-                if (GUILayout.Button("创建 Host"))
-                {
-                    StartHost();
-                }
-
-                if (GUILayout.Button("单机试玩局"))
-                {
-                    StartLocalPreviewRoom();
-                    FillBotsAndStart();
-                }
-
-                if (GUILayout.Button("加入 Client"))
-                {
-                    StartClient(joinAddress);
-                }
-            }
-            else
-            {
-                DrawRoomHeader();
-                GUILayout.Label(LobbyReadinessSummary);
-                GUILayout.Label(LobbyRoadmap);
-                GUILayout.BeginHorizontal();
-
-                if (GUILayout.Button(localReady ? "取消 Ready" : "Ready"))
-                {
-                    localReady = !localReady;
-                    SendClientState(true);
-                }
-
-                bool previousEnabled = GUI.enabled;
-                GUI.enabled = IsHost && CanStartLobbyMatch();
-
-                if (GUILayout.Button("开始在线局"))
-                {
-                    StartOnlineMatch();
-                }
-
-                GUI.enabled = previousEnabled;
-                GUILayout.EndHorizontal();
-
-                if (IsHost && phase == OnlineMatchPhase.Lobby && GUILayout.Button("补 AI 并开始本地可玩局"))
-                {
-                    FillBotsAndStart();
-                }
-
-                if (phase == OnlineMatchPhase.Opening)
-                {
-                    DrawOpeningBriefing();
-
-                    if (IsHost && GUILayout.Button("跳过简报进入行动"))
-                    {
-                        phase = OnlineMatchPhase.Action;
-                        phaseTimer = 0f;
-                        fullMapPreview = false;
-                        tacticalMapOpen = false;
-                        status = "行动开始：九龙港城进入封控搜证。";
-                        AddCaseLog(status);
-                        BroadcastSnapshot();
-                    }
-                }
-
-                if (phase == OnlineMatchPhase.Result)
-                {
-                    fullMapPreview = true;
-                    GUILayout.Label(resultSummary);
-                    bool resultPreviousEnabled = GUI.enabled;
-                    GUILayout.BeginHorizontal();
-                    GUI.enabled = IsHost;
-
-                    if (GUILayout.Button("重开同房间"))
-                    {
-                        RestartMatch();
-                    }
-
-                    GUI.enabled = resultPreviousEnabled;
-
-                    if (GUILayout.Button("返回房间"))
-                    {
-                        ReturnToLobby();
-                    }
-
-                    GUILayout.EndHorizontal();
-                }
-
-                GUILayout.Label("操作: WASD 移动 | E 查证/破坏 | Q 击倒 | R 报案/紧急会议 | F 技能 | M/Tab 大地图 | I 案情板");
-
-                if (!actionHud || intelBoardOpen)
-                {
-                GUILayout.Label("目标: 警方完成证据链或清除黑帮；黑帮破坏、击倒并争取人数压制；卧底加速取证但要隐藏路线。");
-                }
-
-                GUILayout.Space(4f);
-                GUILayout.Label(BuildLocalActionHint());
-
-                if (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
-                {
-                    DrawVotePanel();
-                }
-
-                if (GUILayout.Button("离开房间"))
-                {
-                    Shutdown();
-                }
-            }
-
-            if (!actionHud || intelBoardOpen)
-            {
-                GUILayout.Space(8f);
-                rosterScroll = GUILayout.BeginScrollView(rosterScroll, GUILayout.Height(Mathf.Max(120f, leftPanelHeight * 0.34f)));
-                GUILayout.Label(BuildPlayerList());
-                GUILayout.EndScrollView();
-            }
-
-            GUILayout.EndArea();
-
-            GUILayout.BeginArea(new Rect(Screen.width - rightWidth - 18f, 18f, rightWidth, rightPanelHeight), GUI.skin.box);
-            GUILayout.Label(expandedIntel ? "案情板" : "小地图");
-            DrawTacticalMapMini();
-
-            if (expandedIntel)
-            {
-                intelScroll = GUILayout.BeginScrollView(intelScroll);
-                GUILayout.Space(6f);
-                GUILayout.Label(BuildFocusedIntel());
-                GUILayout.Space(8f);
-                GUILayout.Label(BuildTaskList());
-                GUILayout.Space(8f);
-                GUILayout.Label(BuildCaseLog());
-
-                if (!IsOnline || phase == OnlineMatchPhase.Lobby)
-                {
-                    GUILayout.Space(8f);
-                    GUILayout.Label(BuildReleaseReadiness());
-                }
-
-                GUILayout.EndScrollView();
-            }
-            else
-            {
-                GUILayout.Space(6f);
-                GUILayout.Label(BuildFocusedIntel());
-            }
-
-            GUILayout.EndArea();
-
-            if (tacticalMapOpen)
-            {
-                DrawLargeMapPreview();
-            }
-
-            DrawActiveTaskPanel();
-        }
-
-        private void OnDrawGizmos()
-        {
-            foreach (OnlineTaskState task in tasks)
-            {
-                Gizmos.color = task.Completed ? Color.green : task.Sabotaged ? Color.red : Color.cyan;
-                Gizmos.DrawCube(task.Position, new Vector3(0.35f, 0.35f, 0.05f));
-            }
-
-            foreach (OnlineBodyState body in bodies)
-            {
-                if (body.Reported)
-                {
-                    continue;
-                }
-
-                Gizmos.color = Color.red;
-                Gizmos.DrawCube(body.Position, new Vector3(0.5f, 0.28f, 0.08f));
-            }
-
-            ulong localClientId = LocalClientId();
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                Gizmos.color = state.ClientId == localClientId ? Color.yellow : state.Alive ? Color.white : Color.gray;
-                Gizmos.DrawSphere(state.Position, state.Alive ? 0.22f : 0.14f);
-            }
-        }
-
-        private void EnsureNetworkStack()
-        {
-            networkManager = FindAnyObjectByType<NetworkManager>();
-
-            if (networkManager == null)
-            {
-                GameObject networkObject = new GameObject("NetworkManager");
-                networkManager = networkObject.AddComponent<NetworkManager>();
-                transport = networkObject.AddComponent<UnityTransport>();
-                networkManager.NetworkConfig = new NetworkConfig();
-                networkManager.NetworkConfig.NetworkTransport = transport;
-
-                if (Application.isPlaying)
-                {
-                    DontDestroyOnLoad(networkObject);
-                }
-                else
-                {
-                    networkObject.transform.SetParent(transform, false);
-                }
-            }
-            else
-            {
-                transport = networkManager.GetComponent<UnityTransport>();
-
-                if (transport == null)
-                {
-                    transport = networkManager.gameObject.AddComponent<UnityTransport>();
-                }
-
-                if (networkManager.NetworkConfig == null)
-                {
-                    networkManager.NetworkConfig = new NetworkConfig();
-                }
-
-                networkManager.NetworkConfig.NetworkTransport = transport;
-            }
-
-            // 本作世界完全由 PrototypeBootstrap 程序化生成，对局不依赖 NGO 的场景同步。
-            // 若保留默认开启的场景管理，远端 Client 接入时 NGO 会尝试按场景哈希同步当前
-            // 活动场景（Prototype），而该哈希不在 Client 的 build scene 表里，导致抛出
-            // "Scene Hash ... does not exist in the HashToBuildIndex table"。关闭它既消除该
-            // 异常，也符合"程序化生成、无需场景同步"的实际架构。
-            if (networkManager.NetworkConfig != null)
-            {
-                networkManager.NetworkConfig.EnableSceneManagement = false;
-            }
-
-            networkManager.OnClientConnectedCallback += HandleClientConnected;
-            networkManager.OnClientDisconnectCallback += HandleClientDisconnected;
-
-            // A1: 注册监控摄像头 NetworkPrefab，避免运行时 AddComponent<NetworkObject>.Spawn()
-            // 导致 globalObjectIdHash=0，远端无法复制。
-            RegisterSurveillanceCameraPrefab();
-        }
 
         /// <summary>
         /// A1 修复：创建并注册监控摄像头 NetworkPrefab 模板。
         /// 必须在 NetworkManager.StartHost() 前调用。
         /// </summary>
-        private void RegisterSurveillanceCameraPrefab()
-        {
-            if (surveillanceCameraTemplate != null) return;
-            if (TryReuseRegisteredSurveillanceCameraPrefab(out surveillanceCameraTemplate)) return;
 
-            surveillanceCameraTemplate = new GameObject("SurveillanceCameraTemplate");
-            surveillanceCameraTemplate.AddComponent<NetworkObject>();
-            var templateCamera = surveillanceCameraTemplate.AddComponent<Online.Surveillance.OnlineSecurityCamera>();
-            templateCamera.ZoneCenter = Vector2.zero;
-            templateCamera.ZoneSize = new Vector2(6f, 4f);
-            templateCamera.CameraLabel = "Template";
-            surveillanceCameraTemplate.SetActive(false);
-            DontDestroyOnLoad(surveillanceCameraTemplate);
 
-            networkManager.NetworkConfig.Prefabs.Add(
-                new Unity.Netcode.NetworkPrefab
-                {
-                    Override = NetworkPrefabOverride.Hash,
-                    SourceHashToOverride = SurveillanceCameraPrefabHash,
-                    OverridingTargetPrefab = surveillanceCameraTemplate
-                });
-        }
 
-        private bool TryReuseRegisteredSurveillanceCameraPrefab(out GameObject template)
-        {
-            template = null;
-
-            if (networkManager?.NetworkConfig?.Prefabs == null)
-            {
-                return false;
-            }
-
-            foreach (NetworkPrefab prefab in networkManager.NetworkConfig.Prefabs.Prefabs)
-            {
-                if (prefab != null
-                    && prefab.Override == NetworkPrefabOverride.Hash
-                    && prefab.SourceHashToOverride == SurveillanceCameraPrefabHash)
-                {
-                    template = prefab.OverridingTargetPrefab != null ? prefab.OverridingTargetPrefab : prefab.Prefab;
-                    return template != null;
-                }
-            }
-
-            if (networkManager.NetworkConfig.Prefabs.NetworkPrefabOverrideLinks.TryGetValue(
-                    SurveillanceCameraPrefabHash,
-                    out NetworkPrefab registeredPrefab))
-            {
-                template = registeredPrefab.OverridingTargetPrefab != null
-                    ? registeredPrefab.OverridingTargetPrefab
-                    : registeredPrefab.Prefab;
-                return template != null;
-            }
-
-            return false;
-        }
-
-        private void EnsureServiceBootstrap()
-        {
-            if (serviceBootstrap != null)
-            {
-                return;
-            }
-
-            serviceBootstrap = GetComponent<UnityServiceBootstrap>();
-
-            if (serviceBootstrap == null)
-            {
-                serviceBootstrap = gameObject.AddComponent<UnityServiceBootstrap>();
-            }
-        }
-
-        private void EnsureCanvasHud()
-        {
-            if (onlineHud != null)
-            {
-                return;
-            }
-
-            OnlineMatchHud existingHud = GetComponentInChildren<OnlineMatchHud>(true);
-
-            if (existingHud != null)
-            {
-                onlineHud = existingHud;
-                onlineHud.Bind(this);
-                return;
-            }
-
-            GameObject hudObject = new GameObject("Online Match HUD");
-            hudObject.transform.SetParent(transform, false);
-            onlineHud = hudObject.AddComponent<OnlineMatchHud>();
-            onlineHud.Bind(this);
-        }
-
-        /// <summary>
-        /// M1 收尾：语音路由已搁置。Vivox 已移除，方案 B（联机文本聊天）替代。
-        /// TickVoiceRouting 保留为空调用点，序列化字段（proximityVoiceEnabled 等）
-        /// 保留以维持 GameStateSnapshot 兼容性。
-        /// 复用时恢复此方法体即可。
-        /// </summary>
-        private void TickVoiceRouting()
-        {
-            // Vivox removed — per-voice-channel routing disabled.
-            // Re-enable when a replacement voice provider (Dissonance / Photon Voice / platform-native) is integrated.
-        }
-
-        private async Task JoinVoiceChannelAsync(string channelName, bool positional)
-        {
-            voiceJoinInProgress = true;
-            nextVoiceRetryTime = Time.time + VoiceRetrySeconds;
-
-            try
-            {
-                bool joined = await serviceBootstrap.JoinVoiceChannelAsync(channelName, localPlayerName, positional);
-
-                if (joined && pendingVoiceChannel == channelName)
-                {
-                    AddCaseLog(positional ? "行动近距离语音已接入。" : "全员语音频道已接入。");
-                }
-            }
-            finally
-            {
-                voiceJoinInProgress = false;
-            }
-        }
-
-        private void RequestLeaveVoiceChannels()
-        {
-            if (serviceBootstrap == null || voiceLeaveInProgress || string.IsNullOrWhiteSpace(serviceBootstrap.ActiveVoiceChannel))
-            {
-                return;
-            }
-
-            _ = LeaveVoiceChannelsAsync();
-        }
-
-        private async Task LeaveVoiceChannelsAsync()
-        {
-            voiceLeaveInProgress = true;
-
-            try
-            {
-                await serviceBootstrap.LeaveVoiceChannelsAsync();
-            }
-            finally
-            {
-                voiceLeaveInProgress = false;
-            }
-        }
-
-        private bool ShouldUsePositionalVoice()
-        {
-            return phase == OnlineMatchPhase.Action && proximityVoiceEnabled && IsLocalAlive();
-        }
-
-        private string BuildDesiredVoiceChannel()
-        {
-            string roomKey = StableRoomKey(roomName);
-
-            switch (phase)
-            {
-                case OnlineMatchPhase.Lobby:
-                    return "gangland-" + roomKey + "-lobby";
-                case OnlineMatchPhase.Opening:
-                    return "gangland-" + roomKey + "-briefing";
-                case OnlineMatchPhase.Action:
-                    return IsLocalAlive()
-                        ? "gangland-" + roomKey + "-action"
-                        : "gangland-" + roomKey + "-ghost";
-                case OnlineMatchPhase.Meeting:
-                case OnlineMatchPhase.Voting:
-                    return "gangland-" + roomKey + "-meeting";
-                case OnlineMatchPhase.Result:
-                    return "gangland-" + roomKey + "-result";
-                default:
-                    return string.Empty;
-            }
-        }
-
-        private Vector3 LocalVoicePosition()
-        {
-            if (players.TryGetValue(LocalClientId(), out OnlinePlayerState state))
-            {
-                return state.Position;
-            }
-
-            return localPosition;
-        }
-
-        private static string StableRoomKey(string value)
-        {
-            unchecked
-            {
-                uint hash = 2166136261;
-                string source = string.IsNullOrWhiteSpace(value) ? "gangland-room" : value;
-
-                for (int i = 0; i < source.Length; i++)
-                {
-                    hash ^= source[i];
-                    hash *= 16777619;
-                }
-
-                return hash.ToString("x8");
-            }
-        }
 
         private void OnDestroy()
         {
             if (networkManager == null)
             {
-                RequestLeaveVoiceChannels();
                 return;
             }
 
-            RequestLeaveVoiceChannels();
             networkManager.OnClientConnectedCallback -= HandleClientConnected;
             networkManager.OnClientDisconnectCallback -= HandleClientDisconnected;
             UnregisterMessages();
         }
 
-        private void StartHost()
-        {
-            try
-            {
-                relayJoinCode = string.Empty;
-                relayStatus = "使用直连 Host。";
-                ConfigureTransport("0.0.0.0");
-                RegisterMessages();
 
-                if (networkManager.StartHost())
-                {
-                    localPreviewMode = false;
-                    status = "Host 已创建。等待玩家 Ready。";
-                    AddCaseLog(status);
-                    UpsertLocalPlayer();
-                    SendClientProfile();
-                    EnsureSurveillanceCameraNetworkObjects();
-                    PlayCue("start");
-                    BroadcastSnapshot();
-                }
-                else
-                {
-                    StartLocalPreviewRoom();
-                    status = "Host 创建失败，已切换本地试玩模式。";
-                    AddCaseLog(status);
-                }
-            }
-            catch (Exception exception)
-            {
-                StartLocalPreviewRoom();
-                status = "Host 启动异常，已切换本地试玩模式：" + exception.GetType().Name;
-                AddCaseLog(status);
-            }
-        }
 
-        private void StartClient(string address)
-        {
-            string safeAddress = string.IsNullOrWhiteSpace(address) ? "127.0.0.1" : address.Trim();
-            relayJoinCode = string.Empty;
-            relayStatus = "使用直连 Client。";
-            ConfigureTransport(safeAddress);
-            RegisterMessages();
 
-            if (networkManager.StartClient())
-            {
-                status = "Client 正在连接 " + safeAddress + "。";
-                AddCaseLog(status);
-            }
-            else
-            {
-                status = "Client 加入失败。";
-            }
-        }
 
-        private async void StartRelayHost()
-        {
-            if (relayOperationInProgress)
-            {
-                return;
-            }
 
-            relayOperationInProgress = true;
-            relayStatus = "Relay 正在创建房间码。";
-            status = relayStatus;
-            OnRelayStatusChanged?.Invoke(relayStatus);
 
-            try
-            {
-                EnsureServiceBootstrap();
-                EnsureNetworkStack();
-                await serviceBootstrap.InitializeAsync();
-
-                if (!CanUseRelay(out string reason))
-                {
-                    relayStatus = reason;
-                    status = reason;
-                    AddCaseLog(reason);
-                    OnRelayStatusChanged?.Invoke(reason);
-                    return;
-                }
-
-                int maxConnections = Mathf.Clamp(roomMaxPlayers - 1, 1, ruleSet.MaximumRoomPlayers - 1);
-                Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxConnections);
-                relayJoinCode = (await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId) ?? string.Empty).Trim().ToUpperInvariant();
-                transport.UseWebSockets = false;
-                transport.SetRelayServerData(allocation.ToRelayServerData("dtls"));
-                RegisterMessages();
-
-                if (networkManager.StartHost())
-                {
-                    localPreviewMode = false;
-                    relayHostClientId = networkManager.LocalClientId;
-                    relayStatus = "Relay 房间码: " + relayJoinCode;
-                    status = "Relay Host 已创建。分享房间码 " + relayJoinCode + "。";
-                    AddCaseLog(status);
-                    UpsertLocalPlayer();
-                    SendClientProfile();
-                    EnsureSurveillanceCameraNetworkObjects();
-                    PlayCue("start");
-                    BroadcastSnapshot();
-
-                    OnRelayStatusChanged?.Invoke(relayStatus);
-                    OnRelayRoomCodeReady?.Invoke(relayJoinCode);
-                    OnRelayConnectionChanged?.Invoke(true);
-                }
-                else
-                {
-                    relayStatus = "Relay Host 启动失败。";
-                    status = relayStatus;
-                    AddCaseLog(status);
-                    OnRelayStatusChanged?.Invoke(relayStatus);
-                }
-            }
-            catch (Exception exception)
-            {
-                relayJoinCode = string.Empty;
-                relayStatus = "Relay 创建失败：" + exception.Message;
-                status = relayStatus;
-                AddCaseLog(status);
-                OnRelayStatusChanged?.Invoke(relayStatus);
-            }
-            finally
-            {
-                relayOperationInProgress = false;
-            }
-        }
-
-        private async void StartRelayClient()
-        {
-            if (relayOperationInProgress)
-            {
-                return;
-            }
-
-            string safeJoinCode = (relayJoinInput ?? string.Empty).Trim().ToUpperInvariant();
-            if (string.IsNullOrWhiteSpace(safeJoinCode))
-            {
-                relayStatus = "请输入 Relay 房间码。";
-                status = relayStatus;
-                OnRelayStatusChanged?.Invoke(relayStatus);
-                return;
-            }
-
-            relayOperationInProgress = true;
-            relayStatus = "Relay 正在加入 " + safeJoinCode + "。";
-            status = relayStatus;
-            OnRelayStatusChanged?.Invoke(relayStatus);
-
-            try
-            {
-                EnsureServiceBootstrap();
-                EnsureNetworkStack();
-                await serviceBootstrap.InitializeAsync();
-
-                if (!CanUseRelay(out string reason))
-                {
-                    relayStatus = reason;
-                    status = reason;
-                    AddCaseLog(reason);
-                    OnRelayStatusChanged?.Invoke(reason);
-                    return;
-                }
-
-                JoinAllocation allocation = await RelayService.Instance.JoinAllocationAsync(safeJoinCode);
-                relayJoinCode = safeJoinCode;
-                transport.UseWebSockets = false;
-                transport.SetRelayServerData(allocation.ToRelayServerData("dtls"));
-                RegisterMessages();
-
-                if (networkManager.StartClient())
-                {
-                    relayStatus = "Relay 已发送加入请求: " + safeJoinCode;
-                    status = relayStatus;
-                    AddCaseLog(status);
-                    OnRelayStatusChanged?.Invoke(relayStatus);
-                    OnRelayConnectionChanged?.Invoke(true);
-                }
-                else
-                {
-                    relayStatus = "Relay Client 启动失败。";
-                    status = relayStatus;
-                    OnRelayStatusChanged?.Invoke(relayStatus);
-                }
-            }
-            catch (Exception exception)
-            {
-                relayStatus = "Relay 加入失败：" + exception.Message;
-                status = relayStatus;
-                AddCaseLog(status);
-                OnRelayStatusChanged?.Invoke(relayStatus);
-            }
-            finally
-            {
-                relayOperationInProgress = false;
-            }
-        }
-
-        private bool CanUseRelay(out string reason)
-        {
-            if (serviceBootstrap == null)
-            {
-                reason = "Unity Services 未挂载，Relay 暂不可用。";
-                return false;
-            }
-
-            if (!serviceBootstrap.CloudProjectBound)
-            {
-                reason = "Unity Cloud Project 未绑定，Relay 暂不可用。";
-                return false;
-            }
-
-            if (!serviceBootstrap.ServicesReady || !serviceBootstrap.AuthenticationReady || !serviceBootstrap.RelayReady)
-            {
-                reason = "Relay 未就绪：" + serviceBootstrap.ServiceReadinessSummary;
-                return false;
-            }
-
-            reason = string.Empty;
-            return true;
-        }
-
-        private void StartLocalPreviewRoom()
-        {
-            localPreviewMode = true;
-            localReady = true;
-            localPlayerName = LimitText(localPlayerName, 16, "港区玩家");
-
-            if (!players.ContainsKey(LocalPreviewClientId))
-            {
-                players[LocalPreviewClientId] = new OnlinePlayerState(LocalPreviewClientId, localPlayerName, FindNearestOpenPosition(localPosition, Vector3.zero), true, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
-            }
-            else
-            {
-                OnlinePlayerState state = players[LocalPreviewClientId];
-                state.DisplayName = localPlayerName;
-                state.Ready = true;
-                state.IsBot = false;
-                players[LocalPreviewClientId] = state;
-            }
-
-            killCooldowns[LocalPreviewClientId] = 0f;
-            abilityCooldowns[LocalPreviewClientId] = 0f;
-            status = "本地试玩房间已创建。";
-            AddCaseLog(status);
-            PlayCue("start");
-        }
-
-        private void Shutdown()
-        {
-            UnregisterMessages();
-
-            if (networkManager != null && networkManager.IsListening)
-            {
-                try
-                {
-                    networkManager.Shutdown();
-                }
-                catch (Exception exception)
-                {
-                    Debug.LogWarning("Gangland network shutdown skipped: " + exception.GetType().Name);
-                }
-            }
-
-            players.Clear();
-            bodies.Clear();
-            caseLog.Clear();
-            votes.Clear();
-            privateRoles.Clear();
-            killCooldowns.Clear();
-            abilityCooldowns.Clear();
-            botThinkTimers.Clear();
-            botVoteTimers.Clear();
-            botTargets.Clear();
-            localRole = OnlineRole.Unassigned;
-            phase = OnlineMatchPhase.Lobby;
-            localPreviewMode = false;
-            localReady = false;
-            matchStarted = false;
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-            submittingActiveTask = false;
-            taskService.EvidenceScore = 0;
-            lastMeetingReason = "尚未召开会议。";
-            lastVoteOutcome = "尚未投票。";
-            lastEvidenceEvent = "尚未取得关键证据。";
-            lastSabotageEvent = "尚未发生破坏。";
-            evidenceMilestoneIndex = 0;
-            phaseTimer = 0f;
-            taskService.ResetAllSabotageTimers();
-            emergencyCooldownTimer = 0f;
-            aiActionGraceTimer = 0f;
-            _cameraRig.SetSubject(LocalPreviewClientId);
-            desiredVoiceChannel = string.Empty;
-            pendingVoiceChannel = string.Empty;
-            voiceJoinInProgress = false;
-            RequestLeaveVoiceChannels();
-            resultSummary = "尚未结算。";
-            status = "已离开房间。";
-            relayJoinCode = string.Empty;
-            relayStatus = "Relay 房间码未创建。";
-            chatSystem?.Clear();
-        }
 
         public void SetLocalPlayerName(string value)
         {
@@ -2001,11 +998,6 @@ namespace GanglandUndercover.Online
         public void SetProximityVoiceEnabled(bool value)
         {
             proximityVoiceEnabled = value;
-
-            if (IsOnline && IsHost)
-            {
-                BroadcastSnapshot();
-            }
         }
 
         public void SetLocalReady(bool ready)
@@ -2016,6 +1008,11 @@ namespace GanglandUndercover.Online
             {
                 SendClientState(true);
             }
+        }
+
+        public void SetReady(bool ready)
+        {
+            SetLocalReady(ready);
         }
 
         public void ToggleLocalReady()
@@ -2091,6 +1088,13 @@ namespace GanglandUndercover.Online
             Shutdown();
         }
 
+        public void LeaveRoom()
+        {
+            Shutdown();
+            OnRelayConnectionChanged?.Invoke(false);
+            OnRelayStatusChanged?.Invoke(relayStatus);
+        }
+
         public void RequestAction(OnlineActionType actionType)
         {
             SendClientAction(actionType);
@@ -2141,156 +1145,12 @@ namespace GanglandUndercover.Online
             SendClientAction(OnlineActionType.SkipVote);
         }
 
-        private void ConfigureTransport(string address)
-        {
-            transport.UseWebSockets = false;
-            transport.UseEncryption = false;
-            transport.SetConnectionData(address, DefaultPort);
-        }
 
-        private void RegisterMessages()
-        {
-            if (networkManager == null || networkManager.CustomMessagingManager == null)
-            {
-                return;
-            }
 
-            UnregisterMessages();
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ClientStateMessage, ReceiveClientState);
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ClientActionMessage, ReceiveClientAction);
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ClientProfileMessage, ReceiveClientProfile);
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ServerSnapshotMessage, ReceiveServerSnapshot);
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(RoleAssignMessage, ReceiveRoleAssign);
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ChatSendMessage, ReceiveChatSend);
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ChatBroadcastMessage, ReceiveChatBroadcast);
-            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(MapSelectMessage, ReceiveMapSelect); // D5
 
-            // 主机迁移消息
-            if (migrationManager != null)
-            {
-                migrationManager.RegisterMessageHandlers(networkManager);
-            }
-            else
-            {
-                EnsureMigrationManager();
-                migrationManager?.RegisterMessageHandlers(networkManager);
-            }
-        }
 
-        private void UnregisterMessages()
-        {
-            if (networkManager == null || networkManager.CustomMessagingManager == null)
-            {
-                return;
-            }
 
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ClientStateMessage);
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ClientActionMessage);
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ClientProfileMessage);
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ServerSnapshotMessage);
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(RoleAssignMessage);
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ChatSendMessage);
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ChatBroadcastMessage);
-            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(MapSelectMessage); // D5
 
-            // 主机迁移消息
-            migrationManager?.UnregisterMessageHandlers(networkManager);
-        }
-
-        private void HandleClientConnected(ulong clientId)
-        {
-            if (networkManager.IsServer)
-            {
-                Vector3 spawn = mapService.SpawnPosition(players.Count);
-                players[clientId] = new OnlinePlayerState(clientId, "玩家" + clientId, spawn, false, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
-                killCooldowns[clientId] = 0f;
-                abilityCooldowns[clientId] = 0f;
-                BroadcastSnapshot();
-            }
-
-            if (clientId == LocalClientId())
-            {
-                UpsertLocalPlayer();
-                SendClientProfile();
-                status = networkManager.IsHost ? "Host 在线。" : "Client 已连接。";
-                AddCaseLog(status);
-            }
-        }
-
-        private void HandleClientDisconnected(ulong clientId)
-        {
-            // 主机迁移管理：通知迁移管理器检测主机断连
-            migrationManager?.OnClientDisconnected(clientId);
-
-            ReleaseTasksHeldByClient(clientId);
-            RemoveDisconnectedPlayerVotes(clientId);
-
-            players.Remove(clientId);
-            privateRoles.Remove(clientId);
-            killCooldowns.Remove(clientId);
-            abilityCooldowns.Remove(clientId);
-            botThinkTimers.Remove(clientId);
-            botVoteTimers.Remove(clientId);
-            botTargets.Remove(clientId);
-
-            if (networkManager != null && networkManager.IsServer)
-            {
-                AddCaseLog("玩家" + clientId + " 已离开房间。");
-
-                int aliveCount = CountAlivePlayers();
-                if ((phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
-                    && aliveCount > 0
-                    && votes.Count >= aliveCount)
-                {
-                    ResolveVotes();
-                    return;
-                }
-
-                EvaluateWinConditions();
-                BroadcastSnapshot();
-            }
-        }
-
-        private void ReleaseTasksHeldByClient(ulong clientId)
-        {
-            if (activeTaskUsers == null || activeTaskUsers.Count == 0)
-            {
-                return;
-            }
-
-            List<int> taskIdsToRelease = new List<int>();
-            foreach (KeyValuePair<int, ulong> pair in activeTaskUsers)
-            {
-                if (pair.Value == clientId)
-                {
-                    taskIdsToRelease.Add(pair.Key);
-                }
-            }
-
-            for (int i = 0; i < taskIdsToRelease.Count; i++)
-            {
-                activeTaskUsers.Remove(taskIdsToRelease[i]);
-            }
-        }
-
-        private void RemoveDisconnectedPlayerVotes(ulong clientId)
-        {
-            votes.Remove(clientId);
-
-            List<ulong> votersToClear = new List<ulong>();
-            foreach (KeyValuePair<ulong, ulong> vote in votes)
-            {
-                if (vote.Value == clientId)
-                {
-                    votersToClear.Add(vote.Key);
-                }
-            }
-
-            for (int i = 0; i < votersToClear.Count; i++)
-            {
-                votes.Remove(votersToClear[i]);
-            }
-        }
 
         private void ReadLocalInput()
         {
@@ -2361,217 +1221,14 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void SendClientAction(OnlineActionType actionType, ulong targetClientId = SkipVoteTarget)
-        {
-            if (localPreviewMode)
-            {
-                ApplyClientAction(LocalPreviewClientId, actionType, targetClientId);
-                return;
-            }
 
-            if (networkManager == null || networkManager.CustomMessagingManager == null || !networkManager.IsClient)
-            {
-                return;
-            }
 
-            if (networkManager.IsHost)
-            {
-                ApplyClientAction(networkManager.LocalClientId, actionType, targetClientId);
-                return;
-            }
 
-            using FastBufferWriter writer = new FastBufferWriter(32, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe((int)actionType);
-            writer.WriteValueSafe(targetClientId);
-            networkManager.CustomMessagingManager.SendNamedMessage(ClientActionMessage, NetworkManager.ServerClientId, writer);
-        }
 
-        private void SendClientState(bool force = false)
-        {
-            if (localPreviewMode)
-            {
-                ApplyClientState(LocalPreviewClientId, localPosition, localInput, localReady);
-                return;
-            }
 
-            if (networkManager == null || networkManager.CustomMessagingManager == null || !networkManager.IsClient)
-            {
-                return;
-            }
 
-            clientSnapshotTimer -= Time.deltaTime;
 
-            if (!force && clientSnapshotTimer > 0f)
-            {
-                return;
-            }
 
-            clientSnapshotTimer = SnapshotIntervalSeconds;
-
-            if (networkManager.IsHost)
-            {
-                ApplyClientState(networkManager.LocalClientId, localPosition, localInput, localReady);
-                return;
-            }
-
-            using FastBufferWriter writer = new FastBufferWriter(128, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe(localPosition);
-            writer.WriteValueSafe(localInput);
-            writer.WriteValueSafe(localReady);
-            networkManager.CustomMessagingManager.SendNamedMessage(ClientStateMessage, NetworkManager.ServerClientId, writer);
-        }
-
-        private void SendClientProfile()
-        {
-            if (localPreviewMode)
-            {
-                ApplyClientProfile(LocalPreviewClientId, LimitText(localPlayerName, 16, "港区玩家"));
-                return;
-            }
-
-            if (networkManager == null || networkManager.CustomMessagingManager == null || !networkManager.IsClient)
-            {
-                return;
-            }
-
-            string safeName = LimitText(localPlayerName, 16, "港区玩家");
-            localPlayerName = safeName;
-
-            if (networkManager.IsHost)
-            {
-                ApplyClientProfile(networkManager.LocalClientId, safeName);
-                return;
-            }
-
-            using FastBufferWriter writer = new FastBufferWriter(128, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe(safeName);
-            networkManager.CustomMessagingManager.SendNamedMessage(ClientProfileMessage, NetworkManager.ServerClientId, writer);
-        }
-
-        private void ReceiveClientState(ulong senderClientId, FastBufferReader reader)
-        {
-            if (networkManager == null || !networkManager.IsServer)
-            {
-                return;
-            }
-
-            reader.ReadValueSafe(out Vector3 position);
-            reader.ReadValueSafe(out Vector2 input);
-            reader.ReadValueSafe(out bool ready);
-            ApplyClientState(senderClientId, position, input, ready);
-        }
-
-        private void ReceiveClientProfile(ulong senderClientId, FastBufferReader reader)
-        {
-            if (networkManager == null || !networkManager.IsServer)
-            {
-                return;
-            }
-
-            reader.ReadValueSafe(out string displayName);
-            ApplyClientProfile(senderClientId, displayName);
-        }
-
-        private void ReceiveClientAction(ulong senderClientId, FastBufferReader reader)
-        {
-            if (networkManager == null || !networkManager.IsServer)
-            {
-                return;
-            }
-
-            reader.ReadValueSafe(out int actionValue);
-            reader.ReadValueSafe(out ulong targetClientId);
-            ApplyClientAction(senderClientId, (OnlineActionType)actionValue, targetClientId);
-        }
-
-        private void ApplyClientAction(ulong senderClientId, OnlineActionType actionType, ulong targetClientId)
-        {
-            if ((!localPreviewMode && (networkManager == null || !networkManager.IsServer)) || !players.TryGetValue(senderClientId, out OnlinePlayerState player))
-            {
-                return;
-            }
-
-            if (actionType == OnlineActionType.Vote || actionType == OnlineActionType.SkipVote)
-            {
-                ApplyVote(senderClientId, actionType == OnlineActionType.SkipVote ? SkipVoteTarget : targetClientId);
-                return;
-            }
-
-            if (phase == OnlineMatchPhase.Lobby || phase == OnlineMatchPhase.Opening || phase == OnlineMatchPhase.Result || !player.Alive)
-            {
-                return;
-            }
-
-            if (actionType == OnlineActionType.Report)
-            {
-                TryReportOrEmergency(senderClientId, player);
-                return;
-            }
-
-            if (phase != OnlineMatchPhase.Action)
-            {
-                return;
-            }
-
-            if (actionType == OnlineActionType.Kill)
-            {
-                TryKill(senderClientId, player);
-                return;
-            }
-
-            if (actionType == OnlineActionType.Interact)
-            {
-                TryInteractWithTask(senderClientId, player);
-                return;
-            }
-
-            if (actionType == OnlineActionType.Ability)
-            {
-                TryUseProfessionAbility(senderClientId, player);
-                return;
-            }
-
-            if (actionType == OnlineActionType.Vent)
-            {
-                TryUseUnderworldPassage(senderClientId, player);
-            }
-        }
-
-        private void ApplyClientState(ulong senderClientId, Vector3 position, Vector2 input, bool ready)
-        {
-            OnlinePlayerState state = players.TryGetValue(senderClientId, out OnlinePlayerState existing)
-                ? existing
-                : new OnlinePlayerState(senderClientId, "玩家" + senderClientId, position, ready, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
-
-            if (!matchStarted || phase == OnlineMatchPhase.Lobby)
-            {
-                state.Position = mapService.ClampToOnlineMap(position);
-            }
-
-            state.Input = state.Alive && phase == OnlineMatchPhase.Action ? input : Vector2.zero;
-            state.Ready = ready;
-            players[senderClientId] = state;
-        }
-
-        private void ApplyClientProfile(ulong senderClientId, string displayName)
-        {
-            string safeName = LimitText(displayName, 16, "港区玩家");
-
-            if (players.TryGetValue(senderClientId, out OnlinePlayerState state))
-            {
-                state.DisplayName = safeName;
-                state.IsBot = false;
-                players[senderClientId] = state;
-            }
-            else
-            {
-                players[senderClientId] = new OnlinePlayerState(senderClientId, safeName, mapService.SpawnPosition(players.Count), false, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
-            }
-
-            status = safeName + " 已进入房间。";
-            AddCaseLog(status);
-            BroadcastSnapshot();
-        }
 
         private void TickHostSimulation()
         {
@@ -2583,10 +1240,8 @@ namespace GanglandUndercover.Online
                 emergencyCooldownTimer = Mathf.Max(0f, emergencyCooldownTimer - deltaTime);
             }
 
-            if (reportCooldownTimer > 0f)
-            {
-                reportCooldownTimer = Mathf.Max(0f, reportCooldownTimer - deltaTime);
-            }
+            if (killSystem != null)
+                killSystem.TickReportCooldown(deltaTime);
 
             if (aiActionGraceTimer > 0f)
             {
@@ -2690,319 +1345,12 @@ namespace GanglandUndercover.Online
             }
         }
 
-        internal void BroadcastSnapshot()
-        {
-            if (localPreviewMode)
-            {
-                return;
-            }
 
-            if (networkManager == null || networkManager.CustomMessagingManager == null || !networkManager.IsServer)
-            {
-                return;
-            }
-
-            if (!networkManager.IsListening && !networkManager.IsClient && !networkManager.IsServer)
-            {
-                return;
-            }
-
-            using FastBufferWriter writer = new FastBufferWriter(8192, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe(matchStarted);
-            writer.WriteValueSafe((int)phase);
-            writer.WriteValueSafe(taskService.EvidenceScore);
-            writer.WriteValueSafe(taskService.EvidenceTarget);
-            writer.WriteValueSafe(emergencyMeetingsLeft);
-            writer.WriteValueSafe(roomMinPlayers);
-            writer.WriteValueSafe(roomMaxPlayers);
-            writer.WriteValueSafe(roomAutoFillAi);
-            writer.WriteValueSafe(revealRoleOnEject);
-            writer.WriteValueSafe(proximityVoiceEnabled);
-            writer.WriteValueSafe(roomName);
-            writer.WriteValueSafe(resultSummary);
-            writer.WriteValueSafe(lastMeetingReason);
-            writer.WriteValueSafe(lastVoteOutcome);
-            writer.WriteValueSafe(lastEvidenceEvent);
-            writer.WriteValueSafe(lastSabotageEvent);
-            writer.WriteValueSafe(evidenceMilestoneIndex);
-            writer.WriteValueSafe(phaseTimer);
-            writer.WriteValueSafe(taskService.BlackoutTimer);
-            writer.WriteValueSafe(taskService.LockdownTimer);
-            writer.WriteValueSafe(taskService.CommunicationJamTimer);
-            writer.WriteValueSafe(taskService.EvidenceLeakTimer);
-            writer.WriteValueSafe(taskService.PatrolAlertTimer);
-            writer.WriteValueSafe(taskService.EvidenceLeakAccumulator);
-            writer.WriteValueSafe(emergencyCooldownTimer);
-            writer.WriteValueSafe(reportCooldownTimer);
-            writer.WriteValueSafe(aiActionGraceTimer);
-            writer.WriteValueSafe(matchElapsedSeconds);
-            writer.WriteValueSafe(players.Count);
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                float killCooldown = killCooldowns.TryGetValue(state.ClientId, out float cooldown) ? cooldown : 0f;
-                float abilityCooldown = abilityCooldowns.TryGetValue(state.ClientId, out float abilityCooldownValue) ? abilityCooldownValue : 0f;
-                float ventCooldown = ventCooldowns.TryGetValue(state.ClientId, out float ventCooldownValue) ? ventCooldownValue : 0f;
-                writer.WriteValueSafe(state.ClientId);
-                writer.WriteValueSafe(state.DisplayName);
-                writer.WriteValueSafe(state.Position);
-                writer.WriteValueSafe(state.Ready);
-                writer.WriteValueSafe(state.Alive);
-                writer.WriteValueSafe(state.IsBot);
-                writer.WriteValueSafe((int)state.PublicRole);
-                writer.WriteValueSafe((int)state.Profession);
-                writer.WriteValueSafe(state.Suspicion);
-                writer.WriteValueSafe(killCooldown);
-                writer.WriteValueSafe(abilityCooldown);
-                writer.WriteValueSafe(ventCooldown);
-            }
-
-            writer.WriteValueSafe(tasks.Count);
-
-            foreach (OnlineTaskState task in tasks)
-            {
-                writer.WriteValueSafe(task.Id);
-                writer.WriteValueSafe(task.Position);
-                writer.WriteValueSafe(task.Progress);
-                writer.WriteValueSafe(task.RequiredProgress);
-                writer.WriteValueSafe(task.Completed);
-                writer.WriteValueSafe(task.Sabotaged);
-            }
-
-            writer.WriteValueSafe(bodies.Count);
-
-            foreach (OnlineBodyState body in bodies)
-            {
-                writer.WriteValueSafe(body.Id);
-                writer.WriteValueSafe(body.VictimClientId);
-                writer.WriteValueSafe(body.Position);
-                writer.WriteValueSafe(body.Reported);
-            }
-
-            writer.WriteValueSafe(votes.Count);
-
-            foreach (KeyValuePair<ulong, ulong> vote in votes)
-            {
-                writer.WriteValueSafe(vote.Key);
-                writer.WriteValueSafe(vote.Value);
-            }
-
-            writer.WriteValueSafe(caseLog.Count);
-
-            foreach (string entry in caseLog)
-            {
-                writer.WriteValueSafe(entry);
-            }
-
-            networkManager.CustomMessagingManager.SendNamedMessageToAll(ServerSnapshotMessage, writer, NetworkDelivery.ReliableFragmentedSequenced);
-        }
-
-        private void ReceiveServerSnapshot(ulong senderClientId, FastBufferReader reader)
-        {
-            if (networkManager != null && networkManager.IsServer)
-            {
-                return;
-            }
-
-            reader.ReadValueSafe(out bool snapshotMatchStarted);
-            reader.ReadValueSafe(out int phaseValue);
-            reader.ReadValueSafe(out int snapshotEvidenceScore);
-            reader.ReadValueSafe(out int snapshotEvidenceTarget);
-            reader.ReadValueSafe(out int snapshotEmergencyMeetingsLeft);
-            reader.ReadValueSafe(out int snapshotRoomMinPlayers);
-            reader.ReadValueSafe(out int snapshotRoomMaxPlayers);
-            reader.ReadValueSafe(out bool snapshotAutoFillAi);
-            reader.ReadValueSafe(out bool snapshotRevealRoleOnEject);
-            reader.ReadValueSafe(out bool snapshotProximityVoice);
-            reader.ReadValueSafe(out string snapshotRoomName);
-            reader.ReadValueSafe(out string snapshotResultSummary);
-            reader.ReadValueSafe(out string snapshotLastMeetingReason);
-            reader.ReadValueSafe(out string snapshotLastVoteOutcome);
-            reader.ReadValueSafe(out string snapshotLastEvidenceEvent);
-            reader.ReadValueSafe(out string snapshotLastSabotageEvent);
-            reader.ReadValueSafe(out int snapshotEvidenceMilestoneIndex);
-            reader.ReadValueSafe(out float snapshotPhaseTimer);
-            reader.ReadValueSafe(out float snapshotBlackoutTimer);
-            reader.ReadValueSafe(out float snapshotLockdownTimer);
-            reader.ReadValueSafe(out float snapshotCommunicationJamTimer);
-            reader.ReadValueSafe(out float snapshotEvidenceLeakTimer);
-            reader.ReadValueSafe(out float snapshotPatrolAlertTimer);
-            reader.ReadValueSafe(out float snapshotEvidenceLeakAccumulator);
-            reader.ReadValueSafe(out float snapshotEmergencyCooldownTimer);
-            reader.ReadValueSafe(out float snapshotReportCooldownTimer);
-            reader.ReadValueSafe(out float snapshotAiActionGraceTimer);
-            reader.ReadValueSafe(out float snapshotMatchElapsedSeconds);
-            reader.ReadValueSafe(out int count);
-            matchStarted = snapshotMatchStarted;
-            phase = (OnlineMatchPhase)phaseValue;
-            taskService.EvidenceScore = snapshotEvidenceScore;
-            taskService.EvidenceTarget = snapshotEvidenceTarget;
-            emergencyMeetingsLeft = snapshotEmergencyMeetingsLeft;
-            roomMinPlayers = snapshotRoomMinPlayers;
-            roomMaxPlayers = snapshotRoomMaxPlayers;
-            roomAutoFillAi = snapshotAutoFillAi;
-            revealRoleOnEject = snapshotRevealRoleOnEject;
-            proximityVoiceEnabled = snapshotProximityVoice;
-            roomName = snapshotRoomName;
-            resultSummary = snapshotResultSummary;
-            lastMeetingReason = snapshotLastMeetingReason;
-            lastVoteOutcome = snapshotLastVoteOutcome;
-            lastEvidenceEvent = snapshotLastEvidenceEvent;
-            lastSabotageEvent = snapshotLastSabotageEvent;
-            evidenceMilestoneIndex = snapshotEvidenceMilestoneIndex;
-            phaseTimer = snapshotPhaseTimer;
-            taskService.LoadSabotageTimersFromSnapshot(
-                snapshotBlackoutTimer, snapshotLockdownTimer, snapshotCommunicationJamTimer,
-                snapshotEvidenceLeakTimer, snapshotEvidenceLeakAccumulator, snapshotPatrolAlertTimer);
-            emergencyCooldownTimer = snapshotEmergencyCooldownTimer;
-            reportCooldownTimer = snapshotReportCooldownTimer;
-            aiActionGraceTimer = snapshotAiActionGraceTimer;
-            matchElapsedSeconds = snapshotMatchElapsedSeconds;
-            status = "同步在线局：" + PhaseName(phase) + "。";
-
-            HashSet<ulong> seenPlayers = new HashSet<ulong>();
-
-            for (int i = 0; i < count; i++)
-            {
-                reader.ReadValueSafe(out ulong clientId);
-                reader.ReadValueSafe(out string displayName);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out bool ready);
-                reader.ReadValueSafe(out bool alive);
-                reader.ReadValueSafe(out bool isBot);
-                reader.ReadValueSafe(out int roleValue);
-                reader.ReadValueSafe(out int professionValue);
-                reader.ReadValueSafe(out int suspicion);
-                reader.ReadValueSafe(out float killCooldown);
-                reader.ReadValueSafe(out float abilityCooldown);
-                reader.ReadValueSafe(out float ventCooldown);
-
-                OnlinePlayerState state = players.TryGetValue(clientId, out OnlinePlayerState existing)
-                    ? existing
-                    : new OnlinePlayerState(clientId, displayName, position, ready, alive, (OnlineRole)roleValue, (OnlineProfession)professionValue, suspicion, isBot);
-
-                state.DisplayName = displayName;
-                state.Position = position;
-                state.Ready = ready;
-                state.Alive = alive;
-                state.IsBot = isBot;
-                state.PublicRole = (OnlineRole)roleValue;
-                state.Profession = (OnlineProfession)professionValue;
-                state.Suspicion = suspicion;
-                state.KillCooldown = killCooldown;
-                state.AbilityCooldown = abilityCooldown;
-                state.VentCooldown = ventCooldown;
-                players[clientId] = state;
-                seenPlayers.Add(clientId);
-
-                if (clientId == LocalClientId())
-                {
-                    localPosition = position;
-                }
-            }
-
-            RemoveMissingPlayers(seenPlayers);
-
-            reader.ReadValueSafe(out int taskCount);
-            tasks.Clear();
-
-            for (int i = 0; i < taskCount; i++)
-            {
-                reader.ReadValueSafe(out int id);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out int progress);
-                reader.ReadValueSafe(out int requiredProgress);
-                reader.ReadValueSafe(out bool completed);
-                reader.ReadValueSafe(out bool sabotaged);
-                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), position, progress, requiredProgress, completed, sabotaged));
-            }
-
-            reader.ReadValueSafe(out int bodyCount);
-            bodies.Clear();
-
-            for (int i = 0; i < bodyCount; i++)
-            {
-                reader.ReadValueSafe(out int id);
-                reader.ReadValueSafe(out ulong victimClientId);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out bool reported);
-                bodies.Add(new OnlineBodyState(id, victimClientId, position, reported));
-            }
-
-            reader.ReadValueSafe(out int voteCount);
-            votes.Clear();
-
-            for (int i = 0; i < voteCount; i++)
-            {
-                reader.ReadValueSafe(out ulong voterClientId);
-                reader.ReadValueSafe(out ulong targetClientId);
-                votes[voterClientId] = targetClientId;
-            }
-
-            reader.ReadValueSafe(out int caseLogCount);
-            caseLog.Clear();
-
-            for (int i = 0; i < caseLogCount; i++)
-            {
-                reader.ReadValueSafe(out string entry);
-                caseLog.Add(entry);
-            }
-
-            // ── 客户端初始快照完整性检查 ──
-            ValidateClientSnapshotIntegrity();
-        }
 
         /// <summary>
         /// 客户端收到服务器快照后，验证复原的状态是否完整可用。
         /// 检测残缺快照（如零玩家/零任务/空对局阶段）并记录警告。
         /// </summary>
-        private void ValidateClientSnapshotIntegrity()
-        {
-            bool hasIssue = false;
-
-            if (matchStarted && players.Count == 0)
-            {
-                Debug.LogError("[ClientSnapshot] 完整性异常：对局已开始但玩家列表为空");
-                hasIssue = true;
-            }
-
-            if (tasks.Count == 0)
-            {
-                Debug.LogWarning("[ClientSnapshot] 完整性警告：任务列表为空，可能影响任务系统正常运行");
-                hasIssue = true;
-            }
-
-            // 各玩家关键字段检查（检测反序列化字节错位）
-            foreach (var kv in players)
-            {
-                var p = kv.Value;
-                if (string.IsNullOrEmpty(p.DisplayName))
-                {
-                    Debug.LogWarning($"[ClientSnapshot] 完整性警告：玩家 {p.ClientId} DisplayName 为空");
-                    hasIssue = true;
-                }
-
-                // 位置检查：NaN/Infinity 表示序列化异常
-                if (float.IsNaN(p.Position.x) || float.IsNaN(p.Position.y) ||
-                    float.IsInfinity(p.Position.x) || float.IsInfinity(p.Position.y))
-                {
-                    Debug.LogError($"[ClientSnapshot] 完整性异常：玩家 {p.ClientId} 位置为 NaN/Infinity");
-                    hasIssue = true;
-                }
-
-                // 未分配角色但 Alive = true 视为异常（仅对局进行中）
-                if (matchStarted && p.Alive && p.PublicRole == OnlineRole.Unassigned)
-                {
-                    Debug.LogWarning($"[ClientSnapshot] 完整性警告：玩家 {p.ClientId} 存活但角色未分配");
-                    hasIssue = true;
-                }
-            }
-
-            if (!hasIssue)
-            {
-                Debug.Log($"[ClientSnapshot] 快照完整性检查通过。玩家 {players.Count} / 任务 {tasks.Count} / 尸体 {bodies.Count} / 投票 {votes.Count}");
-            }
-        }
 
         internal void StartOnlineMatch()
         {
@@ -3036,14 +1384,14 @@ namespace GanglandUndercover.Online
             }
 
             BuildDefaultTasks();
-            bodies.Clear();
+            killSystem.bodies.Clear();
             votes.Clear();
             caseLog.Clear();
             privateRoles.Clear();
-            killCooldowns.Clear();
+            killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
-            botVoteTimers.Clear();
-            nextBodyId = 0;
+            _botController?.ClearVoteTimers();
+            killSystem.nextBodyId = 0;
             activeTaskId = -1;
             activeTaskStep = 0;
             activeTaskCharge = 0f;
@@ -3084,10 +1432,10 @@ namespace GanglandUndercover.Online
                 state.Suspicion = 0;
                 state.Ready = true;
                 players[ids[i]] = state;
-                killCooldowns[ids[i]] = 0f;
+                killSystem.killCooldowns[ids[i]] = 0f;
                 abilityCooldowns[ids[i]] = 0f;
-                botTargets[ids[i]] = PickBotTarget(ids[i]);
-                botThinkTimers[ids[i]] = UnityEngine.Random.Range(BotThinkMinSeconds, BotThinkMaxSeconds);
+                if (OnlineBotController.IsBotClient(ids[i]))
+                    _botController.InitBotState(ids[i]);
             }
 
             AssignRoles(ids);
@@ -3170,91 +1518,19 @@ namespace GanglandUndercover.Online
 
         private void FillBotsAndStart()
         {
-            if ((!localPreviewMode && (networkManager == null || !networkManager.IsServer)) || phase != OnlineMatchPhase.Lobby)
-            {
-                return;
-            }
-
-            EnsureMinimumBots();
-            StartOnlineMatch();
+            _botController.FillBotsAndStart();
         }
 
         private void EnsureMinimumBots()
         {
-            int targetCount = Mathf.Clamp(roomMinPlayers, ruleSet.MinimumPlayablePlayers, roomMaxPlayers);
-            int index = 0;
-
-            while (players.Count < targetCount)
-            {
-                ulong clientId = BotClientIdBase + (ulong)index;
-                index++;
-
-                if (players.ContainsKey(clientId))
-                {
-                    continue;
-                }
-
-                string displayName = BotName(index);
-                Vector3 spawn = mapService.SpawnPosition(players.Count);
-                players[clientId] = new OnlinePlayerState(clientId, displayName, spawn, true, true, OnlineRole.Unassigned, BotProfession(index), 0, true);
-                killCooldowns[clientId] = 0f;
-                abilityCooldowns[clientId] = 0f;
-                botThinkTimers[clientId] = UnityEngine.Random.Range(BotThinkMinSeconds, BotThinkMaxSeconds);
-                botTargets[clientId] = PickBotTarget(clientId);
-            }
-
-            status = "已补齐 AI 玩家，可直接开始完整本地局。";
-            BroadcastSnapshot();
+            _botController.EnsureMinimumBots();
         }
 
-        private void SendRole(ulong clientId, OnlineRole role)
-        {
-            if (clientId == LocalClientId())
-            {
-                localRole = role;
-                status = "收到身份：" + RoleName(localRole);
-            }
 
-            if (localPreviewMode || IsBotClient(clientId) || networkManager == null || networkManager.CustomMessagingManager == null)
-            {
-                return;
-            }
-
-            using FastBufferWriter writer = new FastBufferWriter(16, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe((int)role);
-            networkManager.CustomMessagingManager.SendNamedMessage(RoleAssignMessage, clientId, writer);
-        }
-
-        private void ReceiveRoleAssign(ulong senderClientId, FastBufferReader reader)
-        {
-            reader.ReadValueSafe(out int roleValue);
-            localRole = (OnlineRole)roleValue;
-            status = "收到身份：" + RoleName(localRole);
-        }
 
         // ─── 聊天系统 ─────────────────────────────
 
-        private void EnsureChatSystem()
-        {
-            if (chatSystem == null)
-            {
-                chatSystem = new ChatSystem(SendChatMessage);
-            }
-        }
 
-        private void EnsureMigrationManager()
-        {
-            if (migrationManager != null)
-            {
-                return;
-            }
-
-            migrationManager = GetComponent<HostMigrationManager>();
-            if (migrationManager == null)
-            {
-                migrationManager = gameObject.AddComponent<HostMigrationManager>();
-            }
-        }
 
         /// <summary>
         /// 捕获当前游戏状态的完整快照（供主机迁移使用）。
@@ -3273,7 +1549,7 @@ namespace GanglandUndercover.Online
             snap.EvidenceTarget = taskService.EvidenceTarget;
             snap.EmergencyMeetingsLeft = emergencyMeetingsLeft;
             snap.EvidenceMilestoneIndex = evidenceMilestoneIndex;
-            snap.NextBodyId = nextBodyId;
+            snap.NextBodyId = killSystem.nextBodyId;
             snap.RoomMinPlayers = roomMinPlayers;
             snap.RoomMaxPlayers = roomMaxPlayers;
             snap.RoomAutoFillAi = roomAutoFillAi;
@@ -3311,7 +1587,7 @@ namespace GanglandUndercover.Online
                     IsBot = p.IsBot,
                     PublicRole = p.PublicRole,
                     Profession = p.Profession,
-                    KillCooldown = killCooldowns.TryGetValue(p.ClientId, out float kd) ? kd : 0f,
+                    KillCooldown = killSystem.killCooldowns.TryGetValue(p.ClientId, out float kd) ? kd : 0f,
                     AbilityCooldown = abilityCooldowns.TryGetValue(p.ClientId, out float ac) ? ac : 0f,
                     Suspicion = p.Suspicion,
                 });
@@ -3337,8 +1613,8 @@ namespace GanglandUndercover.Online
             }
 
             // ── 尸体 ──
-            snap.Bodies = new List<GameStateSnapshot.SnapshotBodyEntry>(bodies.Count);
-            foreach (var b in bodies)
+            snap.Bodies = new List<GameStateSnapshot.SnapshotBodyEntry>(killSystem.bodies.Count);
+            foreach (var b in killSystem.bodies)
             {
                 snap.Bodies.Add(new GameStateSnapshot.SnapshotBodyEntry
                 {
@@ -3358,15 +1634,15 @@ namespace GanglandUndercover.Online
             snap.CaseLog = new List<string>(caseLog);
 
             // ── 冷却 ──
-            snap.KillCooldowns = CooldownsToList(killCooldowns);
+            snap.KillCooldowns = CooldownsToList(killSystem.killCooldowns);
             snap.AbilityCooldowns = CooldownsToList(abilityCooldowns);
             snap.VentCooldowns = CooldownsToList(ventCooldowns);
-            snap.BotThinkTimers = CooldownsToList(botThinkTimers);
-            snap.BotVoteTimers = CooldownsToList(botVoteTimers);
+            snap.BotThinkTimers = CooldownsToList(_botController.ThinkTimers);
+            snap.BotVoteTimers = CooldownsToList(_botController.VoteTimers);
 
             // ── Bot 目标 ──
-            snap.BotTargets = new List<GameStateSnapshot.SnapshotTargetEntry>(botTargets.Count);
-            foreach (var bt in botTargets)
+            snap.BotTargets = new List<GameStateSnapshot.SnapshotTargetEntry>(_botController.Targets.Count);
+            foreach (var bt in _botController.Targets)
             {
                 snap.BotTargets.Add(new GameStateSnapshot.SnapshotTargetEntry { ClientId = bt.Key, Target = bt.Value });
             }
@@ -3399,7 +1675,7 @@ namespace GanglandUndercover.Online
             taskService.EvidenceTarget = snap.EvidenceTarget;
             emergencyMeetingsLeft = snap.EmergencyMeetingsLeft;
             evidenceMilestoneIndex = snap.EvidenceMilestoneIndex;
-            nextBodyId = snap.NextBodyId;
+            killSystem.nextBodyId = snap.NextBodyId;
             roomMinPlayers = snap.RoomMinPlayers;
             roomMaxPlayers = snap.RoomMaxPlayers;
             roomAutoFillAi = snap.RoomAutoFillAi;
@@ -3447,10 +1723,10 @@ namespace GanglandUndercover.Online
             }
 
             // ── 尸体 ──
-            bodies.Clear();
+            killSystem.bodies.Clear();
             foreach (var b in snap.Bodies)
             {
-                bodies.Add(new OnlineBodyState(b.Id, b.VictimClientId, b.Position, b.Reported));
+                killSystem.bodies.Add(new OnlineBodyState(b.Id, b.VictimClientId, b.Position, b.Reported));
             }
 
             // ── 投票 ──
@@ -3465,17 +1741,22 @@ namespace GanglandUndercover.Online
             caseLog.AddRange(snap.CaseLog);
 
             // ── 冷却 ──
-            ListToCooldowns(killCooldowns, snap.KillCooldowns);
+            ListToCooldowns(killSystem.killCooldowns, snap.KillCooldowns);
             ListToCooldowns(abilityCooldowns, snap.AbilityCooldowns);
             ListToCooldowns(ventCooldowns, snap.VentCooldowns);
-            ListToCooldowns(botThinkTimers, snap.BotThinkTimers);
-            ListToCooldowns(botVoteTimers, snap.BotVoteTimers);
+            // Bot 计时器通过 bot 控制器恢复
+            if (snap.BotThinkTimers != null)
+                foreach (var entry in snap.BotThinkTimers)
+                    _botController.SetThinkTimer(entry.ClientId, entry.CooldownSeconds);
+            if (snap.BotVoteTimers != null)
+                foreach (var entry in snap.BotVoteTimers)
+                    _botController.SetVoteTimer(entry.ClientId, entry.CooldownSeconds);
 
             // ── Bot 目标 ──
-            botTargets.Clear();
+            _botController.ClearTargets();
             foreach (var bt in snap.BotTargets)
             {
-                botTargets[bt.ClientId] = bt.Target;
+                _botController.SetTarget(bt.ClientId, bt.Target);
             }
 
             // 更新本地位置
@@ -3503,7 +1784,7 @@ namespace GanglandUndercover.Online
             SetResult(resultText);
         }
 
-        private static List<GameStateSnapshot.SnapshotCooldownEntry> CooldownsToList(Dictionary<ulong, float> dict)
+        private static List<GameStateSnapshot.SnapshotCooldownEntry> CooldownsToList(IReadOnlyDictionary<ulong, float> dict)
         {
             var list = new List<GameStateSnapshot.SnapshotCooldownEntry>(dict.Count);
             foreach (var kv in dict)
@@ -3522,203 +1803,8 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void SendChatMessage(string content)
-        {
-            if (string.IsNullOrWhiteSpace(content) || chatSystem == null)
-            {
-                return;
-            }
 
-            // 限流检查
-            if (!chatSystem.CanSendNow())
-            {
-                return;
-            }
 
-            OnlineRole role = LocalEffectiveRole();
-            Faction faction = ChatSystem.RoleToFaction(role);
-            bool isDead = !IsLocalAlive();
-            string senderId = LocalClientId().ToString();
-            string senderName = GetLocalDisplayName();
-
-            // 确定通道
-            ChatChannel channel = ChatSystem.DetermineChannel(phase, !isDead);
-
-            // 本地立即显示
-            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction, channel);
-            chatSystem.MarkSent();
-
-            // 联机：发送到服务器
-            if (localPreviewMode)
-            {
-                return; // 本地试玩模式，不发送网络消息
-            }
-
-            if (networkManager == null || networkManager.CustomMessagingManager == null || !networkManager.IsClient)
-            {
-                return;
-            }
-
-            try
-            {
-                Vector3 senderPos = GetLocalPlayerPosition();
-                string payload = ((int)role) + "|" + ((int)channel) + "|" +
-                    senderPos.x.ToString("F2") + "|" + senderPos.y.ToString("F2") + "|" + senderPos.z.ToString("F2") + "|" + content;
-                byte[] payloadBytes = System.Text.Encoding.UTF8.GetBytes(payload);
-                using FastBufferWriter writer = new FastBufferWriter(4 + payloadBytes.Length + 2048, Unity.Collections.Allocator.Temp);
-                writer.WriteValueSafe(payloadBytes.Length);
-                writer.WriteBytes(payloadBytes, payloadBytes.Length);
-                networkManager.CustomMessagingManager.SendNamedMessage(ChatSendMessage, NetworkManager.ServerClientId, writer);
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning("Gangland Chat: Send failed - " + ex.Message);
-            }
-        }
-
-        private void ReceiveChatSend(ulong senderClientId, FastBufferReader reader)
-        {
-            if (networkManager == null || !networkManager.IsServer)
-            {
-                return;
-            }
-
-            reader.ReadValueSafe(out int payloadLength);
-
-            if (payloadLength <= 0 || payloadLength > 4096)
-            {
-                return;
-            }
-
-            byte[] payloadBytes = new byte[payloadLength];
-            reader.ReadBytes(ref payloadBytes, payloadLength);
-            string payload = System.Text.Encoding.UTF8.GetString(payloadBytes);
-            string[] parts = payload.Split('|');
-
-            // 格式: role|channel|posX|posY|posZ|content (6+ parts)
-            if (parts.Length < 6)
-            {
-                return;
-            }
-
-            string content = string.Join("|", parts, 5, parts.Length - 5);
-            if (!int.TryParse(parts[0], out int roleValue)) return;
-            OnlineRole role = (OnlineRole)roleValue;
-            if (!int.TryParse(parts[1], out int channelValue)) return;
-            ChatChannel channel = (ChatChannel)channelValue;
-            float.TryParse(parts[2], out float senderPosX);
-            float.TryParse(parts[3], out float senderPosY);
-            float.TryParse(parts[4], out float senderPosZ);
-            Vector3 senderPos = new Vector3(senderPosX, senderPosY, senderPosZ);
-
-            Faction faction = ChatSystem.RoleToFaction(role);
-            bool isDead = !players.TryGetValue(senderClientId, out OnlinePlayerState senderState) || !senderState.Alive;
-            string senderName = players.TryGetValue(senderClientId, out OnlinePlayerState nameState) ? nameState.DisplayName : "玩家" + senderClientId;
-
-            // 本地显示（服务器也显示）
-            chatSystem.ReceiveMessage(senderClientId.ToString(), senderName, content, isDead, faction, channel);
-
-            // 按通道路由转发
-            string forwardPayload = senderClientId + "|" + senderName + "|" + content + "|" + (isDead ? "1" : "0") + "|" + ((int)faction) + "|" + ((int)channel);
-            byte[] forwardBytes = System.Text.Encoding.UTF8.GetBytes(forwardPayload);
-            using FastBufferWriter writer = new FastBufferWriter(4 + forwardBytes.Length + 2048, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe(forwardBytes.Length);
-            writer.WriteBytes(forwardBytes, forwardBytes.Length);
-
-            if (channel == ChatChannel.Meeting)
-            {
-                // 会议频道：广播给所有存活玩家
-                networkManager.CustomMessagingManager.SendNamedMessageToAll(ChatBroadcastMessage, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
-            }
-            else if (channel == ChatChannel.Ghost)
-            {
-                // 鬼魂频道：仅发送给死亡玩家
-                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
-                {
-                    if (kv.Key == senderClientId) continue;
-                    if (!kv.Value.Alive)
-                    {
-                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
-                    }
-                }
-            }
-            else if (channel == ChatChannel.Proximity)
-            {
-                // 近距离频道：发送给发送者附近范围的存活玩家（不分阵营）
-                const float proximityRange = 12f;
-                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
-                {
-                    if (kv.Key == senderClientId) continue;
-                    if (!kv.Value.Alive) continue;
-
-                    Vector3 targetPos = GetPlayerPosition(kv.Key);
-                    float dist = Vector3.Distance(senderPos, targetPos);
-                    if (dist <= proximityRange)
-                    {
-                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
-                    }
-                }
-            }
-            else // Global
-            {
-                // 全局频道：发送给所有存活玩家
-                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
-                {
-                    if (kv.Key == senderClientId) continue;
-                    if (kv.Value.Alive)
-                    {
-                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
-                    }
-                }
-            }
-        }
-
-        private void ReceiveChatBroadcast(ulong senderClientId, FastBufferReader reader)
-        {
-            if (networkManager == null || !networkManager.IsClient)
-            {
-                return;
-            }
-
-            reader.ReadValueSafe(out int length);
-
-            if (length <= 0 || length > 4096)
-            {
-                return;
-            }
-
-            byte[] bytes = new byte[length];
-            reader.ReadBytes(ref bytes, length);
-            string payload = System.Text.Encoding.UTF8.GetString(bytes);
-            string[] parts = payload.Split('|');
-
-            // 新格式: senderId|senderName|content|isDead|faction|channel (6 parts)
-            // 兼容旧格式: senderId|senderName|content|isDead|faction (5 parts)
-            if (parts.Length < 5)
-            {
-                return;
-            }
-
-            string senderId = parts[0];
-            string senderName = parts[1];
-            string content = parts[2];
-            bool isDead = parts[3] == "1";
-            int factionValue;
-
-            if (!int.TryParse(parts[4], out factionValue))
-            {
-                return;
-            }
-
-            Faction faction = (Faction)factionValue;
-            ChatChannel channel = ChatChannel.Global;
-            if (parts.Length >= 6)
-            {
-                int.TryParse(parts[5], out int channelValue);
-                channel = (ChatChannel)channelValue;
-            }
-            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction, channel);
-        }
 
         // ══════════════════════════════════════════════════════
         // D5 地图选择联机同步
@@ -3753,28 +1839,7 @@ namespace GanglandUndercover.Online
             Debug.Log($"[D5] Host selected map: {type}");
         }
 
-        private void ReceiveMapSelect(ulong senderClientId, FastBufferReader reader)
-        {
-            // 仅服务器可发送地图选择
-            if (senderClientId != NetworkManager.ServerClientId) return;
 
-            reader.ReadValueSafe(out int mapTypeInt);
-            var type = (OnlineMapService.OnlineMapType)mapTypeInt;
-            mapService.ActiveMapType = type;
-            Debug.Log($"[D5] Client received map select: {type}");
-        }
-
-        private string GetLocalDisplayName()
-        {
-            ulong clientId = LocalClientId();
-
-            if (players.TryGetValue(clientId, out OnlinePlayerState state))
-            {
-                return state.DisplayName;
-            }
-
-            return localPlayerName;
-        }
 
         /// <summary>获取玩家显示名称（按 clientId 查字典）</summary>
         public string GetPlayerDisplayName(ulong clientId)
@@ -3784,34 +1849,6 @@ namespace GanglandUndercover.Online
             return "玩家" + clientId;
         }
 
-        private void UpsertLocalPlayer()
-        {
-            if (localPreviewMode)
-            {
-                StartLocalPreviewRoom();
-                return;
-            }
-
-            if (networkManager == null || !networkManager.IsClient)
-            {
-                return;
-            }
-
-            ulong clientId = LocalClientId();
-
-            if (players.TryGetValue(clientId, out OnlinePlayerState existing))
-            {
-                existing.Position = localPosition;
-                existing.Ready = localReady;
-                existing.IsBot = false;
-                existing.DisplayName = LimitText(localPlayerName, 16, "港区玩家");
-                players[clientId] = existing;
-            }
-            else
-            {
-                players[clientId] = new OnlinePlayerState(clientId, LimitText(localPlayerName, 16, "港区玩家"), localPosition, localReady, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
-            }
-        }
 
         internal void TryInteractWithTask(ulong senderClientId, OnlinePlayerState player)
         {
@@ -4190,7 +2227,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (killCooldowns.TryGetValue(senderClientId, out float cooldown) && cooldown > 0f)
+            if (killSystem.killCooldowns.TryGetValue(senderClientId, out float cooldown) && cooldown > 0f)
             {
                 status = "击倒冷却中：" + Mathf.CeilToInt(cooldown) + "s。";
                 BroadcastSnapshot();
@@ -4214,17 +2251,17 @@ namespace GanglandUndercover.Online
             {
                 ActivateGhostModeForLocalPlayer(victimClientId);
             }
-            bodies.Add(new OnlineBodyState(nextBodyId++, victimClientId, victim.Position, false));
+            killSystem.bodies.Add(new OnlineBodyState(killSystem.nextBodyId++, victimClientId, victim.Position, false));
 
             // M3: Create 2D corpse ground marker at death position (primary kill path)
             if (worldBuilder != null && worldBuilder.Use2DBackend)
             {
                 worldBuilder.CreateCorpseMarker(victim.Position);
             }
-            killCooldowns[senderClientId] = ruleSet.KillCooldownSeconds;
+            killSystem.killCooldowns[senderClientId] = ruleSet.KillCooldownSeconds;
             player.Suspicion += 2;
             players[senderClientId] = player;
-            _killCount++;
+            killSystem.killCount++;
             status = "黑帮击倒了 " + victim.DisplayName + "。";
             AddCaseLog(status);
             evidenceDossier?.RegisterEvidence("击杀事件：" + victim.DisplayName + "被击倒", new Vector2(victim.Position.x, victim.Position.y), 5.0f); // C2
@@ -4309,7 +2346,7 @@ namespace GanglandUndercover.Online
                 case OnlineProfession.Enforcer:
                     if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                     {
-                        killCooldowns[senderClientId] = Mathf.Max(0f, killCooldowns.TryGetValue(senderClientId, out float killCooldown) ? killCooldown - 9f : 0f);
+                        killSystem.killCooldowns[senderClientId] = Mathf.Max(0f, killSystem.killCooldowns.TryGetValue(senderClientId, out float killCooldown) ? killCooldown - 9f : 0f);
                         player.Suspicion += 1;
                         status = player.DisplayName + " 清理路线，击倒冷却缩短。";
                     }
@@ -4356,7 +2393,7 @@ namespace GanglandUndercover.Online
                             }
                         }
                         // Mole gets a one-time kill cooldown reset
-                        killCooldowns[senderClientId] = 0f;
+                        killSystem.killCooldowns[senderClientId] = 0f;
                         player.KillCooldown = 0f;
                         // Cooldown override: use standard 13s for betrayal
                         abilityCooldowns[senderClientId] = ruleSet.AbilityCooldownSeconds;
@@ -4443,17 +2480,17 @@ namespace GanglandUndercover.Online
 
         private void TryReportOrEmergency(ulong senderClientId, OnlinePlayerState player)
         {
-            if (reportCooldownTimer > 0f)
+            if (killSystem.reportCooldownTimer > 0f)
             {
-                status = "报案冷却中：" + Mathf.CeilToInt(reportCooldownTimer) + "s，请稍后再试。";
+                status = "报案冷却中：" + Mathf.CeilToInt(killSystem.reportCooldownTimer) + "s，请稍后再试。";
                 BroadcastSnapshot();
                 return;
             }
             if (TryFindNearestBody(player.Position, out int bodyIndex))
             {
-                OnlineBodyState body = bodies[bodyIndex];
+                OnlineBodyState body = killSystem.bodies[bodyIndex];
                 body.Reported = true;
-                bodies[bodyIndex] = body;
+                killSystem.bodies[bodyIndex] = body;
                 AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
                 BeginMeeting(player.DisplayName + " 发现尸体并报案");
 
@@ -4505,7 +2542,7 @@ namespace GanglandUndercover.Online
             phase = OnlineMatchPhase.Meeting;
             phaseTimer = ruleSet.MeetingIntroSeconds;
             taskService.RepairSabotageEffect(SabotageType.Blackout);
-            reportCooldownTimer = ruleSet.ReportCooldownSeconds;
+            killSystem.reportCooldownTimer = ruleSet.ReportCooldownSeconds;
             activeTaskId = -1;
             activeTaskStep = 0;
             activeTaskCharge = 0f;
@@ -4935,20 +2972,11 @@ namespace GanglandUndercover.Online
 
         private void TickCooldowns(float deltaTime)
         {
-            List<ulong> keys = new List<ulong>(killCooldowns.Keys);
+            // 击杀冷却已委托给 KillSystem 管理
+            if (killSystem != null)
+                killSystem.TickKillCooldowns(deltaTime);
 
-            foreach (ulong clientId in keys)
-            {
-                killCooldowns[clientId] = Mathf.Max(0f, killCooldowns[clientId] - deltaTime);
-
-                if (players.TryGetValue(clientId, out OnlinePlayerState state))
-                {
-                    state.KillCooldown = killCooldowns[clientId];
-                    players[clientId] = state;
-                }
-            }
-
-            keys = new List<ulong>(abilityCooldowns.Keys);
+            List<ulong> keys = new List<ulong>(abilityCooldowns.Keys);
 
             foreach (ulong clientId in keys)
             {
@@ -4989,153 +3017,18 @@ namespace GanglandUndercover.Online
 
         private void TickBotAction(float deltaTime)
         {
-            List<ulong> botIds = new List<ulong>();
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                if (state.IsBot && state.Alive)
-                {
-                    botIds.Add(state.ClientId);
-                }
-            }
-
-            foreach (ulong botId in botIds)
-            {
-                OnlinePlayerState bot = players[botId];
-                botThinkTimers[botId] = botThinkTimers.TryGetValue(botId, out float timer) ? timer - deltaTime : 0f;
-
-                if (TryFindNearestBody(bot.Position, out int bodyIndex) && UnityEngine.Random.value < 0.45f)
-                {
-                    OnlineBodyState body = bodies[bodyIndex];
-                    body.Reported = true;
-                    bodies[bodyIndex] = body;
-                    players[botId] = bot;
-                    AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
-                    BeginMeeting(bot.DisplayName + " 发现尸体并报案");
-                    return;
-                }
-
-                OnlineRole role = GetPrivateRole(botId);
-
-                if (botThinkTimers[botId] <= 0f)
-                {
-                    botThinkTimers[botId] = UnityEngine.Random.Range(BotThinkMinSeconds, BotThinkMaxSeconds);
-
-                    if (role == OnlineRole.Gang || role == OnlineRole.Mole)
-                    {
-                        if (UnityEngine.Random.value < 0.08f)
-                        {
-                            TryUseProfessionAbility(botId, bot);
-                            return;
-                        }
-
-                        if (killCooldowns.TryGetValue(botId, out float cooldown) && cooldown <= 0f && TryFindNearestVictim(bot.Position, out ulong victimClientId, out OnlinePlayerState victim))
-                        {
-                            victim.Alive = false;
-                            victim.Input = Vector2.zero;
-                            players[victimClientId] = victim;
-                            bodies.Add(new OnlineBodyState(nextBodyId++, victimClientId, victim.Position, false));
-
-                            // M3: Bot kill corpse marker
-                            if (worldBuilder != null && worldBuilder.Use2DBackend)
-                            {
-                                worldBuilder.CreateCorpseMarker(victim.Position);
-                            }
-                            killCooldowns[botId] = ruleSet.KillCooldownSeconds;
-                            status = bot.DisplayName + " 在黑灯巷口击倒了 " + victim.DisplayName + "。";
-                            AddCaseLog(status);
-                            EvaluateWinConditions();
-                            BroadcastSnapshot();
-                            return;
-                        }
-
-                        if (UnityEngine.Random.value < 0.36f)
-                        {
-                            botTargets[botId] = PickSabotageTarget();
-                        }
-                    }
-                    else if (UnityEngine.Random.value < 0.2f && taskService.CommunicationJamTimer <= 0f && emergencyMeetingsLeft > 0 && Vector3.Distance(bot.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
-                    {
-                        emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-                        emergencyCooldownTimer = ruleSet.EmergencyCooldownSeconds;
-                        BeginMeeting(bot.DisplayName + " 按下警署紧急铃");
-                        BroadcastSnapshot();
-                        return;
-                    }
-                    else
-                    {
-                        if (UnityEngine.Random.value < 0.1f)
-                        {
-                            TryUseProfessionAbility(botId, bot);
-                            return;
-                        }
-
-                        botTargets[botId] = PickEvidenceTarget();
-                    }
-                }
-
-                Vector3 target = botTargets.TryGetValue(botId, out Vector3 currentTarget) ? currentTarget : PickBotTarget(botId);
-                Vector3 delta = target - bot.Position;
-                Vector2 direction = new Vector2(delta.x, delta.y);
-
-                if (direction.magnitude <= BotInteractDistance)
-                {
-                    bot.Input = Vector2.zero;
-                    players[botId] = bot;
-
-                    if (role == OnlineRole.Gang || UnityEngine.Random.value < 0.76f)
-                    {
-                        TryInteractWithTask(botId, bot);
-                    }
-
-                    botTargets[botId] = PickBotTarget(botId);
-                    botThinkTimers[botId] = UnityEngine.Random.Range(BotThinkMinSeconds, BotThinkMaxSeconds);
-                }
-                else
-                {
-                    bot.Input = direction.normalized;
-                    players[botId] = bot;
-                }
-            }
+            _botController.TickBotAction(deltaTime);
         }
 
         private void TickBotVoting(float deltaTime)
         {
-            List<ulong> botIds = new List<ulong>();
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                if (state.IsBot && state.Alive && !votes.ContainsKey(state.ClientId))
-                {
-                    botIds.Add(state.ClientId);
-                }
-            }
-
-            foreach (ulong botId in botIds)
-            {
-                botVoteTimers[botId] = botVoteTimers.TryGetValue(botId, out float timer)
-                    ? timer - deltaTime
-                    : UnityEngine.Random.Range(1.2f, 4.5f);
-
-                if (botVoteTimers[botId] > 0f)
-                {
-                    continue;
-                }
-
-                ApplyVote(botId, PickBotVoteTarget(botId));
-                botVoteTimers[botId] = UnityEngine.Random.Range(2f, 5f);
-            }
+            _botController.TickBotVoting(deltaTime);
         }
 
         private void RemoveReportedBodies()
         {
-            for (int i = bodies.Count - 1; i >= 0; i--)
-            {
-                if (bodies[i].Reported)
-                {
-                    bodies.RemoveAt(i);
-                }
-            }
+            if (killSystem != null)
+                killSystem.RemoveReportedBodies();
         }
 
         /// <summary>
@@ -5144,21 +3037,8 @@ namespace GanglandUndercover.Online
         /// </summary>
         private void ApplyPostMeetingKillGrace()
         {
-            float grace = ruleSet.PostMeetingKillGraceSeconds;
-            if (grace <= 0f) return;
-
-            foreach (var kv in players)
-            {
-                if (!kv.Value.Alive) continue;
-                if (privateRoles.TryGetValue(kv.Key, out OnlineRole role) &&
-                    (role == OnlineRole.Gang || role == OnlineRole.Undercover))
-                {
-                    if (!killCooldowns.ContainsKey(kv.Key))
-                        killCooldowns[kv.Key] = grace;
-                    else if (killCooldowns[kv.Key] < grace)
-                        killCooldowns[kv.Key] = grace;
-                }
-            }
+            if (killSystem != null)
+                killSystem.ApplyPostMeetingKillGrace(ruleSet.PostMeetingKillGraceSeconds);
         }
 
         public void AddCaseLog(string entry)
@@ -5293,9 +3173,7 @@ namespace GanglandUndercover.Online
             foreach (ulong clientId in stalePlayers)
             {
                 players.Remove(clientId);
-                botThinkTimers.Remove(clientId);
-                botVoteTimers.Remove(clientId);
-                botTargets.Remove(clientId);
+                _botController?.RemoveBot(clientId);
                 abilityCooldowns.Remove(clientId);
             }
         }
@@ -5492,56 +3370,19 @@ namespace GanglandUndercover.Online
 
         internal bool TryFindNearestVictim(Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
         {
+            if (killSystem != null)
+                return killSystem.TryFindNearestVictim(position, out victimClientId, out victim);
             victimClientId = SkipVoteTarget;
             victim = default;
-            float bestDistance = ruleSet.KillRange;
-
-            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
-            {
-                OnlinePlayerState candidate = pair.Value;
-
-                if (!candidate.Alive || GetPrivateRole(pair.Key) == OnlineRole.Gang)
-                {
-                    continue;
-                }
-
-                float distance = Vector3.Distance(position, candidate.Position);
-
-                if (distance <= bestDistance)
-                {
-                    victimClientId = pair.Key;
-                    victim = candidate;
-                    bestDistance = distance;
-                }
-            }
-
-            return victimClientId != SkipVoteTarget;
+            return false;
         }
 
         internal bool TryFindNearestBody(Vector3 position, out int bodyIndex)
         {
+            if (killSystem != null)
+                return killSystem.TryFindNearestBody(position, out bodyIndex);
             bodyIndex = -1;
-            float bestDistance = ruleSet.ReportRange;
-
-            for (int i = 0; i < bodies.Count; i++)
-            {
-                OnlineBodyState body = bodies[i];
-
-                if (body.Reported)
-                {
-                    continue;
-                }
-
-                float distance = Vector3.Distance(position, body.Position);
-
-                if (distance <= bestDistance)
-                {
-                    bodyIndex = i;
-                    bestDistance = distance;
-                }
-            }
-
-            return bodyIndex >= 0;
+            return false;
         }
 
         private bool IsLocalAlive()
@@ -5839,21 +3680,6 @@ namespace GanglandUndercover.Online
             return localRole == OnlineRole.Unassigned ? OnlineRole.Police : localRole;
         }
 
-        private int CountBotPlayers()
-        {
-            int count = 0;
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                if (state.IsBot)
-                {
-                    count++;
-                }
-            }
-
-            return count;
-        }
-
         private int CountHumanPlayers()
         {
             int count = 0;
@@ -5944,164 +3770,11 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private string BuildResultSummary(string resultStatus)
-        {
-            int alive = CountAlivePlayers();
-            int completedTasks = 0;
-            int sabotageCount = 0;
-
-            foreach (OnlineTaskState task in tasks)
-            {
-                if (task.Completed) completedTasks++;
-                if (task.Sabotaged) sabotageCount++;
-            }
-
-            string moleReport = "";
-            foreach (var kv in _moleObjectives)
-            {
-                string name = GetPlayerDisplayName(kv.Key);
-                var obj = kv.Value;
-                bool bonus = obj.Kills >= 2 && obj.Sabotages >= 1 && obj.SurvivedTilLate;
-                moleReport += $"\n内鬼 {name}：击杀{obj.Kills} 破坏{obj.Sabotages}" +
-                    (bonus ? " 🏆隐藏目标达成" : "") +
-                    (obj.SurvivedTilLate ? " 存活至终局" : "");
-            }
-
-            return resultStatus
-                + "\n用时 " + FormatMatchTime(matchElapsedSeconds)
-                + " | 存活 " + alive + "/" + players.Count
-                + " | 完成任务 " + completedTasks + "/" + tasks.Count
-                + " | 破坏残留 " + sabotageCount
-                + " | 尸体 " + bodies.Count
-                + moleReport
-                + "\n可直接重开同房间，保留玩家与规则配置。";
-        }
 
         private static string FormatMatchTime(float seconds)
         {
             int totalSeconds = Mathf.Max(0, Mathf.FloorToInt(seconds));
             return (totalSeconds / 60).ToString("00") + ":" + (totalSeconds % 60).ToString("00");
-        }
-
-        private Vector3 PickBotTarget(ulong botId)
-        {
-            if (GetPrivateRole(botId) == OnlineRole.Gang)
-            {
-                return UnityEngine.Random.value < 0.55f ? PickNearestLivingNonGang(botId) : PickSabotageTarget();
-            }
-
-            return PickEvidenceTarget();
-        }
-
-        private Vector3 PickEvidenceTarget()
-        {
-            List<OnlineTaskState> options = new List<OnlineTaskState>();
-
-            foreach (OnlineTaskState task in tasks)
-            {
-                if (!task.Completed || task.Sabotaged)
-                {
-                    options.Add(task);
-                }
-            }
-
-            if (options.Count == 0)
-            {
-                return mapService.ScaleMapPosition(Vector3.zero);
-            }
-
-            return options[UnityEngine.Random.Range(0, options.Count)].Position;
-        }
-
-        private Vector3 PickSabotageTarget()
-        {
-            if (tasks.Count == 0)
-            {
-                return mapService.ScaleMapPosition(Vector3.zero);
-            }
-
-            if (UnityEngine.Random.value < 0.4f)
-            {
-                foreach (OnlineTaskState task in tasks)
-                {
-                    if (task.Id == 2)
-                    {
-                        return task.Position;
-                    }
-                }
-            }
-
-            return tasks[UnityEngine.Random.Range(0, tasks.Count)].Position;
-        }
-
-        private Vector3 PickNearestLivingNonGang(ulong botId)
-        {
-            if (!players.TryGetValue(botId, out OnlinePlayerState bot))
-            {
-                return PickSabotageTarget();
-            }
-
-            Vector3 best = PickSabotageTarget();
-            float bestDistance = float.MaxValue;
-
-            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
-            {
-                if (!pair.Value.Alive || pair.Key == botId || GetPrivateRole(pair.Key) == OnlineRole.Gang)
-                {
-                    continue;
-                }
-
-                float distance = Vector3.Distance(bot.Position, pair.Value.Position);
-
-                if (distance < bestDistance)
-                {
-                    best = pair.Value.Position;
-                    bestDistance = distance;
-                }
-            }
-
-            return best;
-        }
-
-        private ulong PickBotVoteTarget(ulong voterClientId)
-        {
-            List<ulong> suspects = new List<ulong>();
-            OnlineRole voterRole = GetPrivateRole(voterClientId);
-
-            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
-            {
-                if (!pair.Value.Alive || pair.Key == voterClientId)
-                {
-                    continue;
-                }
-
-                OnlineRole targetRole = GetPrivateRole(pair.Key);
-
-                if (voterRole == OnlineRole.Gang && targetRole != OnlineRole.Gang)
-                {
-                    suspects.Add(pair.Key);
-                }
-                else if (voterRole != OnlineRole.Gang && targetRole == OnlineRole.Gang && UnityEngine.Random.value < 0.62f)
-                {
-                    suspects.Add(pair.Key);
-                }
-                else if (UnityEngine.Random.value < 0.28f)
-                {
-                    suspects.Add(pair.Key);
-                }
-            }
-
-            if (suspects.Count == 0 || UnityEngine.Random.value < 0.18f)
-            {
-                return SkipVoteTarget;
-            }
-
-            return suspects[UnityEngine.Random.Range(0, suspects.Count)];
-        }
-
-        private static bool IsBotClient(ulong clientId)
-        {
-            return clientId >= BotClientIdBase;
         }
 
         private static SabotageType SabotageForTask(int taskId)
@@ -6160,170 +3833,16 @@ namespace GanglandUndercover.Online
             return ruleSet.EmergencyMeetingLimitFor(playerCount);
         }
 
-        private string BuildPlayerList()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.AppendLine("玩家列表");
-            ulong localClientId = LocalClientId();
 
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                builder.AppendLine((state.ClientId == localClientId ? "你 " : string.Empty)
-                    + state.DisplayName
-                    + (state.IsBot ? " [AI]" : string.Empty)
-                    + " | "
-                    + (state.Alive ? "存活" : "出局")
-                    + " | "
-                    + (state.Ready ? "Ready" : "Not Ready")
-                    + " | "
-                    + RoleName(state.PublicRole)
-                    + " | "
-                    + ProfessionName(state.Profession)
-                    + " | 嫌疑 "
-                    + state.Suspicion
-                    + " | 技能 "
-                    + Mathf.CeilToInt(state.AbilityCooldown)
-                    + "s"
-                    + " | "
-                    + state.Position.ToString("F1"));
-            }
 
-            if (players.Count == 0)
-            {
-                builder.AppendLine("创建 Host 或加入房间后显示玩家。");
-            }
 
-            return builder.ToString();
-        }
 
-        private string BuildCaseLog()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.AppendLine("案情记录");
-
-            if (caseLog.Count == 0)
-            {
-                builder.AppendLine("开局后记录关键事件。");
-                return builder.ToString();
-            }
-
-            for (int i = caseLog.Count - 1; i >= 0; i--)
-            {
-                builder.AppendLine(caseLog[i]);
-            }
-
-            return builder.ToString();
-        }
-
-        private string BuildTaskList()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.AppendLine("港区任务 | 调查组推进任务，黑帮可伪装靠近并破坏");
-            builder.AppendLine("局时: " + FormatMatchTime(matchElapsedSeconds) + "/20:00");
-            builder.AppendLine("证据链: " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget);
-            builder.AppendLine("紧急会议: " + emergencyMeetingsLeft + " | 危机: " + BuildHazardSummary());
-            builder.AppendLine("局势压力: " + BuildMatchPressureSummary());
-            builder.AppendLine("最近证据: " + lastEvidenceEvent);
-            builder.AppendLine("最近破坏: " + lastSabotageEvent);
-            builder.AppendLine("证据阶段: " + EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
-            builder.AppendLine("任务分型: 监控追踪、封条查验、电力修复、证物扫描、账本冻结、路线巡查");
-
-            foreach (OnlineTaskState task in tasks)
-            {
-                builder.AppendLine(task.Name
-                    + " "
-                    + task.Progress
-                    + "/"
-                    + task.RequiredProgress
-                    + " | 区域 " + TaskDistrictName(task.Id)
-                    + " | +" + TaskEvidenceValue(task.Id) + "证"
-                    + " | " + TaskPanelTemplateTitle(task.Id)
-                    + (task.Completed ? " 已完成" : task.Sabotaged ? " 被破坏/" + SabotageName(SabotageForTask(task.Id)) : " 待处理"));
-            }
-
-            int activeBodies = 0;
-
-            foreach (OnlineBodyState body in bodies)
-            {
-                if (!body.Reported)
-                {
-                    activeBodies++;
-                }
-            }
-
-            builder.AppendLine("未报案尸体: " + activeBodies);
-
-            if (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
-            {
-                builder.AppendLine("投票: " + votes.Count + "/" + CountAlivePlayers() + " | 剩余 " + Mathf.CeilToInt(phaseTimer) + "s");
-            }
-
-            return builder.ToString();
-        }
-
-        private string BuildFocusedIntel()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.AppendLine("局时 " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 会议 " + emergencyMeetingsLeft);
-            builder.AppendLine("目标: 警方闭合证据链或投出黑帮；黑帮通过击倒、破坏和会议误导拖到 20 分钟。");
-            builder.AppendLine("局势压力: " + BuildMatchPressureSummary());
-            builder.AppendLine("你的任务: " + BuildLocalObjectiveSummary());
-            builder.AppendLine("证据阶段: " + EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
-
-            int activeBodies = CountUnreportedBodies();
-            if (activeBodies > 0)
-            {
-                builder.AppendLine("未报案尸体: " + activeBodies);
-            }
-
-            if (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
-            {
-                builder.AppendLine("投票 " + votes.Count + "/" + CountAlivePlayers() + " | " + Mathf.CeilToInt(phaseTimer) + "s");
-                builder.AppendLine("会议原因: " + lastMeetingReason);
-                builder.AppendLine("上轮结论: " + lastVoteOutcome);
-                return builder.ToString();
-            }
-
-            OnlineTaskState nearest = FindNearestTask(LocalCameraTarget());
-
-            if (nearest.Id >= 0)
-            {
-                builder.AppendLine("当前目标: " + nearest.Name);
-                builder.AppendLine("所在区域: " + TaskDistrictName(nearest.Id));
-                builder.AppendLine("进度 " + nearest.Progress + "/" + nearest.RequiredProgress + " | " + TaskPanelTemplateTitle(nearest.Id) + " | +" + TaskEvidenceValue(nearest.Id) + "证" + (nearest.Sabotaged ? " | 被破坏/" + SabotageName(SabotageForTask(nearest.Id)) : string.Empty));
-                return builder.ToString();
-            }
-
-            OnlineTaskState target = FindRecommendedTask(LocalCameraTarget());
-            builder.AppendLine("推荐路线: " + target.Name);
-            builder.AppendLine("区域: " + TaskDistrictName(target.Id));
-            builder.AppendLine("距离 " + Vector3.Distance(LocalCameraTarget(), target.Position).ToString("F1") + " | M 打开大地图");
-            return builder.ToString();
-        }
-
-        private void DrawModePillars()
-        {
-            GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label("完整局结构");
-            GUILayout.Label("开局: 房间 Ready、身份私发、全图预览。");
-            GUILayout.Label("行动: 大地图巡场、小任务、黑帮破坏、暗线换位、尸体报案。");
-            GUILayout.Label("会议: 全员语音讨论、投票放逐、结算身份和胜负。");
-            GUILayout.EndVertical();
-        }
 
         private int CountUnreportedBodies()
         {
-            int activeBodies = 0;
-
-            foreach (OnlineBodyState body in bodies)
-            {
-                if (!body.Reported)
-                {
-                    activeBodies++;
-                }
-            }
-
-            return activeBodies;
+            if (killSystem != null)
+                return killSystem.CountUnreportedBodies();
+            return 0;
         }
 
         private int CountCompletedTasks()
@@ -6356,99 +3875,9 @@ namespace GanglandUndercover.Online
             return sabotaged;
         }
 
-        private string BuildHazardSummary()
-        {
-            List<string> hazards = new List<string>();
 
-            if (taskService.BlackoutTimer > 0f)
-            {
-                hazards.Add("黑灯 " + Mathf.CeilToInt(taskService.BlackoutTimer));
-            }
 
-            if (taskService.LockdownTimer > 0f)
-            {
-                hazards.Add("封锁 " + Mathf.CeilToInt(taskService.LockdownTimer));
-            }
 
-            if (taskService.CommunicationJamTimer > 0f)
-            {
-                hazards.Add("断讯 " + Mathf.CeilToInt(taskService.CommunicationJamTimer));
-            }
-
-            if (taskService.EvidenceLeakTimer > 0f)
-            {
-                hazards.Add("泄证 " + Mathf.CeilToInt(taskService.EvidenceLeakTimer));
-            }
-
-            if (taskService.PatrolAlertTimer > 0f)
-            {
-                hazards.Add("巡逻 " + Mathf.CeilToInt(taskService.PatrolAlertTimer));
-            }
-
-            return hazards.Count == 0 ? "无" : string.Join(" / ", hazards);
-        }
-
-        private string BuildMatchPressureSummary()
-        {
-            float evidenceRatio = taskService.EvidenceScore / (float)Mathf.Max(1, taskService.EvidenceTarget);
-            float taskRatio = CountCompletedTasks() / (float)Mathf.Max(1, tasks.Count);
-            float timeRatio = Mathf.Clamp01(matchElapsedSeconds / ruleSet.MatchHardLimitSeconds);
-            int aliveGang = CountAliveRole(OnlineRole.Gang);
-            int aliveNonGang = CountAlivePlayers() - aliveGang;
-            int unresolvedBodies = CountUnreportedBodies();
-            int sabotaged = CountSabotagedTasks();
-            string leadingSide = evidenceRatio >= timeRatio + 0.12f || taskRatio >= timeRatio + 0.1f ? "警方领先" : aliveGang > 0 && aliveGang >= aliveNonGang - 1 ? "黑帮逼近人数优势" : "局势胶着";
-            string urgency = sabotaged > 0 || unresolvedBodies > 0 ? "高压" : timeRatio > 0.65f && evidenceRatio < 0.72f ? "时间压力" : "可控";
-            return leadingSide
-                + " | " + urgency
-                + " | 警方进度 " + Mathf.RoundToInt(evidenceRatio * 100f) + "%"
-                + " | 任务 " + Mathf.RoundToInt(taskRatio * 100f) + "%"
-                + " | 黑帮 " + aliveGang + " / 非黑帮 " + aliveNonGang
-                + (unresolvedBodies > 0 ? " | 未报案 " + unresolvedBodies : string.Empty)
-                + (sabotaged > 0 ? " | 待修复 " + sabotaged : string.Empty);
-        }
-
-        private string BuildLocalObjectiveSummary()
-        {
-            OnlineRole role = LocalEffectiveRole();
-
-            if (role == OnlineRole.Gang)
-            {
-                OnlineTaskState sabotageTarget = FindHighestValueOpenTask();
-                string targetText = sabotageTarget.Id >= 0 ? sabotageTarget.Name + "/" + SabotageName(SabotageForTask(sabotageTarget.Id)) : "寻找落单目标";
-                return "隐藏身份，制造破坏，优先干扰 " + targetText + "，会议中误导投票。";
-            }
-
-            if (role == OnlineRole.Undercover)
-            {
-                OnlineTaskState target = FindRecommendedTask(LocalCameraTarget());
-                return "加速取证但控制嫌疑，优先推进 " + target.Name + "，会议里不要暴露路线。";
-            }
-
-            if (role == OnlineRole.Mole)
-            {
-                OnlineTaskState sabotageTargetMol = FindHighestValueOpenTask();
-                string targetTextMol = sabotageTargetMol.Id >= 0 ? sabotageTargetMol.Name + "/" + SabotageName(SabotageForTask(sabotageTargetMol.Id)) : "寻找落单目标";
-                return "身为线人隐匿在警方之中，破坏证据并掩护黑帮，优先干扰 " + targetTextMol + "，利用警察身份误导搜查方向。";
-            }
-
-            OnlineTaskState recommended = FindRecommendedTask(LocalCameraTarget());
-            return "完成任务、报案、投出黑帮；当前推荐 " + recommended.Name + "。";
-        }
-
-        private string BuildNextEvidenceMilestoneHint()
-        {
-            int nextMilestone = Mathf.Clamp(evidenceMilestoneIndex + 1, 1, 4);
-            float targetRatio = nextMilestone == 1 ? 0.25f : nextMilestone == 2 ? 0.5f : nextMilestone == 3 ? 0.75f : 1f;
-            int nextScore = Mathf.CeilToInt(taskService.EvidenceTarget * targetRatio);
-
-            if (taskService.EvidenceScore >= taskService.EvidenceTarget)
-            {
-                return "证据已闭合";
-            }
-
-            return "下阶段还差 " + Mathf.Max(0, nextScore - taskService.EvidenceScore) + " 证";
-        }
 
         private static string EvidenceMilestoneName(int milestone)
         {
@@ -6467,65 +3896,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private string BuildLocalActionHint()
-        {
-            if (!IsOnline)
-            {
-                return "创建 Host 后可预览完整 2.5D 港区并开局，默认单局目标 10-20 分钟。";
-            }
 
-            ulong localClientId = LocalClientId();
-
-            if (!players.TryGetValue(localClientId, out OnlinePlayerState localState) || !localState.Alive)
-            {
-                return "你已出局，继续观察路线、投票和结算。";
-            }
-
-            if (activeTaskId >= 0)
-            {
-                return "正在处理任务面板：按 1/2/3 校准，按住 Space 推进，Esc 退出。";
-            }
-
-            if (localRole == OnlineRole.Gang && IsNearUnderworldPassage(localState.Position))
-            {
-                return "你在暗线节点旁，按 F 可换位到对侧节点；E 可破坏附近任务。";
-            }
-
-            OnlineTaskState nearestTask = FindNearestTask(localState.Position);
-
-            if (nearestTask.Id >= 0)
-            {
-                return "附近任务: " + nearestTask.Name + " | E " + (localRole == OnlineRole.Gang ? "破坏" : nearestTask.Sabotaged ? "修复" : "推进")
-                    + " | 类型: " + SabotageName(SabotageForTask(nearestTask.Id));
-            }
-
-            if (TryFindNearestBody(localState.Position, out _))
-            {
-                return "附近发现尸体，按 R 报案开会。";
-            }
-
-            if (Vector3.Distance(localState.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
-            {
-                return "你在紧急铃旁，剩余会议 " + emergencyMeetingsLeft + "，断讯/冷却会阻止开会。";
-            }
-
-            OnlineTaskState target = FindRecommendedTask(localState.Position);
-            return "推荐前往: " + target.Name + " | 距离 " + Vector3.Distance(localState.Position, target.Position).ToString("F1");
-        }
-
-        private string BuildVoiceHudLine()
-        {
-            ChatChannel channel = chatSystem != null ? chatSystem.CurrentChannel : ChatChannel.Global;
-            string mode = channel switch
-            {
-                ChatChannel.Meeting => "会议频道",
-                ChatChannel.Proximity => "近距离",
-                ChatChannel.Global => "全局",
-                ChatChannel.Ghost => "鬼魂频道",
-                _ => "聊天"
-            };
-            return "聊天: " + mode + " | 输入 T 发言 | " + (chatSystem != null ? chatSystem.MessageCount + "条消息" : "未连接");
-        }
 
         private OnlineTaskState FindRecommendedTask(Vector3 position)
         {
@@ -6583,349 +3954,19 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private string BuildReleaseReadiness()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.AppendLine("发行候选覆盖");
-            builder.AppendLine("联网: Host/Client/AI 补位/权威判定");
-            builder.AppendLine("玩法: 开局身份、证据链、多类型破坏、击倒、尸体、会议次数、投票、结算，目标单局 10-20 分钟");
-            builder.AppendLine("局内完整度: 非黑帮任务小游戏输入门禁、会议证据墙、票型结论、局势压力条、M 键全图任务/玩家标注");
-            builder.AppendLine("人物: 督察、鉴证、技侦、卧底、打手、白纸扇、车手");
-            builder.AppendLine("场景: 大型九龙港城，道路骨架、12 区域、28 任务点、可替换真实地图底座");
-            builder.AppendLine("美术: 2.5D 建筑体、屋顶、外立面、窗格、招牌、门框、道路标线、港口设备、监控墙、夜市摊档、诊所、电房、证物库");
-            builder.AppendLine("地图物件: 每区专属装饰、任务设备外观、公共设施、路障、标牌、货架、线缆");
-            builder.AppendLine("碰撞: 服务端权威阻挡墙体、货柜、柜台、车辆、重型设备，小装饰不阻挡");
-            builder.AppendLine("黑帮路线: 后巷暗线节点、车手换位、断讯/封锁/黑灯等破坏链");
-            builder.AppendLine("预览: 局前全图预览、局内小地图、Tab 战术地图、任务推荐提示");
-            builder.AppendLine("服务: Unity Services 初始化/匿名登录/Vivox 准备，等待 Cloud Project 绑定后启用");
-            builder.AppendLine("音频: 运行时生成提示音，覆盖开局、任务、破坏、击倒、会议、投票、结算");
-            builder.AppendLine("资源: " + CommercialArtAdapterCount + " 个资源适配层 | " + LargePortVistaCount + " 个大场景港区层");
-            builder.AppendLine("大厅: " + BuildLobbyReadinessSummary());
-            builder.AppendLine(BuildPhaseRoadmap());
-            return builder.ToString();
-        }
 
-        private string BuildServiceStatus()
-        {
-            if (serviceBootstrap == null)
-            {
-                return "未挂载。";
-            }
 
-            string player = string.IsNullOrEmpty(serviceBootstrap.PlayerId) ? string.Empty : " | Player " + serviceBootstrap.PlayerId;
-            return serviceBootstrap.ServiceReadinessSummary + player;
-        }
 
-        private string BuildLobbyReadinessSummary()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.Append("大厅准备: ");
-            builder.Append(CountHumanPlayers()).Append("/").Append(roomMinPlayers).Append(" 真人");
 
-            if (roomAutoFillAi)
-            {
-                builder.Append(" | AI补位开启");
-            }
 
-            if (localPreviewMode)
-            {
-                builder.Append(" | 本地可玩局");
-            }
-            else if (!IsHost)
-            {
-                builder.Append(" | 等待Host开局");
-            }
-            else
-            {
-                builder.Append(" | Host可开局");
-            }
 
-            builder.Append(" | ").Append(ReadyPlayerCount()).Append("/").Append(players.Count).Append(" Ready");
 
-            if (players.Count < roomMinPlayers)
-            {
-                builder.Append(" | 人数不足");
-            }
 
-            if (!roomAutoFillAi && CountHumanPlayers() < roomMinPlayers)
-            {
-                builder.Append(" | 需补真人或开启AI");
-            }
 
-            return builder.ToString();
-        }
 
-        private string BuildPhaseRoadmap()
-        {
-            const string roadmap = "流程: Lobby -> Opening -> Action -> Meeting/Voting -> Result";
 
-            if (!IsOnline)
-            {
-                return "阶段: 直连/Relay/本地试玩 | " + roadmap;
-            }
 
-            switch (phase)
-            {
-                case OnlineMatchPhase.Lobby:
-                    return roadmap;
-                case OnlineMatchPhase.Opening:
-                    return "当前: Opening | 身份简报与初始路线 | " + roadmap;
-                case OnlineMatchPhase.Action:
-                    return "当前: Action | 巡场、任务、破坏、击倒、报案 | " + roadmap;
-                case OnlineMatchPhase.Meeting:
-                    return "当前: Meeting | 讨论、对照证据、准备投票 | " + roadmap;
-                case OnlineMatchPhase.Voting:
-                    return "当前: Voting | 票型结算中 | " + roadmap;
-                case OnlineMatchPhase.Result:
-                    return "当前: Result | 结算与重开 | " + roadmap;
-                default:
-                    return "阶段: 未知 | " + roadmap;
-            }
-        }
 
-        private void DrawRoomSettings()
-        {
-            GUILayout.Space(8f);
-            GUILayout.Label("房间设置");
-            roomName = LimitText(GUILayout.TextField(roomName), 20, "九龙港区夜局");
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("最少人数 " + roomMinPlayers, GUILayout.Width(110f));
-            roomMinPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMinPlayers, ruleSet.MinimumRoomPlayers, ruleSet.MaximumRoomPlayers));
-            GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("最大人数 " + roomMaxPlayers, GUILayout.Width(110f));
-            roomMaxPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMaxPlayers, roomMinPlayers, ruleSet.MaximumRoomPlayers));
-            GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("证据目标 " + taskService.EvidenceTarget, GUILayout.Width(110f));
-            taskService.EvidenceTarget = Mathf.RoundToInt(GUILayout.HorizontalSlider(taskService.EvidenceTarget, 34, 56));
-            GUILayout.EndHorizontal();
-            GUILayout.Label("目标局长: " + TargetMatchMinutesMin + "-" + TargetMatchMinutesMax + " 分钟 | 击倒冷却 " + Mathf.RoundToInt(ruleSet.KillCooldownSeconds) + "s | 会议 " + Mathf.RoundToInt(ruleSet.MeetingIntroSeconds + ruleSet.VotingSeconds) + "s");
-            roomAutoFillAi = GUILayout.Toggle(roomAutoFillAi, "人数不足时 AI 补位");
-            revealRoleOnEject = GUILayout.Toggle(revealRoleOnEject, "投出局时公开身份");
-            proximityVoiceEnabled = GUILayout.Toggle(proximityVoiceEnabled, "近距离语音规则");
-        }
-
-        private void DrawRelayJoinControls()
-        {
-            GUILayout.Space(8f);
-            GUILayout.Label("Relay 联网房间码");
-            bool previousEnabled = GUI.enabled;
-            GUI.enabled = previousEnabled && !relayOperationInProgress;
-
-            if (GUILayout.Button("创建 Relay 房间码"))
-            {
-                StartRelayHost();
-            }
-
-            GUILayout.BeginHorizontal();
-            relayJoinInput = CleanRelayJoinInput(GUILayout.TextField(relayJoinInput));
-
-            if (GUILayout.Button("加入房间码", GUILayout.Width(108f)))
-            {
-                StartRelayClient();
-            }
-
-            GUILayout.EndHorizontal();
-            GUI.enabled = previousEnabled;
-            GUILayout.Label(relayStatus);
-        }
-
-        private void DrawRoomHeader()
-        {
-            GUILayout.Label("房间: " + CountHumanPlayers() + " 真人 / " + CountBotPlayers() + " AI | " + roomMinPlayers + "-" + roomMaxPlayers + " 人");
-            GUILayout.Label("规则: " + (roomAutoFillAi ? "AI 补位" : "真人优先") + " | " + (revealRoleOnEject ? "出局公开身份" : "身份隐藏") + " | " + (proximityVoiceEnabled ? "近距离语音" : "会议语音"));
-
-            if (!string.IsNullOrWhiteSpace(relayJoinCode))
-            {
-                GUILayout.Label("Relay 房间码: " + relayJoinCode);
-            }
-
-            if (IsHost && phase == OnlineMatchPhase.Lobby)
-            {
-                DrawRoomSettings();
-            }
-        }
-
-        private void DrawCompactActionHud()
-        {
-            float topBarWidth = Mathf.Clamp(Screen.width * 0.34f, 360f, 540f);
-            float topBarHeight = 68f;
-            Rect topBar = new Rect(16f, 14f, topBarWidth, topBarHeight);
-            GUILayout.BeginArea(topBar, GUI.skin.box);
-            GUILayout.Label("九龙港城行动 | " + RoleName(localRole) + " / " + LocalProfessionName());
-            GUILayout.Label("证据 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 任务 " + CountCompletedTasks() + "/" + tasks.Count + " | 存活 " + CountAlivePlayers() + "/" + players.Count + " | 会议 " + emergencyMeetingsLeft + " | " + BuildHazardSummary() + (aiActionGraceTimer > 0f ? " | 缓冲 " + Mathf.CeilToInt(aiActionGraceTimer) + "s" : string.Empty));
-            GUILayout.Label("阶段 " + EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
-            GUILayout.Label(BuildVoiceHudLine());
-            GUILayout.EndArea();
-
-            float promptWidth = Mathf.Clamp(Screen.width * 0.34f, 420f, 560f);
-            Rect promptRect = new Rect((Screen.width - promptWidth) * 0.5f, Screen.height - 66f, promptWidth, 48f);
-            GUILayout.BeginArea(promptRect, GUI.skin.box);
-            GUILayout.Label(BuildLocalActionHint() + " | WASD/E/Q/R/F/V/M/I");
-            GUILayout.EndArea();
-
-            float miniWidth = Mathf.Clamp(Screen.width * 0.13f, 165f, 220f);
-            Rect miniRect = new Rect(Screen.width - miniWidth - 18f, 14f, miniWidth, 128f);
-            GUILayout.BeginArea(miniRect, GUI.skin.box);
-            GUILayout.Label("小地图");
-            DrawTacticalMapMini();
-            GUILayout.EndArea();
-
-            int activeBodies = CountUnreportedBodies();
-            if (activeBodies > 0)
-            {
-                Rect alertRect = new Rect(18f, 86f, Mathf.Clamp(Screen.width * 0.2f, 220f, 300f), 56f);
-                GUILayout.BeginArea(alertRect, GUI.skin.box);
-                GUILayout.Label("未报案尸体: " + activeBodies);
-                GUILayout.Label(status);
-                GUILayout.EndArea();
-            }
-
-            DrawRoleAbilityMeter();
-        }
-
-        private void DrawRoleAbilityMeter()
-        {
-            if (!players.TryGetValue(LocalClientId(), out OnlinePlayerState localState) || !localState.Alive)
-            {
-                return;
-            }
-
-            Rect rect = new Rect(18f, Screen.height - 92f, Mathf.Clamp(Screen.width * 0.15f, 180f, 250f), 56f);
-            GUILayout.BeginArea(rect, GUI.skin.box);
-            GUILayout.Label("技能 | " + ProfessionName(localState.Profession));
-
-            float abilityCooldown = abilityCooldowns.TryGetValue(localState.ClientId, out float value) ? value : localState.AbilityCooldown;
-            float ratio = Mathf.Clamp01(1f - abilityCooldown / ruleSet.AbilityCooldownSeconds);
-            Rect bar = GUILayoutUtility.GetRect(rect.width - 18f, 12f);
-            DrawProgressBar(bar, ratio, ratio >= 1f ? new Color(0.12f, 0.74f, 0.36f, 1f) : new Color(0.08f, 0.42f, 0.72f, 1f));
-            GUILayout.Label(ratio >= 1f ? "F 可用" : "冷却 " + Mathf.CeilToInt(abilityCooldown) + "s");
-            GUILayout.EndArea();
-        }
-
-        private void DrawActionIntelPanel()
-        {
-            float width = Mathf.Clamp(Screen.width * 0.24f, 300f, 420f);
-            float height = Mathf.Clamp(Screen.height * 0.52f, 360f, 560f);
-            Rect rect = new Rect(18f, 108f, width, height);
-            GUILayout.BeginArea(rect, GUI.skin.box);
-            GUILayout.Label("案情板");
-            intelScroll = GUILayout.BeginScrollView(intelScroll);
-            GUILayout.Label(BuildFocusedIntel());
-            GUILayout.Space(8f);
-            GUILayout.Label(BuildTaskList());
-            GUILayout.Space(8f);
-            GUILayout.Label(BuildCaseLog());
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
-        }
-
-        private void DrawActiveTaskPanel()
-        {
-            // 小游戏接管时由其自建 Canvas 呈现，OnGUI 经典面板让位，避免双层叠加。
-            if (activeTaskId < 0 || activeMiniGame != null)
-            {
-                return;
-            }
-
-            OnlineTaskState task = GetTask(activeTaskId);
-            float width = Mathf.Clamp(Screen.width * 0.46f, 520f, 760f);
-            float height = 428f;
-            Rect rect = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
-            GUILayout.BeginArea(rect, GUI.skin.box);
-            GUILayout.Label("现场任务 | " + task.Name);
-            GUILayout.Label(TaskPanelInstruction(activeTaskId));
-            GUILayout.Space(4f);
-            Rect tagRect = GUILayoutUtility.GetRect(width - 44f, 42f);
-            DrawTaskMiniGameTag(tagRect, TaskPanelTemplateTitle(activeTaskId), TaskPanelTemplateSubtitle(activeTaskId), TaskPanelAccent(activeTaskId));
-            GUILayout.Space(6f);
-            DrawTaskMiniGameWidget(activeTaskId, width - 44f, 112f);
-            GUILayout.Space(6f);
-            Rect sequenceRect = GUILayoutUtility.GetRect(width - 44f, 108f);
-            DrawTaskSequenceRail(sequenceRect, activeTaskId);
-            GUILayout.Space(6f);
-
-            Rect progressRect = GUILayoutUtility.GetRect(width - 44f, 24f);
-            DrawProgressBar(progressRect, activeTaskCharge, new Color(0.08f, 0.62f, 0.82f, 1f));
-            GUILayout.Label("证据价值 +" + TaskEvidenceValue(activeTaskId) + " | 错误 " + activeTaskMistakes + "/3 | 模板 " + TaskPanelTemplateTitle(activeTaskId));
-            DrawTaskFeedbackBanner(width - 44f);
-
-            GUILayout.Space(8f);
-            GUILayout.BeginHorizontal();
-            DrawTaskStepButton("键 " + CorrectTaskStepInput(activeTaskId, 0), CorrectTaskStepInput(activeTaskId, 0), activeTaskStepOneDone, activeTaskStep == 0);
-            DrawTaskStepButton("键 " + CorrectTaskStepInput(activeTaskId, 1), CorrectTaskStepInput(activeTaskId, 1), activeTaskStepTwoDone, activeTaskStep == 1);
-            DrawTaskStepButton("键 " + CorrectTaskStepInput(activeTaskId, 2), CorrectTaskStepInput(activeTaskId, 2), activeTaskStepThreeDone, activeTaskStep == 2);
-            GUILayout.EndHorizontal();
-            GUILayout.Space(8f);
-            GUILayout.Label("按高亮顺序点击或输入数字键，按住 Space 扫描/同步，Esc 退出 | " + TaskPanelFooter(activeTaskId));
-            GUILayout.EndArea();
-        }
-
-        private void DrawTaskFeedbackBanner(float width)
-        {
-            if (activeTaskFeedbackTimer <= 0f)
-            {
-                return;
-            }
-
-            Rect rect = GUILayoutUtility.GetRect(width, 26f);
-            Color oldColor = GUI.color;
-            GUI.color = activeTaskFeedbackPositive ? new Color(0.1f, 0.62f, 0.28f, 0.9f) : new Color(0.78f, 0.14f, 0.1f, 0.9f);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            GUI.Label(new Rect(rect.x + 10f, rect.y + 3f, rect.width - 20f, rect.height - 6f), activeTaskFeedbackPositive ? "校验通过" : "输入不匹配");
-            GUI.color = oldColor;
-        }
-
-        private void DrawTaskMiniGameWidget(int taskId, float width, float height)
-        {
-            Rect widget = GUILayoutUtility.GetRect(width, height);
-            Color oldColor = GUI.color;
-            GUI.color = new Color(0.045f, 0.06f, 0.065f, 0.96f);
-            GUI.DrawTexture(widget, Texture2D.whiteTexture);
-
-            int mode = TaskTemplateMode(taskId);
-
-            if (mode == 0)
-            {
-                DrawTaskScreenGrid(widget);
-            }
-            else if (mode == 1)
-            {
-                DrawTaskSealScanner(widget);
-            }
-            else if (mode == 2)
-            {
-                DrawTaskBreakerWidget(widget);
-            }
-            else if (mode == 3)
-            {
-                DrawTaskEvidenceTray(widget);
-            }
-            else if (mode == 4)
-            {
-                DrawTaskLedgerWidget(widget);
-            }
-            else
-            {
-                DrawTaskRouteWidget(widget);
-            }
-
-            GUI.color = oldColor;
-        }
-
-        private void DrawTaskMiniGameTag(Rect rect, string title, string subtitle, Color accent)
-        {
-            GUI.color = new Color(0.09f, 0.1f, 0.11f, 1f);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            GUI.color = accent;
-            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, 4f), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-
-            Rect textRect = new Rect(rect.x + 12f, rect.y + 6f, rect.width - 24f, rect.height - 12f);
-            GUI.Label(textRect, title + "\n" + subtitle);
-        }
 
         private static int TaskTemplateMode(int taskId)
         {
@@ -7224,52 +4265,7 @@ namespace GanglandUndercover.Online
             GUI.color = oldColor;
         }
 
-        private void DrawTaskSequenceRail(Rect rect, int taskId)
-        {
-            Color oldColor = GUI.color;
-            int nextInput = CorrectTaskStepInput(taskId, Mathf.Clamp(activeTaskStep, 0, 2));
-            Color accent = TaskPanelAccent(taskId);
 
-            for (int i = 0; i < 3; i++)
-            {
-                int required = CorrectTaskStepInput(taskId, i);
-                bool completed = i == 0 ? activeTaskStepOneDone : i == 1 ? activeTaskStepTwoDone : activeTaskStepThreeDone;
-                bool current = !completed && activeTaskStep == i;
-                float segmentWidth = rect.width / 3f - 10f;
-                Rect segment = new Rect(rect.x + i * rect.width / 3f + 5f, rect.y + 10f, segmentWidth, rect.height - 20f);
-                GUI.color = completed ? new Color(0.12f, 0.64f, 0.34f, 1f) : current ? accent : new Color(0.12f, 0.15f, 0.16f, 1f);
-                GUI.DrawTexture(segment, Texture2D.whiteTexture);
-                GUI.color = current ? new Color(1f, 1f, 1f, 0.96f) : new Color(0.04f, 0.05f, 0.055f, 1f);
-                GUI.DrawTexture(new Rect(segment.x + 8f, segment.y + 8f, segment.width - 16f, 5f), Texture2D.whiteTexture);
-                GUI.color = completed ? Color.white : current ? Color.black : new Color(0.78f, 0.82f, 0.8f, 1f);
-                GUI.Label(new Rect(segment.x + 10f, segment.y + 20f, segment.width - 20f, segment.height - 28f), completed ? "已校验\n键 " + required : current ? "下一步\n键 " + nextInput : "等待\n键 " + required);
-            }
-
-            if (activeTaskFeedbackTimer > 0f)
-            {
-                GUI.color = activeTaskFeedbackPositive ? new Color(0.18f, 0.9f, 0.42f, 0.72f) : new Color(0.95f, 0.14f, 0.08f, 0.72f);
-                GUI.DrawTexture(new Rect(rect.x, rect.y + rect.height - 5f, rect.width, 5f), Texture2D.whiteTexture);
-            }
-
-            GUI.color = oldColor;
-        }
-
-        private void DrawTaskStepButton(string label, int input, bool completed, bool current)
-        {
-            Color oldColor = GUI.color;
-            GUI.color = completed ? new Color(0.16f, 0.72f, 0.36f, 1f) : current ? TaskPanelAccent(activeTaskId) : new Color(0.18f, 0.22f, 0.24f, 1f);
-
-            if (completed)
-            {
-                GUILayout.Box("完成 " + label, GUILayout.Height(44f), GUILayout.ExpandWidth(true));
-            }
-            else if (GUILayout.Button((current ? "执行 " : "待命 ") + label, GUILayout.Height(44f), GUILayout.ExpandWidth(true)))
-            {
-                ResolveActiveTaskStep(input);
-            }
-
-            GUI.color = oldColor;
-        }
 
         private static string TaskPanelInstruction(int taskId)
         {
@@ -7346,61 +4342,8 @@ namespace GanglandUndercover.Online
             return safeValue.Length <= maxLength ? safeValue : safeValue.Substring(0, maxLength);
         }
 
-        private string LocalProfessionName()
-        {
-            if (players.TryGetValue(LocalClientId(), out OnlinePlayerState state))
-            {
-                return ProfessionName(state.Profession);
-            }
 
-            return "待分配";
-        }
 
-        private void DrawOpeningBriefing()
-        {
-            GUILayout.Space(10f);
-            GUILayout.BeginVertical(GUI.skin.box);
-            GUILayout.Label("专案简报");
-            GUILayout.Label("你的身份: " + RoleName(localRole));
-            GUILayout.Label("你的职责: " + LocalProfessionName());
-            GUILayout.Label("地图: 九龙港区封控街区");
-            GUILayout.Label("局长: 目标 10-20 分钟；20 分钟未闭合关键证据则按证据比例结算。");
-            GUILayout.Label("关键机制: 大地图巡线、现场小任务、尸体报案、会议语音、投票放逐、黑帮暗线通道。");
-            GUILayout.Label("目标: 警方搜证和投出黑帮；黑帮制造不在场证明、破坏证据链并误导会议。");
-            GUILayout.Space(6f);
-            Rect routeRect = GUILayoutUtility.GetRect(360f, 62f, GUILayout.ExpandWidth(true));
-            DrawOpeningRouteCards(routeRect);
-            GUILayout.Label("行动倒计时: " + Mathf.CeilToInt(phaseTimer) + "s");
-            GUILayout.EndVertical();
-        }
-
-        private void DrawOpeningRouteCards(Rect rect)
-        {
-            Color oldColor = GUI.color;
-            string[] labels = { "货柜码头", "监控中心", "夜市情报", "洗钱账房", "证物冷库" };
-            Color[] colors =
-            {
-                new Color(0.18f, 0.36f, 0.32f, 1f),
-                new Color(0.08f, 0.3f, 0.42f, 1f),
-                new Color(0.46f, 0.14f, 0.1f, 1f),
-                new Color(0.18f, 0.2f, 0.34f, 1f),
-                new Color(0.34f, 0.22f, 0.42f, 1f)
-            };
-
-            float gap = 8f;
-            float cardWidth = (rect.width - gap * (labels.Length - 1)) / labels.Length;
-
-            for (int i = 0; i < labels.Length; i++)
-            {
-                Rect card = new Rect(rect.x + i * (cardWidth + gap), rect.y, cardWidth, rect.height);
-                GUI.color = colors[i];
-                GUI.DrawTexture(card, Texture2D.whiteTexture);
-                GUI.color = Color.white;
-                GUI.Label(new Rect(card.x + 8f, card.y + 8f, card.width - 16f, card.height - 16f), labels[i] + "\n" + OpeningRouteStatus(i));
-            }
-
-            GUI.color = oldColor;
-        }
 
         private static string OpeningRouteStatus(int index)
         {
@@ -7430,144 +4373,12 @@ namespace GanglandUndercover.Online
             GUI.skin.label.wordWrap = true;
         }
 
-        private void DrawTacticalMapMini()
-        {
-            float mapHeight = phase == OnlineMatchPhase.Action && !tacticalMapOpen ? 92f : 132f;
-            Rect rect = GUILayoutUtility.GetRect(180f, mapHeight, GUILayout.ExpandWidth(true));
-            GUI.Box(rect, "港区小地图");
-            DrawMapRect(rect, false);
-        }
 
-        private void DrawLargeMapPreview()
-        {
-            float width = Mathf.Min(Screen.width * 0.74f, 1180f);
-            float height = Mathf.Min(Screen.height * 0.68f, 760f);
-            Rect rect = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f + 26f, width, height);
-            GUI.Box(rect, "九龙港区封控全图 | M/Tab 收起");
-            DrawMapRect(new Rect(rect.x + 18f, rect.y + 34f, rect.width - 36f, rect.height - 52f), true);
 
-            Rect legend = new Rect(rect.x + 22f, rect.y + rect.height - 42f, rect.width - 44f, 28f);
-            GUILayout.BeginArea(legend);
-            GUILayout.Label("黄点 玩家 | 青点 任务 | 红点 被破坏/尸体 | 紫点 暗线 | 蓝色区域 警方据点 | 棕红区域 黑帮高风险区");
-            GUILayout.EndArea();
-        }
 
-        private void DrawMapRect(Rect rect, bool withLabels)
-        {
-            Color oldColor = GUI.color;
-            GUI.color = new Color(0.06f, 0.075f, 0.08f, 0.92f);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-            DrawMiniMapCorridors(rect);
 
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                DrawMiniMapArea(rect, mapService.ScaleMapPosition(room.Center), mapService.ScaleMapSize(room.Size), room.Floor, withLabels ? room.Label : string.Empty);
-            }
 
-            for (int i = 0; i < ruleSet.UnderworldPassageCount; i++)
-            {
-                DrawMiniMapDot(rect, mapService.UnderworldPassagePosition(i, ruleSet.UnderworldPassageCount), new Color(0.78f, 0.2f, 0.86f, 1f), withLabels ? 8f : 5f);
-            }
 
-            foreach (OnlineTaskState task in tasks)
-            {
-                Color taskColor = task.Completed ? Color.green : task.Sabotaged ? Color.red : Color.cyan;
-                DrawMiniMapDot(rect, task.Position, taskColor, withLabels ? 7f : 5f);
-
-                if (withLabels)
-                {
-                    DrawMiniMapLabel(rect, task.Position, TaskMapCode(task.Id), taskColor);
-                }
-            }
-
-            foreach (OnlineBodyState body in bodies)
-            {
-                if (!body.Reported)
-                {
-                    DrawMiniMapDot(rect, body.Position, new Color(1f, 0.05f, 0.04f, 1f), withLabels ? 9f : 6f);
-                    if (withLabels)
-                    {
-                        DrawMiniMapLabel(rect, body.Position, "尸", new Color(1f, 0.05f, 0.04f, 1f));
-                    }
-                }
-            }
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                Color playerColor = state.Alive ? Color.yellow : Color.gray;
-                DrawMiniMapDot(rect, state.Position, playerColor, withLabels ? 8f : 6f);
-
-                if (withLabels)
-                {
-                    DrawMiniMapLabel(rect, state.Position, state.ClientId == LocalClientId() ? "你" : ShortDisplayName(state.DisplayName, 3), playerColor);
-                }
-            }
-
-            GUI.color = oldColor;
-        }
-
-        private void DrawMiniMapCorridors(Rect rect)
-        {
-            Color oldColor = GUI.color;
-            GUI.color = new Color(0.22f, 0.25f, 0.26f, 1f);
-            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, -0.18f, 0f)), mapService.ScaleMapSize(new Vector3(15.5f, 1.2f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, 3.65f, 0f)), mapService.ScaleMapSize(new Vector3(16.4f, 1.04f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0.12f, -3.9f, 0f)), mapService.ScaleMapSize(new Vector3(15.4f, 1.04f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(-6.85f, 0.15f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 8.35f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(7.05f, 0.08f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 8.18f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, 1.85f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 3.15f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapArea(rect, mapService.ScaleMapPosition(new Vector3(0f, -2.35f, 0f)), mapService.ScaleMapSize(new Vector3(1.08f, 3.05f, 0f)), GUI.color, string.Empty);
-            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(0f, -0.35f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 13f);
-            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(-6.85f, 3.65f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
-            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(7.05f, 3.65f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
-            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(-6.85f, -3.9f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
-            DrawMiniMapDot(rect, mapService.ScaleMapPosition(new Vector3(7.05f, -3.9f, 0f)), new Color(0.54f, 0.6f, 0.62f, 1f), 9f);
-            GUI.color = oldColor;
-        }
-
-        private void DrawMiniMapArea(Rect mapRect, Vector3 worldCenter, Vector3 worldSize, Color color, string label)
-        {
-            Rect area = WorldRectToMapRect(mapRect, worldCenter, worldSize);
-            Color oldColor = GUI.color;
-            GUI.color = color;
-            GUI.DrawTexture(area, Texture2D.whiteTexture);
-            GUI.color = Color.white;
-
-            if (!string.IsNullOrEmpty(label))
-            {
-                GUI.Label(area, label);
-            }
-
-            GUI.color = oldColor;
-        }
-
-        private void DrawMiniMapDot(Rect mapRect, Vector3 worldPosition, Color color, float size)
-        {
-            Vector2 point = WorldToMapPoint(mapRect, worldPosition);
-            Color oldColor = GUI.color;
-            GUI.color = color;
-            GUI.DrawTexture(new Rect(point.x - size * 0.5f, point.y - size * 0.5f, size, size), Texture2D.whiteTexture);
-            GUI.color = oldColor;
-        }
-
-        private void DrawMiniMapLabel(Rect mapRect, Vector3 worldPosition, string label, Color color)
-        {
-            if (string.IsNullOrEmpty(label))
-            {
-                return;
-            }
-
-            Vector2 point = WorldToMapPoint(mapRect, worldPosition);
-            Rect labelRect = new Rect(point.x + 5f, point.y - 9f, 64f, 20f);
-            Color oldColor = GUI.color;
-            GUI.color = new Color(0.015f, 0.018f, 0.02f, 0.78f);
-            GUI.DrawTexture(labelRect, Texture2D.whiteTexture);
-            GUI.color = color;
-            GUI.DrawTexture(new Rect(labelRect.x, labelRect.y, 3f, labelRect.height), Texture2D.whiteTexture);
-            GUI.color = Color.white;
-            GUI.Label(new Rect(labelRect.x + 6f, labelRect.y + 1f, labelRect.width - 8f, labelRect.height - 2f), label);
-            GUI.color = oldColor;
-        }
 
         private Rect WorldRectToMapRect(Rect mapRect, Vector3 worldCenter, Vector3 worldSize)
         {
@@ -7584,188 +4395,11 @@ namespace GanglandUndercover.Online
             return new Vector2(mapRect.x + x * mapRect.width, mapRect.y + (1f - y) * mapRect.height);
         }
 
-        private Vector3 LocalCameraTarget()
-        {
-            EnsureCameraRig();
-            return _cameraRig.GetTarget(players, LocalClientId(), localPosition);
-        }
 
-        private ulong PickOpeningCameraSubject(ulong fallbackClientId)
-        {
-            if (players.TryGetValue(fallbackClientId, out OnlinePlayerState localState) && localState.Alive && localState.Input.sqrMagnitude > 0.02f)
-            {
-                return fallbackClientId;
-            }
 
-            ulong bestClientId = fallbackClientId;
-            float bestDistance = float.MaxValue;
-            Vector3 anchor = mapService.ScaleMapPosition(new Vector3(-4.8f, 1.65f, 0f));
 
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                if (!state.Alive)
-                {
-                    continue;
-                }
 
-                float distance = Vector3.Distance(state.Position, anchor);
 
-                if (distance < bestDistance)
-                {
-                    bestClientId = state.ClientId;
-                    bestDistance = distance;
-                }
-            }
-
-            return bestClientId;
-        }
-
-        private void DrawVotePanel()
-        {
-            GUILayout.Space(6f);
-            GUILayout.Label("会议投票");
-
-            if (phase == OnlineMatchPhase.Meeting)
-            {
-                GUILayout.Label("讨论倒计时：" + Mathf.CeilToInt(phaseTimer) + "s");
-            }
-            else
-            {
-                GUILayout.Label("投票倒计时：" + Mathf.CeilToInt(phaseTimer) + "s");
-            }
-
-            ulong localClientId = LocalClientId();
-            bool canVote = players.TryGetValue(localClientId, out OnlinePlayerState localState) && localState.Alive;
-            bool previousEnabled = GUI.enabled;
-            GUI.enabled = previousEnabled && canVote;
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                if (!state.Alive || state.ClientId == localClientId)
-                {
-                    continue;
-                }
-
-                if (GUILayout.Button("投票给 " + state.DisplayName))
-                {
-                    SendClientAction(OnlineActionType.Vote, state.ClientId);
-                }
-            }
-
-            if (GUILayout.Button("跳过投票"))
-            {
-                SendClientAction(OnlineActionType.SkipVote);
-            }
-
-            GUI.enabled = previousEnabled;
-        }
-
-        private void DrawActionChatPanel()
-        {
-            if (chatSystem == null)
-            {
-                return;
-            }
-
-            float chatWidth = Mathf.Clamp(Screen.width * 0.22f, 240f, 340f);
-            float chatHeight = Mathf.Clamp(Screen.height * 0.35f, 220f, 360f);
-            Rect chatArea = new Rect(Screen.width - chatWidth - 18f, Screen.height - chatHeight - 18f, chatWidth, chatHeight);
-
-            chatSystem.CurrentPhase = OnlineMatchPhase.Action;
-            chatSystem.CanSend = IsLocalAlive();
-            chatSystem.IsAlive = IsLocalAlive();
-            chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
-            chatSystem.ProcessInputKeys();
-            chatSystem.DrawChatPanel(chatArea, null);
-        }
-
-        private void DrawMeetingScreen()
-        {
-            float boardWidth = Mathf.Clamp(Screen.width * 0.58f, 720f, 980f);
-            float boardHeight = Mathf.Clamp(Screen.height * 0.72f, 520f, 760f);
-            Rect board = new Rect((Screen.width - boardWidth) * 0.5f, (Screen.height - boardHeight) * 0.5f, boardWidth, boardHeight);
-            GUILayout.BeginArea(board, GUI.skin.box);
-            GUILayout.Label("九龙港城会议");
-            GUILayout.Label(status);
-            GUILayout.Label((phase == OnlineMatchPhase.Meeting ? "讨论倒计时 " : "投票倒计时 ") + Mathf.CeilToInt(phaseTimer) + "s | 投票 " + votes.Count + "/" + CountAlivePlayers());
-
-            GUILayout.Space(8f);
-            GUILayout.BeginHorizontal();
-            GUILayout.BeginVertical(GUILayout.Width(boardWidth * 0.54f));
-            DrawMeetingEvidenceStrip(boardWidth * 0.52f);
-            GUILayout.Space(6f);
-            DrawVoiceRoomStrip();
-            GUILayout.Space(6f);
-            DrawMeetingRosterButtons();
-            GUILayout.EndVertical();
-
-            GUILayout.BeginVertical();
-            float rightWidth = boardWidth * 0.4f;
-
-            // 案情记录（上半部分）
-            GUILayout.Label("案情记录");
-            float intelHeight = boardHeight * 0.38f;
-            intelScroll = GUILayout.BeginScrollView(intelScroll, GUILayout.Height(intelHeight));
-            GUILayout.Label(BuildFocusedIntel());
-            GUILayout.Space(8f);
-            GUILayout.Label(BuildCaseLog());
-            GUILayout.EndScrollView();
-
-            // 聊天区域（下半部分）
-            GUILayout.Space(6f);
-            if (chatSystem != null)
-            {
-                float chatHeight = boardHeight * 0.42f;
-                Rect chatArea = GUILayoutUtility.GetRect(rightWidth, chatHeight);
-                chatSystem.CurrentPhase = phase;
-                chatSystem.CanSend = IsLocalAlive();
-                chatSystem.IsAlive = IsLocalAlive();
-                chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
-                chatSystem.ProcessInputKeys();
-                chatSystem.DrawChatPanel(chatArea, null);
-            }
-
-            GUILayout.EndVertical();
-            GUILayout.EndHorizontal();
-            GUILayout.EndArea();
-        }
-
-        private void DrawMeetingEvidenceStrip(float width)
-        {
-            GUILayout.Label("会议证据墙");
-            Rect rect = GUILayoutUtility.GetRect(width, 124f);
-            Color oldColor = GUI.color;
-            GUI.color = new Color(0.055f, 0.065f, 0.07f, 1f);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-
-            float progress = Mathf.Clamp01(taskService.EvidenceScore / (float)Mathf.Max(1, taskService.EvidenceTarget));
-            GUI.color = new Color(0.08f, 0.62f, 0.82f, 1f);
-            GUI.DrawTexture(new Rect(rect.x + 12f, rect.y + 16f, (rect.width - 24f) * progress, 10f), Texture2D.whiteTexture);
-            GUI.color = new Color(0.72f, 0.18f, 0.16f, 1f);
-            GUI.DrawTexture(new Rect(rect.x + 12f, rect.y + 40f, Mathf.Clamp01(CountUnreportedBodies() / 3f) * (rect.width - 24f), 8f), Texture2D.whiteTexture);
-            GUI.color = new Color(0.86f, 0.68f, 0.12f, 1f);
-
-            int sabotaged = CountSabotagedTasks();
-            for (int i = 0; i < sabotaged; i++)
-            {
-                float x = rect.x + 14f + i * 18f;
-                GUI.DrawTexture(new Rect(x, rect.y + 60f, 12f, 12f), Texture2D.whiteTexture);
-            }
-
-            GUI.color = Color.white;
-            GUI.Label(new Rect(rect.x + 12f, rect.y + 18f, rect.width - 24f, rect.height - 18f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + "\n未报案 " + CountUnreportedBodies() + " | 被破坏任务 " + sabotaged + "\n" + BuildMeetingEvidenceDigest() + "\n会议原因: " + lastMeetingReason + "\n上轮结论: " + lastVoteOutcome);
-            GUI.color = oldColor;
-        }
-
-        private string BuildMeetingEvidenceDigest()
-        {
-            OnlineTaskState keyTask = FindHighestValueOpenTask();
-            string keyTaskText = keyTask.Id >= 0 ? "关键未闭合: " + keyTask.Name + " +" + TaskEvidenceValue(keyTask.Id) : "关键未闭合: 无";
-            string dossier = evidenceDossier?.MeetingEvidenceDossier() ?? "";
-            if (!string.IsNullOrEmpty(dossier))
-                return keyTaskText + "\n\n【证据指证】\n" + dossier;
-            return keyTaskText + " | 当前票型 " + BuildVoteTallySummary();
-        }
 
         private OnlineTaskState FindHighestValueOpenTask()
         {
@@ -7791,213 +4425,11 @@ namespace GanglandUndercover.Online
             return best;
         }
 
-        private string BuildVoteTallySummary()
-        {
-            if (votes.Count == 0)
-            {
-                return "无人投票";
-            }
 
-            Dictionary<ulong, int> tally = new Dictionary<ulong, int>();
-            int skipVotes = 0;
 
-            foreach (ulong targetClientId in votes.Values)
-            {
-                if (targetClientId == SkipVoteTarget)
-                {
-                    skipVotes++;
-                    continue;
-                }
 
-                tally[targetClientId] = tally.TryGetValue(targetClientId, out int count) ? count + 1 : 1;
-            }
 
-            string lead = skipVotes > 0 ? "跳过 " + skipVotes : "跳过 0";
 
-            // Mark SecretVote voters
-            StringBuilder secretVoters = new StringBuilder();
-            foreach (var kv in votes)
-            {
-                if (players.TryGetValue(kv.Key, out OnlinePlayerState voterState)
-                    && ruleSet != null && ruleSet.HasAbility(voterState.Profession, AbilityType.SecretVote))
-                {
-                    if (secretVoters.Length > 0)
-                    {
-                        secretVoters.Append(" | ");
-                    }
-                    secretVoters.Append(voterState.DisplayName).Append(" 秘密投票");
-                }
-            }
-
-            foreach (KeyValuePair<ulong, int> pair in tally)
-            {
-                if (players.TryGetValue(pair.Key, out OnlinePlayerState state))
-                {
-                    lead += " | " + state.DisplayName + " " + pair.Value;
-                }
-            }
-
-            if (secretVoters.Length > 0)
-            {
-                lead += " | " + secretVoters.ToString();
-            }
-
-            return lead;
-        }
-
-        private string BuildVoteTallySummary(Dictionary<ulong, int> tally)
-        {
-            if (tally == null || tally.Count == 0)
-            {
-                return "无人得票";
-            }
-
-            StringBuilder builder = new StringBuilder();
-
-            // Show SecretVote voters separately
-            StringBuilder secretBuilder = new StringBuilder();
-            foreach (var kv in votes)
-            {
-                if (players.TryGetValue(kv.Key, out OnlinePlayerState voterState)
-                    && ruleSet != null && ruleSet.HasAbility(voterState.Profession, AbilityType.SecretVote))
-                {
-                    if (secretBuilder.Length > 0)
-                    {
-                        secretBuilder.Append(" | ");
-                    }
-                    secretBuilder.Append(voterState.DisplayName).Append(" 秘密投票");
-                }
-            }
-
-            foreach (KeyValuePair<ulong, int> pair in tally)
-            {
-                if (!players.TryGetValue(pair.Key, out OnlinePlayerState state))
-                {
-                    continue;
-                }
-
-                if (builder.Length > 0)
-                {
-                    builder.Append(" | ");
-                }
-
-                builder.Append(state.DisplayName).Append(" ").Append(pair.Value);
-            }
-
-            if (secretBuilder.Length > 0)
-            {
-                if (builder.Length > 0)
-                {
-                    builder.Append(" | ");
-                }
-                builder.Append(secretBuilder);
-            }
-
-            return builder.Length == 0 ? "无人得票" : builder.ToString();
-        }
-
-        private void DrawVoiceRoomStrip()
-        {
-            GUILayout.Label("会议聊天频道：全员可见 | " + BuildVoiceHudLine());
-            GUILayout.BeginHorizontal();
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                if (!state.Alive)
-                {
-                    continue;
-                }
-
-                Color oldColor = GUI.color;
-                GUI.color = votes.ContainsKey(state.ClientId) ? new Color(0.16f, 0.72f, 0.36f, 1f) : new Color(0.24f, 0.28f, 0.3f, 1f);
-                GUILayout.Box(state.DisplayName.Length > 4 ? state.DisplayName.Substring(0, 4) : state.DisplayName, GUILayout.Height(28f), GUILayout.MinWidth(48f));
-                GUI.color = oldColor;
-            }
-
-            GUILayout.EndHorizontal();
-        }
-
-        private void DrawMeetingRosterButtons()
-        {
-            ulong localClientId = LocalClientId();
-            bool canVote = players.TryGetValue(localClientId, out OnlinePlayerState localState) && localState.Alive;
-            bool previousEnabled = GUI.enabled;
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                GUILayout.BeginHorizontal(GUI.skin.box);
-                string voteBadge = votes.ContainsKey(state.ClientId) ? "已投" : "未投";
-                GUILayout.Label(state.DisplayName + " | " + (state.Alive ? "在场" : "出局") + " | 嫌疑 " + state.Suspicion + " | " + voteBadge + " | " + ProfessionName(state.Profession), GUILayout.ExpandWidth(true));
-                GUI.enabled = previousEnabled && canVote && state.Alive && state.ClientId != localClientId;
-
-                if (GUILayout.Button("投票", GUILayout.Width(92f)))
-                {
-                    SendClientAction(OnlineActionType.Vote, state.ClientId);
-                }
-
-                GUI.enabled = previousEnabled;
-                GUILayout.EndHorizontal();
-            }
-
-            GUI.enabled = previousEnabled && canVote;
-
-            if (GUILayout.Button("跳过投票", GUILayout.Height(36f)))
-            {
-                SendClientAction(OnlineActionType.SkipVote);
-            }
-
-            GUI.enabled = previousEnabled;
-        }
-
-        private void DrawResultScreen()
-        {
-            float width = Mathf.Clamp(Screen.width * 0.58f, 720f, 980f);
-            float height = Mathf.Clamp(Screen.height * 0.62f, 460f, 680f);
-            Rect rect = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
-            GUILayout.BeginArea(rect, GUI.skin.box);
-            GUILayout.Label("行动结算");
-            GUILayout.Label(resultSummary);
-            GUILayout.Space(8f);
-            DrawResultScoreboard(width - 42f);
-            GUILayout.Space(8f);
-            GUILayout.Label(BuildResultRosterLine());
-            GUILayout.Space(10f);
-            GUILayout.BeginHorizontal();
-            bool previousEnabled = GUI.enabled;
-            GUI.enabled = IsHost;
-
-            if (GUILayout.Button("重开同房间", GUILayout.Height(38f)))
-            {
-                RestartMatch();
-            }
-
-            GUI.enabled = previousEnabled;
-
-            if (GUILayout.Button("返回房间", GUILayout.Height(38f)))
-            {
-                ReturnToLobby();
-            }
-
-            GUILayout.EndHorizontal();
-            GUILayout.EndArea();
-        }
-
-        private void DrawResultScoreboard(float width)
-        {
-            Rect rect = GUILayoutUtility.GetRect(width, 120f);
-            Color oldColor = GUI.color;
-            GUI.color = new Color(0.055f, 0.065f, 0.07f, 1f);
-            GUI.DrawTexture(rect, Texture2D.whiteTexture);
-
-            float evidenceRatio = Mathf.Clamp01(taskService.EvidenceScore / (float)Mathf.Max(1, taskService.EvidenceTarget));
-            float taskRatio = Mathf.Clamp01(CountCompletedTasks() / (float)Mathf.Max(1, tasks.Count));
-            float survivalRatio = Mathf.Clamp01(CountAlivePlayers() / (float)Mathf.Max(1, players.Count));
-
-            DrawResultBar(new Rect(rect.x + 14f, rect.y + 18f, rect.width - 28f, 16f), evidenceRatio, new Color(0.08f, 0.62f, 0.82f, 1f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget);
-            DrawResultBar(new Rect(rect.x + 14f, rect.y + 50f, rect.width - 28f, 16f), taskRatio, new Color(0.86f, 0.68f, 0.12f, 1f), "任务 " + CountCompletedTasks() + "/" + tasks.Count);
-            DrawResultBar(new Rect(rect.x + 14f, rect.y + 82f, rect.width - 28f, 16f), survivalRatio, new Color(0.14f, 0.7f, 0.36f, 1f), "存活 " + CountAlivePlayers() + "/" + players.Count);
-            GUI.color = oldColor;
-        }
 
         private static void DrawResultBar(Rect rect, float ratio, Color color, string label)
         {
@@ -8011,35 +4443,7 @@ namespace GanglandUndercover.Online
             GUI.color = oldColor;
         }
 
-        private string BuildResultRosterLine()
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.Append("身份公开: ");
 
-            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
-            {
-                builder.Append(pair.Value.DisplayName)
-                    .Append("/")
-                    .Append(RoleName(GetPrivateRole(pair.Key)))
-                    .Append(pair.Value.Alive ? " " : "(出局) ");
-            }
-
-            return builder.ToString();
-        }
-
-        private void BuildDefaultTasks()
-        {
-            EnsureCoreServices();
-
-            tasks.Clear();
-            // 大地图固定任务站点始终铺满（关卡内容，与人数无关）。
-            // 人数缩放（TotalTaskCount = 非Gang人数 × tasksPerNonGangPlayer）作用于
-            // 每位玩家需完成的任务配额/证据目标，而不是地图上存在的站点数量。
-            for (int id = 0; id < OnlineMapService.TaskStationCount; id++)
-            {
-                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), mapService.TaskPositionFor(id), 0, TaskRequiredProgress(id), false, false));
-            }
-        }
 
         private OnlineTaskState FindNearestTask(Vector3 position)
         {
@@ -8073,383 +4477,20 @@ namespace GanglandUndercover.Online
             return new OnlineTaskState(-1, "未知任务", Vector3.zero, 0, 1, false, false);
         }
 
-        private void SetTask(OnlineTaskState updated)
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                if (tasks[i].Id == updated.Id)
-                {
-                    tasks[i] = updated;
-                    return;
-                }
-            }
-        }
 
-        private void EnsureWorld()
-        {
-            EnsureRuntimeSprites();
 
-            if (worldRoot != null)
-            {
-                return;
-            }
 
-            DestroyStaleWorldRoots();
-            solidObstacleRects.Clear();
-            walkableRects.Clear();
-            worldLabels.Clear();
-            worldRoot = new GameObject(WorldRootName);
-            worldRoot.transform.SetParent(transform, false);
-            WorldBuilder = new OnlineWorldBuilder();
-            WorldBuilder.Initialize(worldRoot, mapService, solidObstacleRects, walkableRects, worldLabels);
-            WorldBuilder.EnsureRuntimeSprites();
-            ConfigureSceneLighting();
-            CreateSocialDeductionShipMap();
 
-            // ── M6.1 监控摄像头在地图中的实际生成 ──
-            SpawnSurveillanceCameras();
 
-            // ── M6.1 灰盒模式：叠加灰盒建造器（可选） ──
-            if (useGreyboxMode && mapLayoutData != null)
-            {
-                BuildGreyboxMap();
-            }
 
-            // ── M6 Kenney 美术：在灰盒之上叠加 Sprite 视觉层 ──
-            if (kenneyMode && kenneyCatalog != null)
-            {
-                DecorateWithKenneySprites();
-            }
 
-            CreateNeonLight("会议舱顶灯", new Vector3(0f, 0f, 1.1f), new Color(0.35f, 0.75f, 1f, 1f), 1.8f, 6.4f);
-            CreateNeonLight("证物库紫外灯", new Vector3(-8.6f, -5.05f, 1.05f), new Color(0.54f, 0.32f, 1f, 1f), 1.1f, 4.2f);
-            CreateNeonLight("电力舱冷光", new Vector3(8.85f, 5.25f, 1.15f), new Color(0.3f, 0.8f, 1f, 1f), 1.35f, 4.6f);
-            CreateEmergencyBell();
-        }
 
-        private void DestroyRuntimeWorld()
-        {
-            if (worldRoot != null)
-            {
-                if (Application.isPlaying)
-                {
-                    Destroy(worldRoot);
-                }
-                else
-                {
-                    DestroyImmediate(worldRoot);
-                }
-            }
 
-            worldRoot = null;
-            solidObstacleRects.Clear();
-            walkableRects.Clear();
-            worldLabels.Clear();
-            taskVisuals.Clear();
-            playerVisuals.Clear();
-            playerVisualBaseScales.Clear();
-            bodyVisuals.Clear();
-            surveillanceCameras.Clear();
-            modelPrefabCache.Clear();
-            runtimeMeshMaterials.Clear();
-            DestroyStaleWorldRoots();
-        }
 
-        private void DestroyStaleWorldRoots()
-        {
-            List<GameObject> staleRoots = new List<GameObject>();
 
-            foreach (Transform child in transform)
-            {
-                if (child == null)
-                {
-                    continue;
-                }
 
-                if (child.name == WorldRootName || child.name.StartsWith("Online Hong Kong Port Map", StringComparison.Ordinal) || child.name.StartsWith("Online Gangland Runtime Map", StringComparison.Ordinal))
-                {
-                    staleRoots.Add(child.gameObject);
-                }
-            }
 
-            foreach (Transform candidate in FindObjectsByType<Transform>(FindObjectsInactive.Include))
-            {
-                if (candidate == null || candidate == transform || candidate.IsChildOf(transform))
-                {
-                    continue;
-                }
 
-                if (candidate.name == WorldRootName
-                    || candidate.name.StartsWith("Online Hong Kong Port Map", StringComparison.Ordinal)
-                    || candidate.name.StartsWith("Online Gangland Runtime Map", StringComparison.Ordinal))
-                {
-                    staleRoots.Add(candidate.gameObject);
-                }
-            }
-
-            for (int i = 0; i < staleRoots.Count; i++)
-            {
-                if (staleRoots[i] == null)
-                {
-                    continue;
-                }
-
-                if (Application.isPlaying)
-                {
-                    Destroy(staleRoots[i]);
-                }
-                else
-                {
-                    DestroyImmediate(staleRoots[i]);
-                }
-            }
-        }
-
-        private void ConfigureMainCamera()
-        {
-            _cameraRig.Configure(Camera.main, phase, tacticalMapOpen, activeTaskId,
-                taskService.BlackoutTimer, players, LocalClientId(), localPosition);
-        }
-
-        private void UpdateWorldVisuals()
-        {
-            UpdateTaskVisuals();
-            UpdatePlayerVisuals();
-            UpdateBodyVisuals();
-            UpdateAreaLabelVisibility();
-            BillboardWorldLabels();
-        }
-
-        private void UpdateTaskVisuals()
-        {
-            HashSet<int> seen = new HashSet<int>();
-
-            foreach (OnlineTaskState task in tasks)
-            {
-                seen.Add(task.Id);
-
-                if (!taskVisuals.TryGetValue(task.Id, out GameObject visual) || visual == null)
-                {
-                    visual = CreateTaskVisual(task);
-                    taskVisuals[task.Id] = visual;
-                }
-
-                visual.transform.position = task.Position + new Vector3(0f, 0f, 0.1f);
-                SetTaskVisualState(visual, task);
-                SetSortingFromZ(visual);
-            }
-
-            RemoveStaleVisuals(taskVisuals, seen);
-        }
-
-        private void UpdatePlayerVisuals()
-        {
-            HashSet<ulong> seen = new HashSet<ulong>();
-            ulong localClientId = LocalClientId();
-            _cameraRig.SetSubject(localClientId);
-
-            foreach (OnlinePlayerState state in players.Values)
-            {
-                seen.Add(state.ClientId);
-
-                if (!playerVisuals.TryGetValue(state.ClientId, out GameObject visual) || visual == null)
-                {
-                    visual = CreatePlayerVisual(state);
-                    playerVisuals[state.ClientId] = visual;
-                    playerVisualBaseScales[state.ClientId] = visual != null ? visual.transform.localScale : Vector3.one;
-                }
-
-                bool isLocalPlayer = state.ClientId == localClientId;
-                visual.transform.position = state.Position + new Vector3(0f, 0f, state.Alive ? 0.32f : 0.12f);
-                Vector3 baseScale = playerVisualBaseScales.TryGetValue(state.ClientId, out Vector3 cachedScale) ? cachedScale : visual.transform.localScale;
-                visual.transform.localScale = state.Alive
-                    ? baseScale
-                    : new Vector3(baseScale.x * 0.92f, baseScale.y * 0.48f, baseScale.z);
-                AnimatePlayerVisual(visual, state);
-                SetPlayerVisualColors(visual, state, isLocalPlayer);
-                UpdatePlayerStageTwoStateLayer(visual, state, isLocalPlayer);
-                SetSortingFromZ(visual);
-
-                TextMesh[] labels = visual.GetComponentsInChildren<TextMesh>(true);
-
-                for (int i = 0; i < labels.Length; i++)
-                {
-                    TextMesh label = labels[i];
-                    label.text = BuildPlayerWorldLabel(state, isLocalPlayer);
-                    bool showLabel = ShouldShowPlayerWorldLabel(state, isLocalPlayer) && IsNearCameraSubject(state.Position);
-                    SetTextMeshVisible(label, showLabel);
-                    BillboardLabel(label.transform);
-                }
-            }
-
-            RemoveStalePlayerVisuals(seen);
-        }
-
-        private void RemoveStalePlayerVisuals(HashSet<ulong> seen)
-        {
-            List<ulong> stale = new List<ulong>();
-
-            foreach (KeyValuePair<ulong, GameObject> pair in playerVisuals)
-            {
-                if (!seen.Contains(pair.Key) || pair.Value == null)
-                {
-                    stale.Add(pair.Key);
-                }
-            }
-
-            for (int i = 0; i < stale.Count; i++)
-            {
-                ulong clientId = stale[i];
-
-                if (playerVisuals.TryGetValue(clientId, out GameObject visual) && visual != null)
-                {
-                    if (Application.isPlaying)
-                    {
-                        Destroy(visual);
-                    }
-                    else
-                    {
-                        DestroyImmediate(visual);
-                    }
-                }
-
-                playerVisuals.Remove(clientId);
-                playerVisualBaseScales.Remove(clientId);
-            }
-        }
-
-        private void UpdateBodyVisuals()
-        {
-            HashSet<int> seen = new HashSet<int>();
-
-            foreach (OnlineBodyState body in bodies)
-            {
-                if (body.Reported)
-                {
-                    continue;
-                }
-
-                seen.Add(body.Id);
-
-                if (!bodyVisuals.TryGetValue(body.Id, out GameObject visual) || visual == null)
-                {
-                    visual = CreateBodyVisual(body);
-                    bodyVisuals[body.Id] = visual;
-                }
-
-                visual.transform.position = body.Position + new Vector3(0f, 0f, 0.11f);
-                SetSortingFromZ(visual);
-            }
-
-            RemoveStaleVisuals(bodyVisuals, seen);
-        }
-
-        private void AnimatePlayerVisual(GameObject visual, OnlinePlayerState state)
-        {
-            if (visual == null)
-            {
-                return;
-            }
-
-            float speed = state.Input.magnitude;
-            bool inMeeting = phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting;
-            Vector2 facing = state.Input.sqrMagnitude > 0.02f ? state.Input.normalized : Vector2.up;
-            float facingAngle = Mathf.Atan2(facing.y, facing.x) * Mathf.Rad2Deg - 90f;
-            float bob = speed > 0.05f ? Mathf.Sin(Time.time * 10f + state.ClientId * 0.37f) * 0.035f : 0f;
-            float meetingBob = inMeeting && state.Alive ? Mathf.Sin(Time.time * 3.2f + state.ClientId * 0.53f) * 0.012f : 0f;
-            Transform body = visual.transform.Find("Body Volume");
-            Transform helmet = visual.transform.Find("Helmet Volume");
-            Transform armL = visual.transform.Find("Arm L");
-            Transform armR = visual.transform.Find("Arm R");
-            Transform bootL = visual.transform.Find("Boot L");
-            Transform bootR = visual.transform.Find("Boot R");
-            Transform facingLight = visual.transform.Find("Facing Light");
-
-            if (body != null)
-            {
-                body.localPosition = state.Alive ? new Vector3(0f, -0.08f + bob + meetingBob, 0.22f) : new Vector3(0f, -0.22f, 0.08f);
-                body.localRotation = state.Alive
-                    ? Quaternion.Euler(90f, 0f, inMeeting ? 0f : Mathf.Clamp(state.Input.x, -1f, 1f) * -10f)
-                    : Quaternion.Euler(90f, 0f, 82f);
-            }
-
-            if (helmet != null)
-            {
-                helmet.localPosition = state.Alive ? new Vector3(0.04f, 0.2f + bob * 0.6f + meetingBob, 0.52f) : new Vector3(0.24f, -0.18f, 0.13f);
-                helmet.localScale = state.Alive ? new Vector3(0.38f, 0.32f, 0.32f) : new Vector3(0.28f, 0.18f, 0.14f);
-            }
-
-            if (armL != null)
-            {
-                armL.localPosition = state.Alive ? new Vector3(-0.26f, -0.08f, 0.28f) : new Vector3(-0.26f, -0.14f, 0.1f);
-                armL.localRotation = state.Alive ? Quaternion.Euler(90f, 0f, 12f + bob * 210f) : Quaternion.Euler(90f, 0f, 74f);
-            }
-
-            if (armR != null)
-            {
-                armR.localPosition = state.Alive ? new Vector3(0.26f, -0.08f, 0.28f) : new Vector3(0.08f, -0.22f, 0.11f);
-                armR.localRotation = state.Alive ? Quaternion.Euler(90f, 0f, -12f - bob * 210f) : Quaternion.Euler(90f, 0f, 100f);
-            }
-
-            if (bootL != null)
-            {
-                bootL.localPosition = state.Alive ? new Vector3(-0.11f, -0.5f - bob * 1.2f, 0.16f) : new Vector3(-0.18f, -0.46f, 0.08f);
-                bootL.localRotation = state.Alive ? Quaternion.Euler(90f, 0f, 0f) : Quaternion.Euler(90f, 0f, 82f);
-            }
-
-            if (bootR != null)
-            {
-                bootR.localPosition = state.Alive ? new Vector3(0.11f, -0.5f + bob * 1.2f, 0.16f) : new Vector3(0.28f, -0.34f, 0.08f);
-                bootR.localRotation = state.Alive ? Quaternion.Euler(90f, 0f, 0f) : Quaternion.Euler(90f, 0f, 82f);
-            }
-
-            if (facingLight != null)
-            {
-                facingLight.localRotation = Quaternion.Euler(0f, 0f, facingAngle);
-                facingLight.gameObject.SetActive(state.Alive && !inMeeting);
-            }
-        }
-
-        private void UpdateAreaLabelVisibility()
-        {
-            bool visible = tacticalMapOpen || phase == OnlineMatchPhase.Lobby || phase == OnlineMatchPhase.Opening || phase == OnlineMatchPhase.Result;
-
-            for (int i = worldLabels.Count - 1; i >= 0; i--)
-            {
-                TextMesh label = worldLabels[i];
-
-                if (label == null)
-                {
-                    worldLabels.RemoveAt(i);
-                    continue;
-                }
-
-                SetTextMeshVisible(label, visible);
-            }
-        }
-
-        private void BillboardWorldLabels()
-        {
-            foreach (TextMesh label in worldLabels)
-            {
-                if (label == null)
-                {
-                    continue;
-                }
-
-                BillboardLabel(label.transform);
-            }
-        }
-
-        private GameObject CreateTaskVisual(OnlineTaskState task)
-        {
-            return worldBuilder.CreateTaskVisual(task, worldRoot.transform);
-        }
-
-        private void SetTaskVisualState(GameObject visual, OnlineTaskState task)
-        {
-            worldBuilder.SetTaskVisualState(visual, task);
-        }
 
         private Sprite TaskVisualSprite(int taskId)
         {
@@ -8496,863 +4537,37 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void CreateTaskEquipment(Transform parent, int taskId)
-        {
-            worldBuilder.CreateTaskEquipment(parent, taskId);
-        }
 
-        private GameObject CreatePlayerVisual(OnlinePlayerState state)
-        {
-            GameObject visual = worldBuilder.CreatePlayerVisual(state, state.ClientId == LocalClientId());
-            if (visual != null)
-            {
-                CreateFreeCharacterAdapter(visual.transform, state);
-            }
 
-            return visual;
-        }
 
-        private void CreateStageTwoCharacterRig(GameObject playerObject, OnlinePlayerState state)
-        {
-            worldBuilder.CreateStageTwoCharacterRig(playerObject, state);
-        }
 
-        private void CreateStageTwoCharacterStateLayer(Transform parent, OnlinePlayerState state)
-        {
-            worldBuilder.CreateStageTwoCharacterStateLayer(parent, state);
-        }
 
-        private void CreateProfessionAccessory(Transform parent, OnlinePlayerState state)
-        {
-            worldBuilder.CreateProfessionAccessory(parent, state);
-        }
 
-        private GameObject CreateBodyVisual(OnlineBodyState body)
-        {
-            return worldBuilder.CreateBodyVisual(body);
-        }
-
-        private void CreateFloor()
-        {
-            CreateProp("港区街区外暗区", new Vector3(0f, 0f, -0.34f), new Vector3(26.2f, 16.8f, 0.08f), new Color(0.025f, 0.032f, 0.034f, 1f));
-            CreateShapeProp("港区不规则边界底板", softCircleSprite, new Vector3(0f, 0f, -0.31f), new Vector3(23.8f, 14.5f, 0.08f), new Color(0.082f, 0.098f, 0.102f, 1f));
-            CreateProp("港区主干道暗面", new Vector3(0f, -0.1f, -0.3f), new Vector3(24.0f, 8.6f, 0.08f), new Color(0.094f, 0.112f, 0.116f, 1f));
-            CreateProp("港区北侧仓储街块", new Vector3(0f, 4.7f, -0.305f), new Vector3(22.5f, 4.7f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
-            CreateProp("港区南侧封控街块", new Vector3(0f, -5.2f, -0.305f), new Vector3(22.2f, 3.9f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
-            CreateProp("北侧港区围挡", new Vector3(0f, mapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("南侧港区围挡", new Vector3(0f, -mapService.MapHalfHeight, 0.02f), new Vector3(24.0f, 0.24f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("西侧港区围挡", new Vector3(-mapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-            CreateProp("东侧港区围挡", new Vector3(mapService.MapHalfWidth, 0f, 0.02f), new Vector3(0.24f, 15.0f, 0.32f), new Color(0.035f, 0.043f, 0.048f, 1f));
-        }
-
-        private void CreateRoadNetwork()
-        {
-            Color mainCorridor = new Color(0.2f, 0.22f, 0.23f, 1f);
-            Color branchCorridor = new Color(0.16f, 0.18f, 0.19f, 1f);
-            Color serviceCorridor = new Color(0.13f, 0.16f, 0.17f, 1f);
-            Color trim = new Color(0.42f, 0.48f, 0.5f, 1f);
-            Color guide = new Color(0.74f, 0.65f, 0.24f, 1f);
-
-            CreateCorridorSegment("会议中心圆舱", new Vector3(0f, -0.08f, -0.17f), new Vector3(2.15f, 1.45f, 0.08f), mainCorridor, true);
-            CreateCorridorSegment("西中段弯廊", new Vector3(-3.85f, 0.08f, -0.18f), new Vector3(6.35f, 1.04f, 0.08f), mainCorridor, false);
-            CreateCorridorSegment("东中段弯廊", new Vector3(4.15f, -0.15f, -0.18f), new Vector3(6.75f, 1.04f, 0.08f), mainCorridor, false);
-            CreateCorridorSegment("西北弯廊", new Vector3(-6.95f, 3.78f, -0.18f), new Vector3(7.2f, 0.98f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("东上弯廊", new Vector3(5.15f, 3.98f, -0.18f), new Vector3(7.9f, 0.98f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("西南弯廊", new Vector3(-6.25f, -3.72f, -0.18f), new Vector3(7.4f, 0.98f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("东南弯廊", new Vector3(4.9f, -3.58f, -0.18f), new Vector3(7.2f, 0.98f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("西侧舱梯", new Vector3(-7.18f, 1.45f, -0.18f), new Vector3(1.02f, 5.2f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("西下舱梯", new Vector3(-7.0f, -3.25f, -0.18f), new Vector3(1.02f, 4.5f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("中心竖向短舱", new Vector3(-0.12f, 2.0f, -0.17f), new Vector3(1.12f, 4.65f, 0.08f), mainCorridor, false);
-            CreateCorridorSegment("中心南向短舱", new Vector3(0.18f, -3.16f, -0.17f), new Vector3(1.12f, 4.4f, 0.08f), mainCorridor, false);
-            CreateCorridorSegment("东侧舱梯", new Vector3(7.12f, 1.18f, -0.18f), new Vector3(1.02f, 5.5f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("东下舱梯", new Vector3(7.35f, -2.6f, -0.18f), new Vector3(1.02f, 4.3f, 0.08f), branchCorridor, false);
-            CreateCorridorSegment("金融偏置短廊", new Vector3(4.25f, 1.1f, -0.17f), new Vector3(0.78f, 4.85f, 0.08f), serviceCorridor, false);
-            CreateCorridorSegment("指挥舱入口短廊", new Vector3(0.35f, -4.48f, -0.17f), new Vector3(3.75f, 0.78f, 0.08f), serviceCorridor, false);
-            CreateCorridorSegment("电房转角舱", new Vector3(8.82f, 4.18f, -0.17f), new Vector3(1.64f, 0.86f, 0.08f), serviceCorridor, true);
-            CreateCorridorSegment("证物库转角舱", new Vector3(-7.0f, -4.42f, -0.17f), new Vector3(1.15f, 1.62f, 0.08f), serviceCorridor, true);
-
-            CreateRotatedProp("西上斜向连接舱", new Vector3(-3.82f, 2.38f, -0.16f), new Vector3(4.2f, 0.64f, 0.08f), branchCorridor, 13f);
-            CreateRotatedProp("东上斜向连接舱", new Vector3(2.7f, 2.4f, -0.16f), new Vector3(4.1f, 0.64f, 0.08f), branchCorridor, -11f);
-            CreateRotatedProp("西下斜向连接舱", new Vector3(-3.6f, -2.1f, -0.16f), new Vector3(4.35f, 0.64f, 0.08f), branchCorridor, -10f);
-            CreateRotatedProp("东下斜向连接舱", new Vector3(3.1f, -2.02f, -0.16f), new Vector3(4.15f, 0.64f, 0.08f), branchCorridor, 12f);
-
-            CreateCorridorNode("中央圆节点", new Vector3(0f, 0f, -0.08f), 0.72f, trim);
-            CreateCorridorNode("西北圆节点", new Vector3(-7f, 4.15f, -0.08f), 0.54f, trim);
-            CreateCorridorNode("东北圆节点", new Vector3(7.25f, 4.15f, -0.08f), 0.54f, trim);
-            CreateCorridorNode("西南圆节点", new Vector3(-7f, -3.65f, -0.08f), 0.54f, trim);
-            CreateCorridorNode("东南圆节点", new Vector3(7.25f, -3.65f, -0.08f), 0.54f, trim);
-            CreateCorridorNode("金融岔口圆节点", new Vector3(4.45f, 0.18f, -0.08f), 0.42f, trim);
-            CreateCorridorNode("指挥入口圆节点", new Vector3(0.18f, -4.38f, -0.08f), 0.46f, trim);
-
-            CreateRotatedProp("主走廊导向线 A", new Vector3(-4.8f, 0.08f, -0.07f), new Vector3(4.7f, 0.055f, 0.09f), guide, 2f);
-            CreateRotatedProp("主走廊导向线 B", new Vector3(4.85f, -0.14f, -0.07f), new Vector3(5.1f, 0.055f, 0.09f), guide, -2f);
-            CreateRotatedProp("北走廊导向线 A", new Vector3(-6.1f, 3.78f, -0.07f), new Vector3(4.8f, 0.05f, 0.09f), guide, 1f);
-            CreateRotatedProp("北走廊导向线 B", new Vector3(5.9f, 3.98f, -0.07f), new Vector3(5.4f, 0.05f, 0.09f), guide, -1f);
-            CreateRotatedProp("南走廊导向线 A", new Vector3(-5.8f, -3.72f, -0.07f), new Vector3(5.1f, 0.05f, 0.09f), guide, -1.5f);
-            CreateRotatedProp("南走廊导向线 B", new Vector3(5.25f, -3.58f, -0.07f), new Vector3(5.0f, 0.05f, 0.09f), guide, 1.5f);
-        }
-
-        private void CreateCorridorSegment(string corridorName, Vector3 center, Vector3 size, Color color, bool roundNode)
-        {
-            GameObject segment = roundNode
-                ? CreateShapeProp(corridorName, circleSprite, center, size, color)
-                : CreateProp(corridorName, center, size, color);
-            segment.transform.SetAsFirstSibling();
-            RegisterWalkableArea(center, size);
-        }
-
-        private void CreateCorridorNode(string nodeName, Vector3 center, float radius, Color color)
-        {
-            GameObject node = CreateShapeProp(nodeName, circleSprite, center, new Vector3(radius, radius, 0.08f), color);
-            node.transform.SetAsFirstSibling();
-            CreateShapeProp(nodeName + " 内圈", circleSprite, center + new Vector3(0f, 0f, 0.02f), new Vector3(radius * 0.62f, radius * 0.62f, 0.08f), new Color(0.18f, 0.22f, 0.23f, 1f));
-            RegisterWalkableArea(center, new Vector3(radius * 1.9f, radius * 1.9f, 0.08f));
-        }
-
-        private void CreateCorridorTrim(string corridorName, Vector3 center, Vector3 size, Color trimColor, bool horizontal)
-        {
-            if (horizontal)
-            {
-                CreateRoad(corridorName + " 上沿", center + new Vector3(0f, size.y * 0.5f - 0.06f, 0.02f), new Vector3(size.x, 0.05f, 0.08f), trimColor);
-                CreateRoad(corridorName + " 下沿", center + new Vector3(0f, -size.y * 0.5f + 0.06f, 0.02f), new Vector3(size.x, 0.05f, 0.08f), trimColor);
-                return;
-            }
-
-            CreateRoad(corridorName + " 左沿", center + new Vector3(-size.x * 0.5f + 0.06f, 0f, 0.02f), new Vector3(0.05f, size.y, 0.08f), trimColor);
-            CreateRoad(corridorName + " 右沿", center + new Vector3(size.x * 0.5f - 0.06f, 0f, 0.02f), new Vector3(0.05f, size.y, 0.08f), trimColor);
-        }
-
-        private void CreateMapStructureLayer()
-        {
-            Color wall = new Color(0.055f, 0.065f, 0.068f, 1f);
-            Color trim = new Color(0.48f, 0.48f, 0.42f, 1f);
-            Color door = new Color(0.88f, 0.66f, 0.12f, 1f);
-
-            CreateRoomFrame("西码头货柜场", new Vector3(-9.3f, 5.35f, 0.09f), new Vector3(4.25f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
-            CreateRoomFrame("海关查验区", new Vector3(-5.0f, 5.35f, 0.09f), new Vector3(2.95f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
-            CreateRoomFrame("监控室", new Vector3(-9.35f, 1.85f, 0.09f), new Vector3(2.85f, 1.85f, 0.24f), wall, trim, OnlineMapService.MapEntrance.East);
-            CreateRoomFrame("茶餐厅", new Vector3(-4.8f, 1.65f, 0.09f), new Vector3(2.85f, 1.8f, 0.24f), wall, trim, OnlineMapService.MapEntrance.East);
-            CreateRoomFrame("夜市主街", new Vector3(-1.0f, 2.75f, 0.09f), new Vector3(4.0f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
-            CreateRoomFrame("金融楼", new Vector3(4.75f, 2.75f, 0.09f), new Vector3(3.3f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.West);
-            CreateRoomFrame("电房", new Vector3(8.85f, 5.25f, 0.09f), new Vector3(2.7f, 2.05f, 0.24f), wall, trim, OnlineMapService.MapEntrance.South);
-            CreateRoomFrame("天台通道", new Vector3(8.95f, 1.65f, 0.09f), new Vector3(2.65f, 1.8f, 0.24f), wall, trim, OnlineMapService.MapEntrance.West);
-            CreateRoomFrame("指挥车广场", new Vector3(0f, -5.35f, 0.09f), new Vector3(4.25f, 1.85f, 0.24f), wall, trim, OnlineMapService.MapEntrance.North);
-            CreateRoomFrame("证物库", new Vector3(-8.6f, -5.05f, 0.09f), new Vector3(3.25f, 1.9f, 0.24f), wall, trim, OnlineMapService.MapEntrance.East);
-            CreateRoomFrame("后巷排档", new Vector3(5.6f, -1.55f, 0.09f), new Vector3(3.45f, 2.1f, 0.24f), wall, trim, OnlineMapService.MapEntrance.West);
-            CreateRoomFrame("地下诊所", new Vector3(6.15f, -5.05f, 0.09f), new Vector3(3.35f, 1.9f, 0.24f), wall, trim, OnlineMapService.MapEntrance.North);
-
-            CreateRoadDetailLayer();
-            CreateSharedCityProps();
-
-            CreateDoorMarker("码头门禁黄线", new Vector3(-9.3f, 4.28f, 0.13f), new Vector3(1.0f, 0.07f, 0.08f), door);
-            CreateDoorMarker("海关排队黄线", new Vector3(-5.0f, 4.28f, 0.13f), new Vector3(0.9f, 0.07f, 0.08f), door);
-            CreateDoorMarker("监控室门灯", new Vector3(-7.82f, 1.85f, 0.13f), new Vector3(0.08f, 0.72f, 0.08f), door);
-            CreateDoorMarker("茶餐厅门灯", new Vector3(-3.28f, 1.65f, 0.13f), new Vector3(0.08f, 0.72f, 0.08f), door);
-            CreateDoorMarker("夜市入口灯带", new Vector3(-1.0f, 1.62f, 0.13f), new Vector3(1.2f, 0.07f, 0.08f), new Color(0.96f, 0.22f, 0.36f, 1f));
-            CreateDoorMarker("金融楼门灯", new Vector3(3.02f, 2.75f, 0.13f), new Vector3(0.08f, 0.82f, 0.08f), new Color(0.32f, 0.72f, 1f, 1f));
-            CreateDoorMarker("电房警戒门", new Vector3(8.85f, 4.16f, 0.13f), new Vector3(0.92f, 0.07f, 0.08f), door);
-            CreateDoorMarker("天台铁门", new Vector3(7.55f, 1.65f, 0.13f), new Vector3(0.08f, 0.72f, 0.08f), trim);
-            CreateDoorMarker("指挥广场入口", new Vector3(0f, -4.38f, 0.13f), new Vector3(1.0f, 0.07f, 0.08f), new Color(0.28f, 0.52f, 1f, 1f));
-            CreateDoorMarker("证物库门禁", new Vector3(-6.88f, -5.05f, 0.13f), new Vector3(0.08f, 0.78f, 0.08f), door);
-            CreateDoorMarker("后巷入口灯", new Vector3(3.82f, -1.55f, 0.13f), new Vector3(0.08f, 0.78f, 0.08f), new Color(0.88f, 0.36f, 0.12f, 1f));
-            CreateDoorMarker("诊所卷闸门", new Vector3(6.15f, -4.02f, 0.13f), new Vector3(0.92f, 0.07f, 0.08f), new Color(0.52f, 0.78f, 0.72f, 1f));
-        }
-
-        private void CreateRoomFrame(string roomName, Vector3 center, Vector3 size, Color wallColor, Color trimColor, OnlineMapService.MapEntrance entrance)
-        {
-            float wallThickness = 0.08f;
-            float doorGap = Mathf.Min(1.45f, size.x * 0.42f);
-            float verticalDoorGap = Mathf.Min(1.2f, size.y * 0.5f);
-            float halfWidth = size.x * 0.5f;
-            float halfHeight = size.y * 0.5f;
-            float horizontalSegment = Mathf.Max(0.1f, (size.x - doorGap) * 0.5f);
-            float verticalSegment = Mathf.Max(0.1f, (size.y - verticalDoorGap) * 0.5f);
-
-            if (entrance == OnlineMapService.MapEntrance.North)
-            {
-                CreateWallSegment(roomName + " 北墙左", center + new Vector3(-(doorGap + horizontalSegment) * 0.5f, halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
-                CreateWallSegment(roomName + " 北墙右", center + new Vector3((doorGap + horizontalSegment) * 0.5f, halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
-            }
-            else
-            {
-                CreateWallSegment(roomName + " 北墙", center + new Vector3(0f, halfHeight, 0f), new Vector3(size.x, wallThickness, size.z), wallColor);
-            }
-
-            if (entrance == OnlineMapService.MapEntrance.South)
-            {
-                CreateWallSegment(roomName + " 南墙左", center + new Vector3(-(doorGap + horizontalSegment) * 0.5f, -halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
-                CreateWallSegment(roomName + " 南墙右", center + new Vector3((doorGap + horizontalSegment) * 0.5f, -halfHeight, 0f), new Vector3(horizontalSegment, wallThickness, size.z), wallColor);
-            }
-            else
-            {
-                CreateWallSegment(roomName + " 南墙", center + new Vector3(0f, -halfHeight, 0f), new Vector3(size.x, wallThickness, size.z), wallColor);
-            }
-
-            if (entrance == OnlineMapService.MapEntrance.East)
-            {
-                CreateWallSegment(roomName + " 东墙上", center + new Vector3(halfWidth, (verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
-                CreateWallSegment(roomName + " 东墙下", center + new Vector3(halfWidth, -(verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
-            }
-            else
-            {
-                CreateWallSegment(roomName + " 东墙", center + new Vector3(halfWidth, 0f, 0f), new Vector3(wallThickness, size.y, size.z), wallColor);
-            }
-
-            if (entrance == OnlineMapService.MapEntrance.West)
-            {
-                CreateWallSegment(roomName + " 西墙上", center + new Vector3(-halfWidth, (verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
-                CreateWallSegment(roomName + " 西墙下", center + new Vector3(-halfWidth, -(verticalDoorGap + verticalSegment) * 0.5f, 0f), new Vector3(wallThickness, verticalSegment, size.z), wallColor);
-            }
-            else
-            {
-                CreateWallSegment(roomName + " 西墙", center + new Vector3(-halfWidth, 0f, 0f), new Vector3(wallThickness, size.y, size.z), wallColor);
-            }
-
-            CreateProp(roomName + " 顶部细线", center + new Vector3(0f, halfHeight - 0.16f, 0.03f), new Vector3(size.x - 0.34f, 0.035f, 0.05f), trimColor);
-            CreateProp(roomName + " 底部细线", center + new Vector3(0f, -halfHeight + 0.16f, 0.03f), new Vector3(size.x - 0.34f, 0.035f, 0.05f), trimColor);
-            CreateProp(roomName + " 左侧细线", center + new Vector3(-halfWidth + 0.16f, 0f, 0.03f), new Vector3(0.035f, size.y - 0.34f, 0.05f), trimColor);
-            CreateProp(roomName + " 右侧细线", center + new Vector3(halfWidth - 0.16f, 0f, 0.03f), new Vector3(0.035f, size.y - 0.34f, 0.05f), trimColor);
-            CreateRoomRoundedCaps(roomName, center, size, trimColor);
-            CreateRoomCornerCutouts(roomName, center, size);
-            CreateRoomAirlockBulges(roomName, center, size, trimColor, entrance);
-        }
-
-        private void CreateRoomRoundedCaps(string roomName, Vector3 center, Vector3 size, Color trimColor)
-        {
-            float halfWidth = size.x * 0.5f;
-            float halfHeight = size.y * 0.5f;
-            float cap = Mathf.Clamp(Mathf.Min(size.x, size.y) * 0.18f, 0.2f, 0.42f);
-
-            CreateShapeProp(roomName + " 圆角舱壁 NW", circleSprite, center + new Vector3(-halfWidth + cap * 0.45f, halfHeight - cap * 0.45f, 0.04f), new Vector3(cap, cap, 0.05f), trimColor);
-            CreateShapeProp(roomName + " 圆角舱壁 NE", circleSprite, center + new Vector3(halfWidth - cap * 0.45f, halfHeight - cap * 0.45f, 0.04f), new Vector3(cap, cap, 0.05f), trimColor);
-            CreateShapeProp(roomName + " 圆角舱壁 SW", circleSprite, center + new Vector3(-halfWidth + cap * 0.45f, -halfHeight + cap * 0.45f, 0.04f), new Vector3(cap, cap, 0.05f), trimColor);
-            CreateShapeProp(roomName + " 圆角舱壁 SE", circleSprite, center + new Vector3(halfWidth - cap * 0.45f, -halfHeight + cap * 0.45f, 0.04f), new Vector3(cap, cap, 0.05f), trimColor);
-        }
-
-        private void CreateRoomCornerCutouts(string roomName, Vector3 center, Vector3 size)
-        {
-            float halfWidth = size.x * 0.5f;
-            float halfHeight = size.y * 0.5f;
-            float cut = Mathf.Clamp(Mathf.Min(size.x, size.y) * 0.34f, 0.38f, 0.72f);
-            Color voidColor = new Color(0.045f, 0.055f, 0.055f, 1f);
-
-            CreateShapeProp(roomName + " 舱室剪影 NW", circleSprite, center + new Vector3(-halfWidth - cut * 0.08f, halfHeight + cut * 0.08f, 0.24f), new Vector3(cut, cut, 0.05f), voidColor);
-            CreateShapeProp(roomName + " 舱室剪影 NE", circleSprite, center + new Vector3(halfWidth + cut * 0.08f, halfHeight + cut * 0.08f, 0.24f), new Vector3(cut, cut, 0.05f), voidColor);
-            CreateShapeProp(roomName + " 舱室剪影 SW", circleSprite, center + new Vector3(-halfWidth - cut * 0.08f, -halfHeight - cut * 0.08f, 0.24f), new Vector3(cut, cut, 0.05f), voidColor);
-            CreateShapeProp(roomName + " 舱室剪影 SE", circleSprite, center + new Vector3(halfWidth + cut * 0.08f, -halfHeight - cut * 0.08f, 0.24f), new Vector3(cut, cut, 0.05f), voidColor);
-
-            if (size.x > 3.2f)
-            {
-                CreateRotatedProp(roomName + " 斜切暗角 A", center + new Vector3(-halfWidth * 0.6f, halfHeight + 0.02f, 0.23f), new Vector3(size.x * 0.28f, 0.1f, 0.05f), voidColor, -14f);
-                CreateRotatedProp(roomName + " 斜切暗角 B", center + new Vector3(halfWidth * 0.55f, -halfHeight - 0.02f, 0.23f), new Vector3(size.x * 0.26f, 0.1f, 0.05f), voidColor, 12f);
-            }
-        }
-
-        private void CreateRoomAirlockBulges(string roomName, Vector3 center, Vector3 size, Color trimColor, OnlineMapService.MapEntrance entrance)
-        {
-            float halfWidth = size.x * 0.5f;
-            float halfHeight = size.y * 0.5f;
-            Color glass = new Color(0.15f, 0.24f, 0.25f, 1f);
-
-            switch (entrance)
-            {
-                case OnlineMapService.MapEntrance.North:
-                    CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(0f, halfHeight + 0.08f, 0.12f), new Vector3(0.62f, 0.38f, 0.05f), trimColor);
-                    CreateProp(roomName + " 气闸玻璃", center + new Vector3(0f, halfHeight + 0.1f, 0.18f), new Vector3(0.38f, 0.06f, 0.05f), glass);
-                    break;
-                case OnlineMapService.MapEntrance.South:
-                    CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(0f, -halfHeight - 0.08f, 0.12f), new Vector3(0.62f, 0.38f, 0.05f), trimColor);
-                    CreateProp(roomName + " 气闸玻璃", center + new Vector3(0f, -halfHeight - 0.1f, 0.18f), new Vector3(0.38f, 0.06f, 0.05f), glass);
-                    break;
-                case OnlineMapService.MapEntrance.East:
-                    CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(halfWidth + 0.08f, 0f, 0.12f), new Vector3(0.38f, 0.62f, 0.05f), trimColor);
-                    CreateProp(roomName + " 气闸玻璃", center + new Vector3(halfWidth + 0.1f, 0f, 0.18f), new Vector3(0.06f, 0.38f, 0.05f), glass);
-                    break;
-                case OnlineMapService.MapEntrance.West:
-                    CreateShapeProp(roomName + " 外凸气闸", circleSprite, center + new Vector3(-halfWidth - 0.08f, 0f, 0.12f), new Vector3(0.38f, 0.62f, 0.05f), trimColor);
-                    CreateProp(roomName + " 气闸玻璃", center + new Vector3(-halfWidth - 0.1f, 0f, 0.18f), new Vector3(0.06f, 0.38f, 0.05f), glass);
-                    break;
-            }
-        }
-
-        private void CreateWallSegment(string wallName, Vector3 position, Vector3 scale, Color color)
-        {
-            CreateSolidProp(wallName, position, scale, color);
-        }
-
-        private void CreateDoorMarker(string markerName, Vector3 position, Vector3 scale, Color color)
-        {
-            GameObject marker = CreateProp(markerName, position, scale, color);
-            marker.name = markerName + " Door Marker";
-            CreateDoorModelOverlay(markerName, position, scale);
-        }
-
-        private void CreateArchitecturalVolumeLayer()
-        {
-            CreateBuildingVolume("西码头仓库", new Vector3(-9.3f, 5.35f, 0f), new Vector3(4.25f, 2.05f, 0.16f), 0.9f, new Color(0.12f, 0.18f, 0.17f, 1f), new Color(0.06f, 0.09f, 0.1f, 1f), "WHARF");
-            CreateBuildingVolume("海关查验楼", new Vector3(-5.0f, 5.35f, 0f), new Vector3(2.95f, 2.05f, 0.16f), 1.05f, new Color(0.16f, 0.2f, 0.16f, 1f), new Color(0.08f, 0.1f, 0.09f, 1f), "CUSTOMS");
-            CreateBuildingVolume("监控中心", new Vector3(-9.35f, 1.85f, 0f), new Vector3(2.85f, 1.85f, 0.16f), 1.15f, new Color(0.1f, 0.16f, 0.22f, 1f), new Color(0.05f, 0.08f, 0.1f, 1f), "CCTV");
-            CreateBuildingVolume("茶餐厅骑楼", new Vector3(-4.8f, 1.65f, 0f), new Vector3(2.85f, 1.8f, 0.16f), 0.78f, new Color(0.34f, 0.19f, 0.1f, 1f), new Color(0.16f, 0.08f, 0.05f, 1f), "茶餐厅");
-            CreateBuildingVolume("庙街夜市棚群", new Vector3(-1.0f, 2.75f, 0f), new Vector3(4.0f, 2.05f, 0.16f), 0.62f, new Color(0.3f, 0.12f, 0.08f, 1f), new Color(0.12f, 0.05f, 0.04f, 1f), "NIGHT");
-            CreateBuildingVolume("黑钱金融楼", new Vector3(4.75f, 2.75f, 0f), new Vector3(3.3f, 2.05f, 0.16f), 1.55f, new Color(0.14f, 0.16f, 0.24f, 1f), new Color(0.05f, 0.06f, 0.1f, 1f), "FINANCE");
-            CreateBuildingVolume("港区电房", new Vector3(8.85f, 5.25f, 0f), new Vector3(2.7f, 2.05f, 0.16f), 1.05f, new Color(0.12f, 0.17f, 0.22f, 1f), new Color(0.05f, 0.07f, 0.08f, 1f), "POWER");
-            CreateBuildingVolume("天台机房", new Vector3(8.95f, 1.65f, 0f), new Vector3(2.65f, 1.8f, 0.16f), 1.3f, new Color(0.16f, 0.16f, 0.24f, 1f), new Color(0.07f, 0.07f, 0.1f, 1f), "ROOF");
-            CreateBuildingVolume("警队指挥车棚", new Vector3(0f, -5.35f, 0f), new Vector3(4.25f, 1.85f, 0.16f), 0.72f, new Color(0.1f, 0.17f, 0.24f, 1f), new Color(0.04f, 0.07f, 0.1f, 1f), "COMMAND");
-            CreateBuildingVolume("证物库冷仓", new Vector3(-8.6f, -5.05f, 0f), new Vector3(3.25f, 1.9f, 0.16f), 1.15f, new Color(0.16f, 0.16f, 0.23f, 1f), new Color(0.07f, 0.07f, 0.1f, 1f), "EVIDENCE");
-            CreateBuildingVolume("后巷排档楼", new Vector3(5.6f, -1.55f, 0f), new Vector3(3.45f, 2.1f, 0.16f), 0.86f, new Color(0.26f, 0.13f, 0.08f, 1f), new Color(0.1f, 0.05f, 0.04f, 1f), "ALLEY");
-            CreateBuildingVolume("地下诊所唐楼", new Vector3(6.15f, -5.05f, 0f), new Vector3(3.35f, 1.9f, 0.16f), 1.22f, new Color(0.12f, 0.22f, 0.18f, 1f), new Color(0.05f, 0.09f, 0.07f, 1f), "CLINIC");
-            CreateTopDownFacilityBackdrop();
-        }
-
-        private void CreateBuildingVolume(string name, Vector3 center, Vector3 size, float height, Color facadeColor, Color roofColor, string sign)
-        {
-            float halfWidth = size.x * 0.5f;
-            float halfHeight = size.y * 0.5f;
-            Color trim = new Color(0.5f, 0.54f, 0.5f, 1f);
-            Color darkTrim = new Color(0.035f, 0.045f, 0.05f, 1f);
-
-            CreateProp("2.5D 建筑体 " + name + " 顶视阴影", center + new Vector3(0.1f, -0.1f, -0.13f), new Vector3(size.x + 0.3f, size.y + 0.26f, 0.05f), new Color(0f, 0f, 0f, 0.22f));
-            CreateProp("2.5D 建筑体 " + name + " 室内地台", center + new Vector3(0f, 0f, -0.04f), new Vector3(size.x * 0.93f, size.y * 0.86f, 0.08f), Darken(facadeColor, 1.18f));
-            CreateProp("屋顶 " + name + " 顶视房间铭牌", center + new Vector3(0f, halfHeight - 0.18f, 0.15f), new Vector3(Mathf.Min(size.x * 0.72f, 2.35f), 0.14f, 0.08f), roofColor);
-            CreateProp("2.5D 建筑体 " + name + " 北墙厚边", center + new Vector3(0f, halfHeight - 0.04f, 0.18f), new Vector3(size.x, 0.13f, 0.14f), darkTrim);
-            CreateProp("2.5D 建筑体 " + name + " 南墙厚边", center + new Vector3(0f, -halfHeight + 0.04f, 0.18f), new Vector3(size.x, 0.13f, 0.14f), darkTrim);
-            CreateProp("2.5D 建筑体 " + name + " 西墙厚边", center + new Vector3(-halfWidth + 0.04f, 0f, 0.18f), new Vector3(0.13f, size.y, 0.14f), darkTrim);
-            CreateProp("2.5D 建筑体 " + name + " 东墙厚边", center + new Vector3(halfWidth - 0.04f, 0f, 0.18f), new Vector3(0.13f, size.y, 0.14f), darkTrim);
-            CreateRoomFloorTiles(name, center, size, facadeColor);
-            CreateRoomEquipmentBays(name, center, size, height);
-            CreateProp("屋顶 " + name + " 门楣灯", center + new Vector3(0f, -halfHeight + 0.18f, 0.22f), new Vector3(Mathf.Min(1.05f, size.x * 0.35f), 0.08f, 0.08f), new Color(0.94f, 0.72f, 0.12f, 1f));
-            CreateProp("屋顶 " + name + " 导航箭头", center + new Vector3(-halfWidth + 0.35f, halfHeight - 0.34f, 0.2f), new Vector3(0.22f, 0.18f, 0.08f), trim);
-            CreateWorldLabelAt(sign, mapService.ScaleMapPosition(new Vector3(center.x, center.y + halfHeight - 0.3f, -0.18f)), 0.055f);
-        }
-
-        private void CreateRoomFloorTiles(string name, Vector3 center, Vector3 size, Color baseColor)
-        {
-            int columns = Mathf.Clamp(Mathf.RoundToInt(size.x * 1.2f), 3, 7);
-            int rows = Mathf.Clamp(Mathf.RoundToInt(size.y * 1.5f), 2, 5);
-            float tileWidth = size.x * 0.78f / columns;
-            float tileHeight = size.y * 0.62f / rows;
-            float startX = center.x - size.x * 0.39f + tileWidth * 0.5f;
-            float startY = center.y - size.y * 0.3f + tileHeight * 0.5f;
-
-            for (int row = 0; row < rows; row++)
-            {
-                for (int column = 0; column < columns; column++)
-                {
-                    float x = startX + column * tileWidth;
-                    float y = startY + row * tileHeight;
-                    float shade = (row + column) % 2 == 0 ? 1.26f : 1.08f;
-                    CreateProp("2.5D 建筑体 " + name + " 顶视地砖 " + row + "-" + column, new Vector3(x, y, 0.02f), new Vector3(tileWidth * 0.82f, tileHeight * 0.78f, 0.04f), Darken(baseColor, shade));
-                }
-            }
-        }
-
-        private void CreateRoomEquipmentBays(string name, Vector3 center, Vector3 size, float height)
-        {
-            Color screen = new Color(0.06f, 0.58f, 0.72f, 1f);
-            Color metal = new Color(0.08f, 0.09f, 0.1f, 1f);
-            Color warning = new Color(0.86f, 0.68f, 0.12f, 1f);
-            float halfWidth = size.x * 0.5f;
-            float halfHeight = size.y * 0.5f;
-
-            CreateProp("屋顶 " + name + " 设备台 A", center + new Vector3(-halfWidth * 0.46f, -halfHeight * 0.18f, 0.2f), new Vector3(0.38f, 0.26f, 0.12f), metal);
-            CreateProp("屋顶 " + name + " 设备屏 A", center + new Vector3(-halfWidth * 0.46f, -halfHeight * 0.02f, 0.26f), new Vector3(0.3f, 0.06f, 0.08f), screen);
-            CreateProp("屋顶 " + name + " 设备台 B", center + new Vector3(halfWidth * 0.42f, halfHeight * 0.05f, 0.2f), new Vector3(0.34f, 0.3f, 0.12f), metal);
-            CreateProp("屋顶 " + name + " 状态灯 B", center + new Vector3(halfWidth * 0.42f, halfHeight * 0.23f, 0.26f), new Vector3(0.22f, 0.05f, 0.07f), screen);
-            CreateProp("2.5D 建筑体 " + name + " 警戒斜纹 A", center + new Vector3(-halfWidth * 0.18f, -halfHeight * 0.36f, 0.16f), new Vector3(0.56f, 0.05f, 0.06f), warning);
-            CreateProp("2.5D 建筑体 " + name + " 警戒斜纹 B", center + new Vector3(halfWidth * 0.1f, -halfHeight * 0.36f, 0.16f), new Vector3(0.56f, 0.05f, 0.06f), warning);
-
-            if (height > 1.05f)
-            {
-                CreateProp("屋顶 " + name + " 高风险设备箱", center + new Vector3(0f, 0f, 0.28f), new Vector3(0.36f, 0.24f, 0.12f), new Color(0.22f, 0.2f, 0.12f, 1f));
-                CreateProp("屋顶 " + name + " 红色警示点", center + new Vector3(0f, 0.18f, 0.34f), new Vector3(0.08f, 0.08f, 0.06f), new Color(0.9f, 0.08f, 0.06f, 1f));
-            }
-        }
-
-        private void CreateTopDownFacilityBackdrop()
-        {
-            Color[] colors =
-            {
-                new Color(0.07f, 0.085f, 0.09f, 1f),
-                new Color(0.06f, 0.075f, 0.08f, 1f),
-                new Color(0.08f, 0.075f, 0.065f, 1f)
-            };
-
-            for (int i = 0; i < 12; i++)
-            {
-                float x = -11.4f + i * 2.08f;
-                CreateProp("2.5D 建筑体 外围封闭舱段 " + i, new Vector3(x, 7.55f, -0.22f), new Vector3(1.44f, 0.42f, 0.08f), colors[i % colors.Length]);
-                CreateProp("屋顶 外围封闭舱段 " + i, new Vector3(x, 7.22f, -0.18f), new Vector3(1.14f, 0.08f, 0.06f), new Color(0.025f, 0.035f, 0.04f, 1f));
-            }
-        }
-
-        private void CreateRoadDetailLayer()
-        {
-            Color panelLine = new Color(0.52f, 0.58f, 0.56f, 1f);
-            Color rail = new Color(0.34f, 0.4f, 0.4f, 1f);
-            Color vent = new Color(0.05f, 0.065f, 0.07f, 1f);
-            Color yellow = new Color(0.84f, 0.66f, 0.08f, 1f);
-
-            for (int i = 0; i < 11; i++)
-            {
-                float x = -9.8f + i * 1.95f;
-                CreateProp("主舱地板接缝 " + i, new Vector3(x, 0f, -0.08f), new Vector3(0.52f, 0.035f, 0.06f), panelLine);
-            }
-
-            for (int i = 0; i < 9; i++)
-            {
-                float x = -8.2f + i * 2.05f;
-                CreateProp("南舱地板接缝 " + i, new Vector3(x, -3.65f, -0.08f), new Vector3(0.48f, 0.035f, 0.06f), panelLine);
-            }
-
-            for (int i = 0; i < 8; i++)
-            {
-                float y = -5.7f + i * 1.55f;
-                CreateProp("西舱导轨 " + i, new Vector3(-7f, y, -0.08f), new Vector3(0.035f, 0.5f, 0.06f), rail);
-                CreateProp("东舱导轨 " + i, new Vector3(7.25f, y, -0.08f), new Vector3(0.035f, 0.5f, 0.06f), rail);
-            }
-
-            for (int i = 0; i < 5; i++)
-            {
-                CreateRotatedProp("码头气闸黄黑条 " + i, new Vector3(-6.95f + i * 0.18f, 4.15f, -0.07f), new Vector3(0.07f, 0.62f, 0.06f), i % 2 == 0 ? yellow : vent, 0f);
-                CreateRotatedProp("指挥舱黄黑条 " + i, new Vector3(-0.36f + i * 0.18f, -4.15f, -0.07f), new Vector3(0.07f, 0.62f, 0.06f), i % 2 == 0 ? yellow : vent, 0f);
-            }
-
-            CreateVentGrate("通风口 A", new Vector3(-3.2f, 0.32f, -0.05f));
-            CreateVentGrate("通风口 B", new Vector3(4.9f, -0.32f, -0.05f));
-            CreateVentGrate("通风口 C", new Vector3(-1.2f, -3.98f, -0.05f));
-
-            CreateProp("北侧舱内导向杆", new Vector3(2.2f, 4.15f, -0.06f), new Vector3(0.64f, 0.05f, 0.06f), panelLine);
-            CreateShapeProp("北侧舱内导向头", diamondSprite, new Vector3(2.62f, 4.15f, -0.05f), new Vector3(0.22f, 0.22f, 0.06f), panelLine);
-            CreateProp("后舱导向杆", new Vector3(7.25f, -2.8f, -0.06f), new Vector3(0.05f, 0.64f, 0.06f), panelLine);
-            CreateShapeProp("后舱导向头", diamondSprite, new Vector3(7.25f, -3.2f, -0.05f), new Vector3(0.22f, 0.22f, 0.06f), panelLine);
-        }
-
-        private void CreateVentGrate(string name, Vector3 position)
-        {
-            Color vent = new Color(0.04f, 0.055f, 0.06f, 1f);
-            Color slit = new Color(0.42f, 0.48f, 0.48f, 1f);
-            CreateModelProp(name + " CC0 Vent", name.Contains("主") ? "Props/Prop_Vent_Big.fbx" : "Props/Prop_Vent_Small.fbx", position + new Vector3(0f, 0f, 0.08f), new Vector3(0.48f, 0.48f, 0.14f), 0f);
-            CreateShapeProp(name, circleSprite, position, new Vector3(0.32f, 0.32f, 0.06f), vent);
-
-            for (int i = 0; i < 3; i++)
-            {
-                CreateProp(name + " 格栅 " + i, position + new Vector3(0f, -0.08f + i * 0.08f, 0.03f), new Vector3(0.22f, 0.025f, 0.04f), slit);
-            }
-        }
-
-        private void CreateSharedCityProps()
-        {
-            Color metal = new Color(0.1f, 0.12f, 0.13f, 1f);
-            Color plastic = new Color(0.14f, 0.28f, 0.32f, 1f);
-            Color warning = new Color(0.86f, 0.66f, 0.1f, 1f);
-
-            for (int i = 0; i < 5; i++)
-            {
-                CreatePrimitiveProp("外壳铆钉 " + i, PrimitiveType.Cylinder, new Vector3(-5.2f + i * 2.6f, -6.98f, 0.08f), new Vector3(0.1f, 0.12f, 0.1f), metal);
-                CreateProp("外壳加固梁 " + i, new Vector3(-4.0f + i * 2.6f, -6.98f, 0.1f), new Vector3(1.9f, 0.035f, 0.06f), metal);
-            }
-
-            CreateSolidProp("墙面监控终端", new Vector3(2.95f, -3.25f, 0.08f), new Vector3(0.16f, 0.88f, 0.28f), new Color(0.08f, 0.16f, 0.18f, 1f));
-            CreateProp("终端冷光屏", new Vector3(3.02f, -3.25f, 0.22f), new Vector3(0.05f, 0.72f, 0.16f), new Color(0.32f, 0.86f, 0.95f, 1f));
-            CreateSolidProp("警用通讯柱", new Vector3(-2.7f, -3.18f, 0.08f), new Vector3(0.34f, 0.42f, 0.28f), new Color(0.14f, 0.18f, 0.2f, 1f));
-            CreateProp("通讯柱灯窗", new Vector3(-2.7f, -3.19f, 0.2f), new Vector3(0.24f, 0.3f, 0.08f), new Color(0.28f, 0.68f, 0.78f, 1f));
-            CreateSolidProp("舱内补给柜", new Vector3(1.9f, 0.82f, 0.08f), new Vector3(0.34f, 0.48f, 0.28f), plastic);
-            CreateProp("补给柜状态灯", new Vector3(1.9f, 1.06f, 0.22f), new Vector3(0.24f, 0.04f, 0.1f), new Color(0.88f, 0.18f, 0.22f, 1f));
-            CreateSolidProp("可疑封控箱 A", new Vector3(-1.05f, -0.68f, 0.06f), new Vector3(0.62f, 0.16f, 0.18f), warning);
-            CreateSolidProp("可疑封控箱 B", new Vector3(1.05f, 0.68f, 0.06f), new Vector3(0.62f, 0.16f, 0.18f), warning);
-            CreateProp("封控箱黑条 A", new Vector3(-1.05f, -0.68f, 0.16f), new Vector3(0.36f, 0.04f, 0.06f), metal);
-            CreateProp("封控箱黑条 B", new Vector3(1.05f, 0.68f, 0.16f), new Vector3(0.36f, 0.04f, 0.06f), metal);
-
-            CreatePrimitiveProp("旋转摄像头底座", PrimitiveType.Cylinder, new Vector3(3.35f, 0.72f, 0.14f), new Vector3(0.12f, 0.1f, 0.12f), metal);
-            CreateProp("旋转摄像头机身", new Vector3(3.35f, 0.9f, 0.28f), new Vector3(0.2f, 0.1f, 0.18f), metal);
-            CreatePrimitiveProp("摄像头红点", PrimitiveType.Sphere, new Vector3(3.28f, 0.91f, 0.34f), new Vector3(0.04f, 0.04f, 0.04f), new Color(0.9f, 0.08f, 0.05f, 1f));
-            CreatePrimitiveProp("摄像头绿点", PrimitiveType.Sphere, new Vector3(3.42f, 0.91f, 0.34f), new Vector3(0.04f, 0.04f, 0.04f), new Color(0.08f, 0.78f, 0.18f, 1f));
-
-            CreateProp("气闸隔离条 A", new Vector3(-5.65f, -3.62f, 0.06f), new Vector3(0.62f, 0.12f, 0.18f), new Color(0.82f, 0.18f, 0.1f, 1f));
-            CreateProp("气闸隔离条 B", new Vector3(-4.92f, -3.62f, 0.06f), new Vector3(0.62f, 0.12f, 0.18f), new Color(0.82f, 0.18f, 0.1f, 1f));
-            CreateProp("墙边档案柜", new Vector3(-6.45f, 0.78f, 0.06f), new Vector3(0.36f, 0.3f, 0.22f), new Color(0.08f, 0.2f, 0.28f, 1f));
-            CreateProp("档案柜屏幕", new Vector3(-6.45f, 0.92f, 0.18f), new Vector3(0.26f, 0.04f, 0.08f), new Color(0.34f, 0.88f, 0.95f, 1f));
-            CreateUnderworldPassageNodes();
-        }
-
-        private void CreateUnderworldPassageNodes()
-        {
-            for (int i = 0; i < ruleSet.UnderworldPassageCount; i++)
-            {
-                Vector3 position = mapService.UnderworldPassageDesignPosition(i, ruleSet.UnderworldPassageCount);
-                CreateModelProp("暗线节点 " + i + " CC0 Vent Hatch", "Props/Prop_Vent_Big.fbx", position + new Vector3(0f, 0f, 0.02f), new Vector3(0.62f, 0.62f, 0.16f), i * 23f);
-                GameObject node = CreatePrimitiveProp("暗线节点 " + i, PrimitiveType.Cylinder, position + new Vector3(0f, 0f, 0.1f), new Vector3(0.26f, 0.08f, 0.26f), new Color(0.45f, 0.1f, 0.55f, 1f));
-                CreatePropChild(node.transform, "暗线井盖纹", new Vector3(0f, 0f, 0.06f), new Vector3(0.64f, 0.12f, 0.08f), new Color(0.9f, 0.42f, 1f, 1f), PrimitiveType.Cube);
-                CreatePropChild(node.transform, "暗线箭头", new Vector3(0f, 0.18f, 0.07f), new Vector3(0.16f, 0.22f, 0.08f), new Color(0.78f, 0.2f, 0.86f, 1f), PrimitiveType.Cube);
-            }
-        }
-
-        private void CreateLargeMapProps()
-        {
-            CreateDockyardDressing();
-            CreateCustomsDressing();
-            CreateCctvRoomDressing();
-            CreateTeaCafeDressing();
-            CreateNightMarketDressing();
-            CreateFinanceDressing();
-            CreatePowerRoomDressing();
-            CreateRooftopDressing();
-            CreateCommandPostDressing();
-            CreateEvidenceRoomDressing();
-            CreateBackLaneDressing();
-            CreateClinicDressing();
-        }
-
-        private void CreateZone(string zoneName, Vector3 position, Vector3 scale, Color color)
-        {
-            CreateProp(zoneName, position, scale, color);
-            CreateWorldLabelAt(zoneName, mapService.ScaleMapPosition(position + new Vector3(0f, scale.y * 0.34f, -0.16f)), 0.07f);
-        }
-
-        private void CreateRoad(string roadName, Vector3 position, Vector3 scale, Color color)
-        {
-            GameObject road = CreateProp(roadName, position, scale, color);
-            road.transform.SetAsFirstSibling();
-        }
-
-        private void CreateDockyardDressing()
-        {
-            Color[] colors =
-            {
-                new Color(0.08f, 0.15f, 0.22f, 0.78f),
-                new Color(0.28f, 0.11f, 0.09f, 0.78f),
-                new Color(0.36f, 0.28f, 0.08f, 0.78f),
-                new Color(0.08f, 0.22f, 0.15f, 0.78f)
-            };
-
-            for (int row = 0; row < 2; row++)
-            {
-                for (int column = 0; column < 4; column++)
-                {
-                    float x = -10.55f + column * 1.45f;
-                    float y = 6.05f - row * 0.62f;
-                    CreateSolidProp("货柜底影 " + row + "-" + column, new Vector3(x, y, 0.02f), new Vector3(1.16f, 0.34f, 0.08f), colors[(row + column) % colors.Length]);
-                    CreateModelProp("成熟港区设施 免费货柜替代模块 " + row + "-" + column, (row + column) % 2 == 0 ? "Props/Prop_Crate4.fbx" : "Props/Prop_Crate3.fbx", new Vector3(x, y, 0.08f), new Vector3(0.92f, 0.34f, 0.34f), column % 2 == 0 ? 0f : 180f, true);
-                    CreateProp("货柜细门线 " + row + "-" + column, new Vector3(x - 0.36f, y, 0.18f), new Vector3(0.025f, 0.22f, 0.04f), new Color(0.62f, 0.66f, 0.62f, 0.9f));
-                    CreateProp("货柜小编号牌 " + row + "-" + column, new Vector3(x + 0.36f, y + 0.12f, 0.18f), new Vector3(0.13f, 0.035f, 0.035f), new Color(0.82f, 0.72f, 0.22f, 0.9f));
-                }
-            }
-
-            CreateSolidProp("码头吊机立柱", new Vector3(-10.95f, 4.2f, 0.2f), new Vector3(0.2f, 1.65f, 0.42f), new Color(0.72f, 0.46f, 0.06f, 1f));
-            CreateProp("码头吊机横臂", new Vector3(-9.95f, 4.92f, 0.28f), new Vector3(1.95f, 0.12f, 0.22f), new Color(0.72f, 0.46f, 0.06f, 1f));
-            CreateProp("吊机挂钩", new Vector3(-9.18f, 4.58f, 0.16f), new Vector3(0.16f, 0.44f, 0.16f), new Color(0.08f, 0.08f, 0.08f, 1f));
-            CreatePrimitiveProp("系船柱 A", PrimitiveType.Cylinder, new Vector3(-11.1f, 3.65f, 0.08f), new Vector3(0.18f, 0.08f, 0.18f), new Color(0.08f, 0.09f, 0.1f, 1f));
-            CreatePrimitiveProp("系船柱 B", PrimitiveType.Cylinder, new Vector3(-8.75f, 3.65f, 0.08f), new Vector3(0.18f, 0.08f, 0.18f), new Color(0.08f, 0.09f, 0.1f, 1f));
-            CreateProp("港口缆绳", new Vector3(-9.9f, 3.68f, 0.04f), new Vector3(2.1f, 0.05f, 0.06f), new Color(0.48f, 0.36f, 0.18f, 1f));
-            CreateProp("叉车车身", new Vector3(-8.38f, 4.72f, 0.07f), new Vector3(0.52f, 0.28f, 0.18f), new Color(0.9f, 0.68f, 0.08f, 1f));
-            CreateProp("叉车货叉", new Vector3(-7.92f, 4.72f, 0.08f), new Vector3(0.42f, 0.05f, 0.08f), new Color(0.08f, 0.08f, 0.07f, 1f));
-            CreatePrimitiveProp("叉车轮 A", PrimitiveType.Cylinder, new Vector3(-8.56f, 4.55f, 0.08f), new Vector3(0.08f, 0.04f, 0.08f), new Color(0.04f, 0.04f, 0.04f, 1f));
-            CreatePrimitiveProp("叉车轮 B", PrimitiveType.Cylinder, new Vector3(-8.22f, 4.55f, 0.08f), new Vector3(0.08f, 0.04f, 0.08f), new Color(0.04f, 0.04f, 0.04f, 1f));
-            CreateProp("地面绑带 A", new Vector3(-10.6f, 5.1f, 0.02f), new Vector3(0.05f, 0.82f, 0.04f), new Color(0.08f, 0.08f, 0.08f, 1f));
-            CreateProp("地面绑带 B", new Vector3(-8.25f, 5.1f, 0.02f), new Vector3(0.05f, 0.82f, 0.04f), new Color(0.08f, 0.08f, 0.08f, 1f));
-            CreateModelDominantDockyardForeground();
-        }
-
-        private void CreateModelDominantDockyardForeground()
-        {
-            Vector3 anchor = new Vector3(-9.42f, 4.92f, 0f);
-            CreateModelProp("成熟港区设施 开局主视觉金属平台", "Platforms/Platform_Rails_4WideTall.fbx", anchor + new Vector3(0.1f, -0.42f, 0.04f), new Vector3(2.2f, 0.62f, 0.32f), 0f, true);
-            CreateModelProp("成熟港区设施 开局主视觉门框左", "Platforms/Door_Frame_SquareTall.fbx", anchor + new Vector3(-1.56f, 0.06f, 0.18f), new Vector3(0.42f, 1.22f, 0.64f), 90f, true);
-            CreateModelProp("成熟港区设施 开局主视觉门框右", "Platforms/Door_Frame_SquareTall.fbx", anchor + new Vector3(1.56f, 0.02f, 0.18f), new Vector3(0.42f, 1.22f, 0.64f), -90f, true);
-            CreateModelProp("成熟港区设施 开局主视觉窗墙", "Walls/WallAstra_Straight_Window.fbx", anchor + new Vector3(0f, 0.78f, 0.28f), new Vector3(2.2f, 0.26f, 0.62f), 0f, true);
-            CreateModelProp("成熟港区设施 开局主视觉电缆墙", "Walls/TopCables_Straight_Hanging.fbx", anchor + new Vector3(-0.1f, 1.08f, 0.46f), new Vector3(1.9f, 0.26f, 0.5f), 0f, true);
-            CreateModelProp("成熟港区设施 开局主视觉地灯左", "Props/Prop_Light_Floor.fbx", anchor + new Vector3(-1.04f, -0.82f, 0.12f), new Vector3(0.36f, 0.36f, 0.44f), 0f);
-            CreateModelProp("成熟港区设施 开局主视觉地灯右", "Props/Prop_Light_Floor.fbx", anchor + new Vector3(1.1f, -0.78f, 0.12f), new Vector3(0.36f, 0.36f, 0.44f), 180f);
-            CreateModelProp("成熟港区设施 开局主视觉接入终端", "Props/Prop_AccessPoint.fbx", anchor + new Vector3(1.15f, 0.48f, 0.14f), new Vector3(0.5f, 0.36f, 0.38f), 180f);
-            CreateModelProp("成熟港区设施 开局主视觉电脑台", "Props/Prop_Computer.fbx", anchor + new Vector3(-1.12f, 0.42f, 0.14f), new Vector3(0.46f, 0.34f, 0.34f), 0f);
-            CreateModelProp("成熟港区设施 开局主视觉通风机", "Props/Prop_Vent_Big.fbx", anchor + new Vector3(0.02f, 0.26f, 0.18f), new Vector3(0.72f, 0.36f, 0.24f), 0f, true);
-            CreateModelProp("成熟港区设施 开局主视觉弧形护栏左", "Props/Prop_Rail_Round_Big.fbx", anchor + new Vector3(-1.42f, -0.5f, 0.14f), new Vector3(0.64f, 0.46f, 0.28f), 90f, true);
-            CreateModelProp("成熟港区设施 开局主视觉弧形护栏右", "Props/Prop_Rail_Round_Big.fbx", anchor + new Vector3(1.42f, -0.5f, 0.14f), new Vector3(0.64f, 0.46f, 0.28f), -90f, true);
-            CreateMeshBoxProp("成熟港区设施 开局主视觉冷色导线", anchor + new Vector3(0f, -1.02f, 0.08f), new Vector3(2.15f, 0.04f, 0.05f), new Color(0.08f, 0.72f, 0.86f, 1f));
-            CreateMeshBoxProp("成熟港区设施 开局主视觉警戒黄线", anchor + new Vector3(0f, -1.18f, 0.08f), new Vector3(2.3f, 0.04f, 0.05f), new Color(0.92f, 0.7f, 0.08f, 1f));
-        }
-
-        private void CreateCustomsDressing()
-        {
-            CreateSolidProp("查验闸机", new Vector3(-5.0f, 4.42f, 0.06f), new Vector3(1.55f, 0.18f, 0.22f), new Color(0.18f, 0.28f, 0.22f, 1f));
-            CreateSolidProp("海关桌", new Vector3(-5.55f, 5.75f, 0.05f), new Vector3(0.82f, 0.42f, 0.18f), new Color(0.24f, 0.24f, 0.2f, 1f));
-            CreateSolidProp("扫描门", new Vector3(-4.35f, 5.55f, 0.12f), new Vector3(0.14f, 0.75f, 0.36f), new Color(0.12f, 0.18f, 0.22f, 1f));
-            CreateProp("封条箱 A", new Vector3(-5.85f, 4.92f, 0.05f), new Vector3(0.35f, 0.28f, 0.2f), new Color(0.74f, 0.68f, 0.42f, 1f));
-            CreateProp("封条箱 B", new Vector3(-5.38f, 4.92f, 0.05f), new Vector3(0.35f, 0.28f, 0.2f), new Color(0.74f, 0.68f, 0.42f, 1f));
-            CreateProp("查验告示牌", new Vector3(-4.2f, 4.58f, 0.07f), new Vector3(0.78f, 0.08f, 0.24f), new Color(0.88f, 0.72f, 0.1f, 1f));
-            CreateProp("护照托盘", new Vector3(-5.58f, 5.48f, 0.16f), new Vector3(0.32f, 0.16f, 0.05f), new Color(0.08f, 0.18f, 0.36f, 1f));
-            CreateProp("查验印章", new Vector3(-5.18f, 5.72f, 0.15f), new Vector3(0.12f, 0.1f, 0.08f), new Color(0.46f, 0.1f, 0.08f, 1f));
-            CreateProp("行李 X 光带", new Vector3(-4.38f, 4.92f, 0.08f), new Vector3(0.9f, 0.18f, 0.12f), new Color(0.08f, 0.08f, 0.09f, 1f));
-            CreatePrimitiveProp("X 光滚轮 A", PrimitiveType.Cylinder, new Vector3(-4.72f, 4.92f, 0.11f), new Vector3(0.05f, 0.05f, 0.05f), new Color(0.5f, 0.5f, 0.46f, 1f));
-            CreatePrimitiveProp("X 光滚轮 B", PrimitiveType.Cylinder, new Vector3(-4.08f, 4.92f, 0.11f), new Vector3(0.05f, 0.05f, 0.05f), new Color(0.5f, 0.5f, 0.46f, 1f));
-        }
-
-        private void CreateCctvRoomDressing()
-        {
-            CreateSolidProp("监控控制台", new Vector3(-9.35f, 1.2f, 0.06f), new Vector3(1.28f, 0.28f, 0.18f), new Color(0.06f, 0.12f, 0.16f, 1f));
-
-            for (int i = 0; i < 4; i++)
-            {
-                CreateProp("监控屏 " + i, new Vector3(-10.0f + i * 0.42f, 2.22f, 0.08f), new Vector3(0.32f, 0.06f, 0.22f), new Color(0.05f, 0.45f, 0.58f, 1f));
-                CreateProp("监控屏边框 " + i, new Vector3(-10.0f + i * 0.42f, 2.18f, 0.1f), new Vector3(0.36f, 0.035f, 0.24f), new Color(0.02f, 0.03f, 0.04f, 1f));
-            }
-
-            CreateSolidProp("录像机柜", new Vector3(-8.28f, 1.25f, 0.07f), new Vector3(0.36f, 0.42f, 0.28f), new Color(0.12f, 0.14f, 0.18f, 1f));
-            CreateProp("折叠椅", new Vector3(-9.95f, 1.48f, 0.05f), new Vector3(0.24f, 0.2f, 0.16f), new Color(0.16f, 0.18f, 0.2f, 1f));
-            CreateProp("录像带箱", new Vector3(-8.72f, 2.35f, 0.05f), new Vector3(0.46f, 0.24f, 0.18f), new Color(0.2f, 0.2f, 0.18f, 1f));
-            CreateProp("键盘灯条", new Vector3(-9.35f, 1.38f, 0.18f), new Vector3(0.98f, 0.04f, 0.06f), new Color(0.08f, 0.72f, 0.82f, 1f));
-            CreateProp("咖啡杯", new Vector3(-9.9f, 1.22f, 0.19f), new Vector3(0.1f, 0.1f, 0.1f), new Color(0.74f, 0.68f, 0.54f, 1f));
-            CreateProp("硬盘阵列 A", new Vector3(-8.28f, 1.44f, 0.24f), new Vector3(0.28f, 0.05f, 0.05f), new Color(0.08f, 0.62f, 0.18f, 1f));
-            CreateProp("硬盘阵列 B", new Vector3(-8.28f, 1.22f, 0.24f), new Vector3(0.28f, 0.05f, 0.05f), new Color(0.08f, 0.62f, 0.18f, 1f));
-        }
-
-        private void CreateTeaCafeDressing()
-        {
-            CreateSolidProp("茶餐厅吧台", new Vector3(-5.6f, 1.95f, 0.06f), new Vector3(0.28f, 1.0f, 0.18f), new Color(0.5f, 0.28f, 0.12f, 1f));
-
-            for (int i = 0; i < 3; i++)
-            {
-                float y = 1.05f + i * 0.42f;
-                CreateSolidProp("卡座桌 " + i, new Vector3(-4.75f, y, 0.05f), new Vector3(0.44f, 0.2f, 0.14f), new Color(0.6f, 0.38f, 0.18f, 1f));
-                CreateProp("卡座椅 " + i + "A", new Vector3(-5.1f, y, 0.05f), new Vector3(0.18f, 0.18f, 0.14f), new Color(0.42f, 0.12f, 0.08f, 1f));
-                CreateProp("卡座椅 " + i + "B", new Vector3(-4.4f, y, 0.05f), new Vector3(0.18f, 0.18f, 0.14f), new Color(0.42f, 0.12f, 0.08f, 1f));
-                CreateProp("奶茶杯 " + i, new Vector3(-4.75f, y + 0.06f, 0.16f), new Vector3(0.08f, 0.08f, 0.08f), new Color(0.78f, 0.56f, 0.32f, 1f));
-            }
-
-            CreateProp("收银机", new Vector3(-5.58f, 2.45f, 0.12f), new Vector3(0.18f, 0.18f, 0.14f), new Color(0.12f, 0.16f, 0.18f, 1f));
-            CreateProp("厨房隔断", new Vector3(-3.95f, 2.25f, 0.06f), new Vector3(0.7f, 0.12f, 0.18f), new Color(0.72f, 0.62f, 0.42f, 1f));
-            CreateSolidProp("冰柜", new Vector3(-3.78f, 1.2f, 0.08f), new Vector3(0.3f, 0.42f, 0.24f), new Color(0.18f, 0.34f, 0.38f, 1f));
-            CreateProp("餐牌灯箱", new Vector3(-4.68f, 2.45f, 0.14f), new Vector3(0.72f, 0.07f, 0.18f), new Color(0.92f, 0.72f, 0.26f, 1f));
-            CreateProp("厨房炉火", new Vector3(-3.98f, 2.02f, 0.16f), new Vector3(0.16f, 0.07f, 0.08f), new Color(1f, 0.32f, 0.08f, 1f));
-            CreateProp("餐具架", new Vector3(-5.58f, 1.42f, 0.18f), new Vector3(0.08f, 0.42f, 0.12f), new Color(0.82f, 0.82f, 0.74f, 1f));
-        }
-
-        private void CreateNightMarketDressing()
-        {
-            for (int i = 0; i < 4; i++)
-            {
-                float x = -2.35f + i * 1.05f;
-                Color stallColor = i % 2 == 0 ? new Color(0.55f, 0.18f, 0.08f, 1f) : new Color(0.18f, 0.38f, 0.18f, 1f);
-                CreateSolidProp("夜市摊台 " + i, new Vector3(x, 3.1f, 0.04f), new Vector3(0.72f, 0.36f, 0.2f), stallColor);
-                CreateProp("夜市棚顶 " + i, new Vector3(x, 3.35f, 0.18f), new Vector3(0.82f, 0.12f, 0.12f), new Color(0.86f, 0.28f, 0.18f, 1f));
-                CreatePrimitiveProp("灯笼 " + i, PrimitiveType.Sphere, new Vector3(x + 0.32f, 3.55f, 0.2f), new Vector3(0.12f, 0.12f, 0.12f), new Color(0.95f, 0.22f, 0.12f, 1f));
-                CreateProp("食材盘 " + i, new Vector3(x - 0.16f, 3.08f, 0.18f), new Vector3(0.18f, 0.14f, 0.05f), new Color(0.82f, 0.48f, 0.22f, 1f));
-                CreateProp("收钱盒 " + i, new Vector3(x + 0.18f, 3.08f, 0.18f), new Vector3(0.16f, 0.1f, 0.06f), new Color(0.08f, 0.1f, 0.12f, 1f));
-            }
-
-            CreateProp("霓虹招牌", new Vector3(-0.65f, 3.78f, 0.06f), new Vector3(1.8f, 0.12f, 0.24f), new Color(0.9f, 0.12f, 0.42f, 1f));
-            CreateProp("啤酒箱堆", new Vector3(0.92f, 2.05f, 0.05f), new Vector3(0.42f, 0.32f, 0.18f), new Color(0.36f, 0.2f, 0.08f, 1f));
-            CreateSolidProp("排队栏杆 A", new Vector3(-2.85f, 2.25f, 0.06f), new Vector3(0.08f, 0.78f, 0.12f), new Color(0.1f, 0.1f, 0.1f, 1f));
-            CreateSolidProp("排队栏杆 B", new Vector3(1.15f, 2.25f, 0.06f), new Vector3(0.08f, 0.78f, 0.12f), new Color(0.1f, 0.1f, 0.1f, 1f));
-            CreateProp("地摊胶凳 A", new Vector3(-2.38f, 2.08f, 0.05f), new Vector3(0.18f, 0.18f, 0.12f), new Color(0.82f, 0.18f, 0.12f, 1f));
-            CreateProp("地摊胶凳 B", new Vector3(0.38f, 2.05f, 0.05f), new Vector3(0.18f, 0.18f, 0.12f), new Color(0.12f, 0.42f, 0.78f, 1f));
-            CreateProp("纸皮箱堆", new Vector3(-1.72f, 2.02f, 0.05f), new Vector3(0.36f, 0.24f, 0.16f), new Color(0.64f, 0.42f, 0.22f, 1f));
-            CreateProp("鱼档冰床", new Vector3(-2.06f, 2.34f, 0.06f), new Vector3(0.52f, 0.18f, 0.14f), new Color(0.72f, 0.86f, 0.9f, 1f));
-            CreateProp("暗号价牌", new Vector3(-1.98f, 2.62f, 0.16f), new Vector3(0.28f, 0.06f, 0.12f), new Color(0.92f, 0.78f, 0.16f, 1f));
-            CreateProp("摊档油桶 A", new Vector3(1.32f, 3.04f, 0.08f), new Vector3(0.16f, 0.16f, 0.18f), new Color(0.1f, 0.18f, 0.22f, 1f));
-            CreateProp("摊档油桶 B", new Vector3(1.52f, 3.04f, 0.08f), new Vector3(0.16f, 0.16f, 0.18f), new Color(0.1f, 0.18f, 0.22f, 1f));
-            CreateProp("夜市布帘", new Vector3(-0.12f, 3.56f, 0.18f), new Vector3(0.52f, 0.08f, 0.1f), new Color(0.2f, 0.34f, 0.68f, 1f));
-            CreateProp("霓虹小箭头", new Vector3(0.98f, 3.72f, 0.14f), new Vector3(0.22f, 0.14f, 0.08f), new Color(0.08f, 0.86f, 0.9f, 1f));
-        }
-
-        private void CreateFinanceDressing()
-        {
-            for (int i = 0; i < 3; i++)
-            {
-                float x = 3.8f + i * 0.7f;
-                CreateSolidProp("金融办公桌 " + i, new Vector3(x, 2.55f, 0.05f), new Vector3(0.45f, 0.28f, 0.16f), new Color(0.28f, 0.24f, 0.2f, 1f));
-                CreateProp("电脑屏 " + i, new Vector3(x, 2.78f, 0.12f), new Vector3(0.28f, 0.05f, 0.18f), new Color(0.05f, 0.4f, 0.6f, 1f));
-                CreateProp("账本 " + i, new Vector3(x - 0.14f, 2.48f, 0.16f), new Vector3(0.16f, 0.1f, 0.04f), new Color(0.78f, 0.72f, 0.54f, 1f));
-            }
-
-            CreateSolidProp("保险柜", new Vector3(5.95f, 2.08f, 0.08f), new Vector3(0.42f, 0.42f, 0.3f), new Color(0.18f, 0.18f, 0.22f, 1f));
-            CreateSolidProp("档案柜 A", new Vector3(5.95f, 3.05f, 0.08f), new Vector3(0.36f, 0.32f, 0.28f), new Color(0.22f, 0.22f, 0.28f, 1f));
-            CreateSolidProp("档案柜 B", new Vector3(6.45f, 3.05f, 0.08f), new Vector3(0.36f, 0.32f, 0.28f), new Color(0.22f, 0.22f, 0.28f, 1f));
-            CreateProp("金融楼入口", new Vector3(4.75f, 3.55f, 0.06f), new Vector3(1.05f, 0.16f, 0.24f), new Color(0.32f, 0.32f, 0.42f, 1f));
-            CreateProp("保险柜转盘", new Vector3(5.95f, 2.28f, 0.26f), new Vector3(0.08f, 0.04f, 0.08f), new Color(0.78f, 0.72f, 0.54f, 1f));
-            CreateProp("碎纸机", new Vector3(3.35f, 3.15f, 0.06f), new Vector3(0.28f, 0.26f, 0.18f), new Color(0.12f, 0.12f, 0.14f, 1f));
-            CreateProp("碎纸袋", new Vector3(3.18f, 3.35f, 0.04f), new Vector3(0.18f, 0.16f, 0.1f), new Color(0.68f, 0.68f, 0.62f, 1f));
-        }
-
-        private void CreatePowerRoomDressing()
-        {
-            for (int i = 0; i < 3; i++)
-            {
-                CreateSolidProp("电房变压器 " + i, new Vector3(8.15f + i * 0.55f, 5.65f, 0.04f), new Vector3(0.34f, 0.52f, 0.32f), new Color(0.18f, 0.24f, 0.34f, 1f));
-                CreateProp("电缆桥架 " + i, new Vector3(8.15f + i * 0.55f, 4.52f, 0.08f), new Vector3(0.42f, 0.08f, 0.12f), new Color(0.04f, 0.04f, 0.05f, 1f));
-                CreateProp("变压器指示灯 " + i, new Vector3(8.15f + i * 0.55f, 5.92f, 0.22f), new Vector3(0.06f, 0.04f, 0.05f), new Color(0.08f, 0.82f, 0.18f, 1f));
-            }
-
-            CreateSolidProp("电闸面板", new Vector3(9.72f, 5.12f, 0.09f), new Vector3(0.28f, 0.62f, 0.28f), new Color(0.08f, 0.12f, 0.18f, 1f));
-            CreateProp("黄色警戒线", new Vector3(8.78f, 4.42f, 0.06f), new Vector3(1.45f, 0.08f, 0.1f), new Color(0.9f, 0.7f, 0.08f, 1f));
-            CreatePrimitiveProp("压力表", PrimitiveType.Cylinder, new Vector3(9.4f, 5.55f, 0.14f), new Vector3(0.12f, 0.04f, 0.12f), new Color(0.72f, 0.78f, 0.75f, 1f));
-            CreateProp("红色急停钮", new Vector3(9.72f, 5.36f, 0.25f), new Vector3(0.08f, 0.04f, 0.06f), new Color(0.9f, 0.06f, 0.04f, 1f));
-            CreateProp("地面电缆 A", new Vector3(8.68f, 5.05f, 0.01f), new Vector3(1.15f, 0.04f, 0.04f), new Color(0.02f, 0.02f, 0.025f, 1f));
-            CreateProp("地面电缆 B", new Vector3(9.15f, 5.35f, 0.01f), new Vector3(0.04f, 0.72f, 0.04f), new Color(0.02f, 0.02f, 0.025f, 1f));
-        }
-
-        private void CreateRooftopDressing()
-        {
-            CreateSolidPrimitiveProp("天台水塔", PrimitiveType.Cylinder, new Vector3(9.58f, 1.95f, 0.14f), new Vector3(0.36f, 0.24f, 0.36f), new Color(0.42f, 0.42f, 0.46f, 1f));
-            CreateSolidProp("空调外机 A", new Vector3(8.35f, 1.1f, 0.07f), new Vector3(0.38f, 0.3f, 0.22f), new Color(0.54f, 0.54f, 0.52f, 1f));
-            CreateSolidProp("空调外机 B", new Vector3(8.85f, 1.1f, 0.07f), new Vector3(0.38f, 0.3f, 0.22f), new Color(0.54f, 0.54f, 0.52f, 1f));
-            CreateSolidProp("天台梯门", new Vector3(9.8f, 1.18f, 0.08f), new Vector3(0.32f, 0.46f, 0.28f), new Color(0.18f, 0.18f, 0.22f, 1f));
-            CreateSolidProp("围栏北", new Vector3(8.95f, 2.42f, 0.08f), new Vector3(1.7f, 0.07f, 0.14f), new Color(0.1f, 0.1f, 0.12f, 1f));
-            CreateSolidProp("围栏东", new Vector3(10.05f, 1.65f, 0.08f), new Vector3(0.07f, 1.35f, 0.14f), new Color(0.1f, 0.1f, 0.12f, 1f));
-            CreateProp("天台排水沟", new Vector3(8.12f, 2.16f, 0.02f), new Vector3(0.48f, 0.04f, 0.05f), new Color(0.04f, 0.06f, 0.06f, 1f));
-            CreateProp("晾衣绳", new Vector3(9.05f, 1.36f, 0.2f), new Vector3(0.72f, 0.03f, 0.04f), new Color(0.82f, 0.82f, 0.72f, 1f));
-            CreateProp("晾晒布 A", new Vector3(8.85f, 1.28f, 0.18f), new Vector3(0.18f, 0.1f, 0.06f), new Color(0.62f, 0.18f, 0.32f, 1f));
-            CreateProp("晾晒布 B", new Vector3(9.18f, 1.28f, 0.18f), new Vector3(0.18f, 0.1f, 0.06f), new Color(0.22f, 0.42f, 0.7f, 1f));
-        }
-
-        private void CreateCommandPostDressing()
-        {
-            CreateSolidProp("警用指挥车", new Vector3(0.2f, -5.3f, 0.05f), new Vector3(1.25f, 0.72f, 0.3f), new Color(0.08f, 0.12f, 0.14f, 1f));
-            CreateProp("车顶天线", new Vector3(0.2f, -4.82f, 0.28f), new Vector3(0.06f, 0.4f, 0.08f), new Color(0.02f, 0.02f, 0.02f, 1f));
-            CreateSolidProp("指挥折叠桌", new Vector3(-1.12f, -5.45f, 0.05f), new Vector3(0.8f, 0.32f, 0.16f), new Color(0.22f, 0.22f, 0.2f, 1f));
-            CreateProp("行动白板", new Vector3(-1.12f, -4.92f, 0.12f), new Vector3(0.75f, 0.08f, 0.3f), new Color(0.82f, 0.86f, 0.82f, 1f));
-            CreateSolidProp("警灯路障", new Vector3(1.7f, -4.35f, 0.06f), new Vector3(1.2f, 0.12f, 0.18f), new Color(0.1f, 0.28f, 0.9f, 1f));
-            CreatePrimitiveProp("路锥 A", PrimitiveType.Cylinder, new Vector3(2.2f, -5.78f, 0.07f), new Vector3(0.14f, 0.1f, 0.14f), new Color(0.9f, 0.34f, 0.08f, 1f));
-            CreatePrimitiveProp("路锥 B", PrimitiveType.Cylinder, new Vector3(2.62f, -5.78f, 0.07f), new Vector3(0.14f, 0.1f, 0.14f), new Color(0.9f, 0.34f, 0.08f, 1f));
-            CreatePrimitiveProp("路锥 C", PrimitiveType.Cylinder, new Vector3(3.04f, -5.78f, 0.07f), new Vector3(0.14f, 0.1f, 0.14f), new Color(0.9f, 0.34f, 0.08f, 1f));
-            CreateProp("车窗玻璃 A", new Vector3(-0.16f, -4.95f, 0.24f), new Vector3(0.28f, 0.05f, 0.1f), new Color(0.18f, 0.48f, 0.58f, 1f));
-            CreateProp("车窗玻璃 B", new Vector3(0.42f, -4.95f, 0.24f), new Vector3(0.28f, 0.05f, 0.1f), new Color(0.18f, 0.48f, 0.58f, 1f));
-            CreateProp("地图文件 A", new Vector3(-1.2f, -5.38f, 0.16f), new Vector3(0.18f, 0.12f, 0.04f), new Color(0.84f, 0.78f, 0.58f, 1f));
-            CreateProp("地图文件 B", new Vector3(-0.92f, -5.48f, 0.16f), new Vector3(0.18f, 0.12f, 0.04f), new Color(0.84f, 0.78f, 0.58f, 1f));
-            CreateProp("警灯红", new Vector3(-0.2f, -4.88f, 0.34f), new Vector3(0.16f, 0.06f, 0.06f), new Color(0.9f, 0.06f, 0.06f, 1f));
-            CreateProp("警灯蓝", new Vector3(0.6f, -4.88f, 0.34f), new Vector3(0.16f, 0.06f, 0.06f), new Color(0.08f, 0.24f, 0.9f, 1f));
-            CreateProp("无人机起降垫", new Vector3(0.96f, -4.62f, 0.08f), new Vector3(0.52f, 0.32f, 0.08f), new Color(0.08f, 0.14f, 0.16f, 1f));
-            CreateProp("无人机机臂 A", new Vector3(0.96f, -4.62f, 0.18f), new Vector3(0.5f, 0.05f, 0.06f), new Color(0.08f, 0.62f, 0.8f, 1f));
-            CreateProp("无人机机臂 B", new Vector3(0.96f, -4.62f, 0.19f), new Vector3(0.05f, 0.34f, 0.06f), new Color(0.08f, 0.62f, 0.8f, 1f));
-            CreateProp("警用电池箱", new Vector3(1.62f, -5.72f, 0.06f), new Vector3(0.32f, 0.22f, 0.16f), new Color(0.18f, 0.26f, 0.28f, 1f));
-        }
-
-        private void CreateEvidenceRoomDressing()
-        {
-            CreateSolidProp("证物冷柜", new Vector3(-8.95f, -5.28f, 0.04f), new Vector3(0.72f, 0.42f, 0.26f), new Color(0.16f, 0.34f, 0.38f, 1f));
-
-            for (int i = 0; i < 3; i++)
-            {
-                CreateSolidProp("证物货架 " + i, new Vector3(-9.92f + i * 0.62f, -4.45f, 0.07f), new Vector3(0.42f, 0.18f, 0.26f), new Color(0.24f, 0.22f, 0.18f, 1f));
-                CreateProp("封存箱 " + i, new Vector3(-9.92f + i * 0.62f, -5.82f, 0.05f), new Vector3(0.36f, 0.28f, 0.18f), new Color(0.7f, 0.62f, 0.38f, 1f));
-                CreateProp("证物标签 " + i, new Vector3(-9.92f + i * 0.62f, -4.32f, 0.22f), new Vector3(0.18f, 0.04f, 0.05f), new Color(0.88f, 0.78f, 0.18f, 1f));
-            }
-
-            CreateProp("证物封条", new Vector3(-8.18f, -4.42f, 0.08f), new Vector3(0.62f, 0.08f, 0.1f), new Color(0.92f, 0.78f, 0.08f, 1f));
-            CreateProp("鉴证灯箱", new Vector3(-7.52f, -5.18f, 0.08f), new Vector3(0.42f, 0.32f, 0.22f), new Color(0.18f, 0.52f, 0.58f, 1f));
-            CreateProp("血样冷藏盒", new Vector3(-8.82f, -5.1f, 0.2f), new Vector3(0.2f, 0.12f, 0.06f), new Color(0.68f, 0.08f, 0.08f, 1f));
-            CreateProp("证物相片板", new Vector3(-7.72f, -4.58f, 0.16f), new Vector3(0.36f, 0.08f, 0.18f), new Color(0.82f, 0.82f, 0.74f, 1f));
-            CreateProp("紫外灯条", new Vector3(-7.52f, -5.02f, 0.22f), new Vector3(0.34f, 0.04f, 0.06f), new Color(0.42f, 0.24f, 0.86f, 1f));
-        }
-
-        private void CreateBackLaneDressing()
-        {
-            CreateSolidProp("后巷垃圾箱", new Vector3(6.2f, -0.95f, 0.04f), new Vector3(0.62f, 0.38f, 0.22f), new Color(0.05f, 0.26f, 0.14f, 1f));
-            CreateSolidProp("排档炉头", new Vector3(5.08f, -1.28f, 0.06f), new Vector3(0.42f, 0.28f, 0.2f), new Color(0.18f, 0.18f, 0.16f, 1f));
-            CreatePrimitiveProp("煤气瓶 A", PrimitiveType.Cylinder, new Vector3(5.62f, -0.82f, 0.08f), new Vector3(0.12f, 0.18f, 0.12f), new Color(0.18f, 0.42f, 0.42f, 1f));
-            CreatePrimitiveProp("煤气瓶 B", PrimitiveType.Cylinder, new Vector3(5.88f, -0.82f, 0.08f), new Vector3(0.12f, 0.18f, 0.12f), new Color(0.18f, 0.42f, 0.42f, 1f));
-            CreateProp("雨棚", new Vector3(5.52f, -1.95f, 0.16f), new Vector3(1.28f, 0.12f, 0.12f), new Color(0.42f, 0.1f, 0.08f, 1f));
-            CreateSolidProp("黑帮摩托", new Vector3(6.85f, -2.08f, 0.06f), new Vector3(0.66f, 0.18f, 0.16f), new Color(0.08f, 0.08f, 0.1f, 1f));
-            CreateProp("排档火苗", new Vector3(5.08f, -1.12f, 0.18f), new Vector3(0.16f, 0.08f, 0.08f), new Color(1f, 0.28f, 0.06f, 1f));
-            CreateProp("墙面涂鸦", new Vector3(4.3f, -0.72f, 0.12f), new Vector3(0.58f, 0.05f, 0.14f), new Color(0.78f, 0.12f, 0.48f, 1f));
-            CreateProp("摩托车把", new Vector3(7.18f, -2.08f, 0.14f), new Vector3(0.16f, 0.04f, 0.05f), new Color(0.7f, 0.7f, 0.64f, 1f));
-            CreatePrimitiveProp("摩托前轮", PrimitiveType.Cylinder, new Vector3(7.16f, -2.08f, 0.08f), new Vector3(0.09f, 0.04f, 0.09f), new Color(0.02f, 0.02f, 0.025f, 1f));
-            CreatePrimitiveProp("摩托后轮", PrimitiveType.Cylinder, new Vector3(6.54f, -2.08f, 0.08f), new Vector3(0.09f, 0.04f, 0.09f), new Color(0.02f, 0.02f, 0.025f, 1f));
-            CreateProp("摩托车牌架", new Vector3(6.86f, -1.84f, 0.16f), new Vector3(0.22f, 0.05f, 0.06f), new Color(0.84f, 0.84f, 0.76f, 1f));
-            CreateProp("后巷油污", new Vector3(6.22f, -2.42f, 0.01f), new Vector3(0.54f, 0.14f, 0.04f), new Color(0.02f, 0.025f, 0.02f, 1f));
-            CreateProp("外卖箱", new Vector3(4.62f, -2.42f, 0.06f), new Vector3(0.34f, 0.24f, 0.18f), new Color(0.86f, 0.36f, 0.1f, 1f));
-            CreateProp("后门铁闩", new Vector3(4.0f, -1.18f, 0.12f), new Vector3(0.08f, 0.52f, 0.08f), new Color(0.5f, 0.5f, 0.46f, 1f));
-        }
-
-        private void CreateClinicDressing()
-        {
-            CreateSolidProp("诊所病床 A", new Vector3(5.55f, -5.45f, 0.04f), new Vector3(0.78f, 0.38f, 0.18f), new Color(0.72f, 0.72f, 0.66f, 1f));
-            CreateSolidProp("诊所病床 B", new Vector3(6.65f, -5.45f, 0.04f), new Vector3(0.78f, 0.38f, 0.18f), new Color(0.72f, 0.72f, 0.66f, 1f));
-            CreateSolidProp("药柜", new Vector3(5.2f, -4.45f, 0.08f), new Vector3(0.42f, 0.32f, 0.3f), new Color(0.2f, 0.34f, 0.28f, 1f));
-            CreateProp("手术灯臂", new Vector3(6.1f, -4.78f, 0.18f), new Vector3(0.08f, 0.5f, 0.08f), new Color(0.82f, 0.82f, 0.72f, 1f));
-            CreatePrimitiveProp("手术灯", PrimitiveType.Sphere, new Vector3(6.1f, -5.04f, 0.22f), new Vector3(0.16f, 0.16f, 0.08f), new Color(0.9f, 0.86f, 0.68f, 1f));
-            CreatePrimitiveProp("输液架", PrimitiveType.Cylinder, new Vector3(7.18f, -5.22f, 0.14f), new Vector3(0.06f, 0.26f, 0.06f), new Color(0.74f, 0.74f, 0.68f, 1f));
-            CreateProp("病床血压仪 A", new Vector3(5.18f, -5.22f, 0.16f), new Vector3(0.12f, 0.1f, 0.08f), new Color(0.08f, 0.14f, 0.18f, 1f));
-            CreateProp("病床血压仪 B", new Vector3(6.28f, -5.22f, 0.16f), new Vector3(0.12f, 0.1f, 0.08f), new Color(0.08f, 0.14f, 0.18f, 1f));
-            CreateProp("药瓶 A", new Vector3(5.08f, -4.3f, 0.25f), new Vector3(0.06f, 0.06f, 0.12f), new Color(0.72f, 0.82f, 0.86f, 1f));
-            CreateProp("药瓶 B", new Vector3(5.28f, -4.3f, 0.25f), new Vector3(0.06f, 0.06f, 0.12f), new Color(0.82f, 0.36f, 0.36f, 1f));
-            CreateProp("隐蔽病历箱", new Vector3(7.22f, -4.48f, 0.06f), new Vector3(0.34f, 0.24f, 0.18f), new Color(0.42f, 0.28f, 0.18f, 1f));
-        }
-
-        private GameObject CreatePrimitiveProp(string propName, PrimitiveType primitiveType, Vector3 position, Vector3 scale, Color color)
         {
             return worldBuilder.CreatePrimitiveProp(propName, primitiveType, position, scale, color);
         }
 
-        private GameObject CreateSolidPrimitiveProp(string propName, PrimitiveType primitiveType, Vector3 position, Vector3 scale, Color color)
-        {
-            return worldBuilder.CreateSolidPrimitiveProp(propName, primitiveType, position, scale, color);
-        }
 
-        private GameObject CreateProp(string propName, Vector3 position, Vector3 scale, Color color)
-        {
-            return worldBuilder.CreateProp(propName, position, scale, color);
-        }
 
         private static Color Darken(Color color, float multiplier)
         {
             return OnlineWorldBuilder.Darken(color, multiplier);
         }
 
-        private GameObject CreateSolidProp(string propName, Vector3 position, Vector3 scale, Color color)
-        {
-            return worldBuilder.CreateSolidProp(propName, position, scale, color);
-        }
 
-        private GameObject CreateShapeProp(string propName, Sprite sprite, Vector3 position, Vector3 scale, Color color)
-        {
-            return worldBuilder.CreateShapeProp(propName, sprite, position, scale, color);
-        }
 
-        private GameObject CreateRotatedProp(string propName, Vector3 position, Vector3 scale, Color color, float rotationDegrees)
-        {
-            return worldBuilder.CreateRotatedProp(propName, position, scale, color, rotationDegrees);
-        }
 
-        private GameObject CreateMeshBoxProp(string propName, Vector3 position, Vector3 scale, Color color, float rotationDegrees = 0f)
-        {
-            return worldBuilder.CreateMeshBoxProp(propName, position, scale, color, rotationDegrees);
-        }
 
-        private GameObject CreateSolidMeshBoxProp(string propName, Vector3 position, Vector3 scale, Color color, float rotationDegrees = 0f)
-        {
-            return worldBuilder.CreateSolidMeshBoxProp(propName, position, scale, color, rotationDegrees);
-        }
 
-        private GameObject CreateMeshBoxChild(Transform parent, string propName, Vector3 localPosition, Vector3 scale, Color color, float rotationDegrees = 0f)
-        {
-            return worldBuilder.CreateMeshBoxChild(parent, propName, localPosition, scale, color, rotationDegrees);
-        }
 
-        private GameObject CreateMeshPrimitiveChild(Transform parent, string propName, PrimitiveType primitiveType, Vector3 localPosition, Vector3 scale, Color color, Quaternion localRotation)
-        {
-            return worldBuilder.CreateMeshPrimitiveChild(parent, propName, primitiveType, localPosition, scale, color, localRotation);
-        }
 
-        private GameObject CreateMeshPrimitiveProp(string propName, PrimitiveType primitiveType, Vector3 position, Vector3 scale, Color color, Quaternion rotation)
-        {
-            return worldBuilder.CreateMeshPrimitiveProp(propName, primitiveType, position, scale, color, rotation);
-        }
 
         private static void Remove3DCollider(GameObject prop)
         {
             OnlineWorldBuilder.Remove3DCollider(prop);
         }
 
-        private void ConfigureRuntimeMesh(GameObject prop, Color color)
-        {
-            worldBuilder.ConfigureRuntimeMesh(prop, color);
-        }
 
-        private Material RuntimeMeshMaterial(Color color)
-        {
-            return worldBuilder.RuntimeMeshMaterial(color);
-        }
 
         private static void ConfigureTransparentMaterial(Material material)
         {
@@ -9400,80 +4615,28 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void RegisterSolidObstacle(Vector3 position, Vector3 scale)
-        {
-            worldBuilder.RegisterSolidObstacle(position, scale);
-        }
 
-        private void RegisterWalkableArea(Vector3 position, Vector3 scale)
-        {
-            worldBuilder.RegisterWalkableArea(position, scale);
-        }
 
         private static void AttachPhysicsCollider(GameObject prop, Vector3 designScale, bool round)
         {
             OnlineWorldBuilder.AttachPhysicsCollider(prop, designScale, round);
         }
 
-        private GameObject CreatePropChild(Transform parent, string propName, Vector3 localPosition, Vector3 scale, Color color, PrimitiveType primitiveType)
-        {
-            return worldBuilder.CreatePropChild(parent, propName, localPosition, scale, color, primitiveType);
-        }
 
-        private GameObject CreateSpriteChild(Transform parent, string objectName, Sprite sprite, Vector3 localPosition, Vector3 scale, Color color)
-        {
-            return worldBuilder.CreateSpriteChild(parent, objectName, sprite, localPosition, scale, color);
-        }
 
-        private GameObject CreateAssetStoreProp(string propName, string resourcePath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false, bool preserveMaterials = true)
-        {
-            return worldBuilder.CreateAssetStoreProp(propName, resourcePath, position, footprint, rotationDegrees, stretchToFootprint, preserveMaterials);
-        }
 
-        private GameObject CreateSolidAssetStoreProp(string propName, string resourcePath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false, bool preserveMaterials = true)
-        {
-            return worldBuilder.CreateSolidAssetStoreProp(propName, resourcePath, position, footprint, rotationDegrees, stretchToFootprint, preserveMaterials);
-        }
 
-        private GameObject CreateModelProp(string propName, string relativeFbxPath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false)
-        {
-            return worldBuilder.CreateModelProp(propName, relativeFbxPath, position, footprint, rotationDegrees, stretchToFootprint);
-        }
 
-        private GameObject CreateModelFallbackProp(string propName, Vector3 position, Vector3 footprint, float rotationDegrees, Color color)
-        {
-            return worldBuilder.CreateModelFallbackProp(propName, position, footprint, rotationDegrees, color);
-        }
 
         private static Color FallbackColorForModel(string relativeFbxPath)
         {
             return OnlineWorldBuilder.FallbackColorForModel(relativeFbxPath);
         }
 
-        private GameObject CreateSolidModelProp(string propName, string relativeFbxPath, Vector3 position, Vector3 footprint, float rotationDegrees = 0f, bool stretchToFootprint = false)
-        {
-            return worldBuilder.CreateSolidModelProp(propName, relativeFbxPath, position, footprint, rotationDegrees, stretchToFootprint);
-        }
 
-        private void CreateWallModelOverlay(string wallName, Vector3 position, Vector3 scale)
-        {
-            worldBuilder.CreateWallModelOverlay(wallName, position, scale);
-        }
 
-        private void CreateDoorModelOverlay(string markerName, Vector3 position, Vector3 scale)
-        {
-            worldBuilder.CreateDoorModelOverlay(markerName, position, scale);
-        }
 
-        private GameObject LoadQuaterniusModel(string relativeFbxPath)
-        {
-            return worldBuilder.LoadQuaterniusModel(relativeFbxPath);
-        }
 
-        private GameObject LoadResourcePrefab(string resourcePath)
-        {
-            return worldBuilder.LoadResourcePrefab(resourcePath);
-        }
 
         private static string NormalizeResourcePath(string resourcePath)
         {
@@ -9485,10 +4648,6 @@ namespace GanglandUndercover.Online
             return OnlineWorldBuilder.InstantiateModelPrefab(prefab);
         }
 
-        private void FitModelToFootprint(GameObject model, Vector3 targetPosition, Vector3 footprint, bool stretchToFootprint)
-        {
-            worldBuilder.FitModelToFootprint(model, targetPosition, footprint, stretchToFootprint);
-        }
 
         private static void AlignModelBounds(GameObject model, Vector3 targetPosition)
         {
@@ -9517,24 +4676,8 @@ namespace GanglandUndercover.Online
 
 
 
-        private void CreateNeonLight(string lightName, Vector3 position, Color color, float intensity, float range)
-        {
-            worldBuilder.CreateNeonLight(lightName, position, color, intensity, range);
-        }
 
-        private void ConfigureSceneLighting()
-        {
-            worldBuilder.ConfigureSceneLighting();
-        }
 
-        private void CreateEmergencyBell()
-        {
-            worldBuilder.CreateEmergencyBell();
-            // M4.3: 绑定 EmergencyButton 到控制器
-            EmergencyButton[] buttons = worldRoot.GetComponentsInChildren<EmergencyButton>();
-            foreach (var btn in buttons)
-                btn.BindController(this);
-        }
 
         // ══════════════════════════════════════════════════════
         // M6.1 监控摄像头生成 & 灰盒地图建造器
@@ -9544,91 +4687,8 @@ namespace GanglandUndercover.Online
         /// 在地图中实例化监控摄像头 NetworkBehaviour。
         /// 从 OnlineMapService.SurveillanceZones() 获取布点数据 → 生成 OnlineSecurityCamera。
         /// </summary>
-        private void SpawnSurveillanceCameras()
-        {
-            surveillanceCameras.Clear();
-            var zones = mapService.SurveillanceZones();
-            if (zones == null || zones.Length == 0)
-            {
-                Debug.LogWarning("[M6] No surveillance zones defined.");
-                return;
-            }
 
-            foreach (var zone in zones)
-            {
-                Vector3 worldPos = mapService.ScaleMapPosition(zone.Center);
-                Vector3 worldSize = mapService.ScaleMapSize(zone.Size);
 
-                // 可视化标记（半透明区域）
-                worldBuilder.CreateShapeProp(
-                    $"SurveillanceZone_{zone.Label}",
-                    worldBuilder.SoftCircleSprite,
-                    zone.Center,
-                    zone.Size,
-                    new Color(0.08f, 0.45f, 0.65f, 0.18f));
-
-                // 实例化 NetworkBehaviour（运行时由 Netcode 管理）
-                if (Application.isPlaying && networkManager != null && networkManager.IsServer)
-                {
-                    CreateSurveillanceCameraNetworkObject(zone);
-                }
-            }
-
-            Debug.Log($"[M6] Spawned {zones.Length} surveillance cameras.");
-        }
-
-        private void EnsureSurveillanceCameraNetworkObjects()
-        {
-            if (!Application.isPlaying || networkManager == null || !networkManager.IsServer || worldRoot == null)
-            {
-                return;
-            }
-
-            if (surveillanceCameras.Count > 0)
-            {
-                return;
-            }
-
-            var zones = mapService.SurveillanceZones();
-            if (zones == null || zones.Length == 0)
-            {
-                return;
-            }
-
-            foreach (var zone in zones)
-            {
-                CreateSurveillanceCameraNetworkObject(zone);
-            }
-        }
-
-        private void CreateSurveillanceCameraNetworkObject(OnlineMapService.SurveillanceZoneSpec zone)
-        {
-            Vector3 worldPos = mapService.ScaleMapPosition(zone.Center);
-            Vector3 worldSize = mapService.ScaleMapSize(zone.Size);
-
-            // A1 修复：从注册的 NetworkPrefab 模板实例化，避免 AddComponent<NetworkObject>.Spawn()
-            // 导致 globalObjectIdHash=0、远端 "NetworkPrefab could not be found"。
-            if (surveillanceCameraTemplate == null)
-            {
-                Debug.LogError("[A1] Surveillance camera template not registered!");
-                return;
-            }
-
-            GameObject cameraObj = Instantiate(surveillanceCameraTemplate, worldRoot.transform, false);
-            cameraObj.name = $"SurveillanceCamera_{zone.Label}";
-            cameraObj.transform.position = worldPos;
-            cameraObj.SetActive(true);
-
-            var netObj = cameraObj.GetComponent<NetworkObject>();
-            var camera = cameraObj.GetComponent<Online.Surveillance.OnlineSecurityCamera>();
-            camera.ZoneCenter = new Vector2(worldPos.x, worldPos.y);
-            camera.ZoneSize = new Vector2(worldSize.x, worldSize.y);
-            camera.CameraLabel = zone.Label;
-            camera.BindController(this);
-            surveillanceCameras.Add(camera);
-
-            netObj.Spawn();
-        }
 
         /// <summary>
         /// C1: Periodic check for Mole auto-exposure.
@@ -9688,1371 +4748,58 @@ namespace GanglandUndercover.Online
         ///
         /// M8.1: 支持根据 OnlineMapService.ActiveMapType 选择港区或警署地图。
         /// </summary>
-        private void BuildGreyboxMap()
-        {
-            // 根据地图类型选择布局数据
-            Map.MapLayoutData activeLayout = mapLayoutData; // 默认港区
-            if (mapService.ActiveMapType == OnlineMapService.OnlineMapType.PoliceStation)
-            {
-                if (policeStationMapLayoutData != null)
-                    activeLayout = policeStationMapLayoutData;
-                else
-                {
-                    activeLayout = Map.PoliceStationMapLayout.CreateMapLayoutAsset();
-                    Debug.Log("[M8.1] Using runtime-generated PoliceStation MapLayoutData (no asset assigned).");
-                }
-            }
-            else if (mapService.ActiveMapType == OnlineMapService.OnlineMapType.KowloonWalledCity)
-            {
-                if (kowloonWalledCityMapLayoutData != null)
-                    activeLayout = kowloonWalledCityMapLayoutData;
-                else
-                {
-                    activeLayout = Map.KowloonWalledCityMapLayout.CreateMapLayoutAsset();
-                    Debug.Log("[D4] Using runtime-generated KowloonWalledCity MapLayoutData (no asset assigned).");
-                }
-            }
-
-            if (activeLayout == null)
-            {
-                Debug.LogError("[GreyboxMapBuilder] No MapLayoutData available for selected map type.");
-                return;
-            }
-
-            var builder = new GreyboxMapBuilder(mapService, worldBuilder, activeLayout, worldRoot);
-            builder.BuildAll();
-
-            // 将灰盒生成的 walkable rects（设计坐标 → 世界坐标）合并到控制器集合中
-            foreach (var rect in builder.WalkableRects)
-            {
-                // 设计坐标 Rect → 世界坐标 Rect
-                Vector3 worldMin = mapService.ScaleMapPosition(new Vector3(rect.xMin, rect.yMin, 0f));
-                Vector3 worldMax = mapService.ScaleMapPosition(new Vector3(rect.xMax, rect.yMax, 0f));
-                walkableRects.Add(new Rect(worldMin.x, worldMin.y,
-                    worldMax.x - worldMin.x, worldMax.y - worldMin.y));
-            }
-
-            Debug.Log($"[M6/M8.1] Greybox map built for {mapService.ActiveMapType}: " +
-                      $"{builder.WalkableRects.Count} walkable zones.");
-        }
 
         /// <summary>
         /// 使用 KenneySpriteDecorator 为所有房间铺设 2D 建筑 Sprite。
         /// 不替换灰盒——仅叠加视觉层。
         /// </summary>
-        private void DecorateWithKenneySprites()
-        {
-            if (kenneyCatalog == null)
-            {
-                Debug.LogWarning("[Kenney] Catalog is null, skipping decoration.");
-                return;
-            }
-
-            // M8.1: 根据地图类型使用对应的房间数据
-            var rooms = mapService.ShipRooms(); // ShipRooms() 已根据 ActiveMapType 切换
-            var decorator = new Map.KenneySpriteDecorator(
-                kenneyCatalog, mapService, worldBuilder, worldRoot);
-            decorator.DecorateAllRooms(rooms);
-
-            Debug.Log($"[Kenney] Decorated {decorator.DecoratedObjects.Count} rooms with Kenney sprites " +
-                      $"for {mapService.ActiveMapType}.");
-        }
-
-        private void CreateSocialDeductionShipMap()
-        {
-            // M8.1/D4: 警署和九龙城寨模式下不建造港区遗留地图（灰盒模式会覆盖整个地图）
-            if (mapService.ActiveMapType == OnlineMapService.OnlineMapType.PoliceStation
-             || mapService.ActiveMapType == OnlineMapService.OnlineMapType.KowloonWalledCity)
-            {
-                CreateFloor();
-                CreateEmergencyBell();
-                return;
-            }
-
-            CreateHongKongPortDistrictMap();
-        }
-
-        private void CreateHongKongPortDistrictMap()
-        {
-            CreateFloor();
-            CreateRoadNetwork();
-            CreateMapStructureLayer();
-            CreateArchitecturalVolumeLayer();
-            CreateShipRooms();
-            CreateShipRoomFrames();
-            CreateShipTaskDressing();
-            CreateLargeMapProps();
-            CreateShipAmbientDressing();
-            CreateDenseMapMicroDressing();
-            CreatePlayableScaleSetDressing();
-            CreateQuaterniusModelDressing();
-            CreateLargeScalePortSetPieces();
-            CreateLargeRoomReadabilityLayer();
-            CreateOfficialFreeAssetStoreLayer();
-            CreateCommercialArtAdapterLayer();
-            CreateVerticalSliceProductionLayer();
-        }
-
-        private void CreateLegacyShipMap()
-        {
-            CreateShipFloor();
-            CreateShipCorridors();
-            CreateCorridorVolumeLayer();
-            CreateShipRooms();
-            CreateShipRoomFrames();
-            CreateShipTaskDressing();
-            CreateUnderworldPassageNodes();
-            CreateShipAmbientDressing();
-            CreateDenseMapMicroDressing();
-            CreatePlayableScaleSetDressing();
-            CreateQuaterniusModelDressing();
-            CreateLargeScalePortSetPieces();
-            CreateOfficialFreeAssetStoreLayer();
-            CreateCommercialArtAdapterLayer();
-        }
-
-        private void CreateShipFloor()
-        {
-            Color voidColor = new Color(0.018f, 0.024f, 0.028f, 1f);
-            Color hull = new Color(0.07f, 0.086f, 0.094f, 1f);
-            Color innerHull = new Color(0.095f, 0.112f, 0.12f, 1f);
-            Color sidePod = new Color(0.082f, 0.1f, 0.108f, 1f);
-
-            CreateProp("行动舰外暗区", new Vector3(0f, 0f, -0.39f), new Vector3(26.6f, 16.8f, 0.08f), voidColor);
-            CreateShapeProp("行动舰圆角主外壳", roundedRectSprite, new Vector3(0f, 0f, -0.36f), new Vector3(23.8f, 13.7f, 0.08f), hull);
-            CreateShapeProp("行动舰圆角内甲板", roundedRectSprite, new Vector3(0f, 0f, -0.35f), new Vector3(22.2f, 12.4f, 0.08f), innerHull);
-            CreateShapeProp("行动舰左推进舱外壳", roundedRectSprite, new Vector3(-10.55f, 0.2f, -0.355f), new Vector3(3.0f, 8.8f, 0.08f), sidePod);
-            CreateShapeProp("行动舰右推进舱外壳", roundedRectSprite, new Vector3(10.55f, 0.15f, -0.355f), new Vector3(3.0f, 8.65f, 0.08f), sidePod);
-            CreateSolidProp("北侧厚舱壁", new Vector3(0f, 6.62f, -0.12f), new Vector3(21.2f, 0.2f, 0.18f), new Color(0.035f, 0.044f, 0.05f, 1f));
-            CreateSolidProp("南侧厚舱壁", new Vector3(0f, -6.62f, -0.12f), new Vector3(21.2f, 0.2f, 0.18f), new Color(0.035f, 0.044f, 0.05f, 1f));
-            CreateSolidProp("西侧外舱壁", new Vector3(-11.55f, 0f, -0.12f), new Vector3(0.2f, 10.2f, 0.18f), new Color(0.035f, 0.044f, 0.05f, 1f));
-            CreateSolidProp("东侧外舱壁", new Vector3(11.55f, 0f, -0.12f), new Vector3(0.2f, 10.2f, 0.18f), new Color(0.035f, 0.044f, 0.05f, 1f));
-
-            for (int i = 0; i < 15; i++)
-            {
-                float x = -10.5f + i * 1.5f;
-                CreateProp("行动舰甲板横向拼缝 " + i, new Vector3(x, 6.2f, -0.22f), new Vector3(0.34f, 0.035f, 0.04f), new Color(0.28f, 0.34f, 0.35f, 1f));
-                CreateProp("行动舰底舱横向拼缝 " + i, new Vector3(x, -6.18f, -0.22f), new Vector3(0.34f, 0.035f, 0.04f), new Color(0.28f, 0.34f, 0.35f, 1f));
-            }
-        }
-
-        private void CreateShipCorridors()
-        {
-            Color main = new Color(0.205f, 0.232f, 0.242f, 1f);
-            Color branch = new Color(0.172f, 0.198f, 0.21f, 1f);
-            Color trim = new Color(0.48f, 0.56f, 0.56f, 1f);
-            Color guide = new Color(0.88f, 0.68f, 0.09f, 1f);
-
-            CreateShipCorridor("中心会议圆舱", new Vector3(0f, -0.35f, -0.21f), new Vector3(3.0f, 2.35f, 0.08f), main, true);
-            CreateShipCorridor("主横连廊", new Vector3(0f, -0.18f, -0.24f), new Vector3(15.5f, 1.2f, 0.08f), main, false);
-            CreateShipCorridor("上层主连廊", new Vector3(0f, 3.65f, -0.24f), new Vector3(16.4f, 1.04f, 0.08f), branch, false);
-            CreateShipCorridor("下层主连廊", new Vector3(0.12f, -3.9f, -0.24f), new Vector3(15.4f, 1.04f, 0.08f), branch, false);
-            CreateShipCorridor("左竖连廊", new Vector3(-6.85f, 0.15f, -0.24f), new Vector3(1.08f, 8.35f, 0.08f), branch, false);
-            CreateShipCorridor("右竖连廊", new Vector3(7.05f, 0.08f, -0.24f), new Vector3(1.08f, 8.18f, 0.08f), branch, false);
-            CreateShipCorridor("中心上连廊", new Vector3(0f, 1.85f, -0.23f), new Vector3(1.08f, 3.15f, 0.08f), main, false);
-            CreateShipCorridor("中心下连廊", new Vector3(0f, -2.35f, -0.23f), new Vector3(1.08f, 3.05f, 0.08f), main, false);
-            CreateShipCorridor("左上斜接舱", new Vector3(-3.2f, 2.1f, -0.23f), new Vector3(4.35f, 0.72f, 0.08f), branch, false);
-            CreateShipCorridor("右上斜接舱", new Vector3(3.35f, 2.08f, -0.23f), new Vector3(4.45f, 0.72f, 0.08f), branch, false);
-            CreateShipCorridor("左下斜接舱", new Vector3(-3.25f, -2.15f, -0.23f), new Vector3(4.25f, 0.72f, 0.08f), branch, false);
-            CreateShipCorridor("右下斜接舱", new Vector3(3.42f, -2.12f, -0.23f), new Vector3(4.25f, 0.72f, 0.08f), branch, false);
-            CreateShipCorridor("左侧气闸短廊", new Vector3(-9.3f, -0.18f, -0.24f), new Vector3(3.95f, 0.92f, 0.08f), branch, false);
-            CreateShipCorridor("右侧气闸短廊", new Vector3(9.2f, -0.18f, -0.24f), new Vector3(3.7f, 0.92f, 0.08f), branch, false);
-
-            CreateShipNode("西北舱路口", new Vector3(-6.85f, 3.65f, -0.18f), 0.44f, trim);
-            CreateShipNode("东北舱路口", new Vector3(7.05f, 3.65f, -0.18f), 0.44f, trim);
-            CreateShipNode("西南舱路口", new Vector3(-6.85f, -3.9f, -0.18f), 0.44f, trim);
-            CreateShipNode("东南舱路口", new Vector3(7.05f, -3.9f, -0.18f), 0.44f, trim);
-            CreateShipNode("会议桌圆环", new Vector3(0f, -0.35f, -0.16f), 0.62f, new Color(0.52f, 0.62f, 0.62f, 1f));
-
-            for (int i = 0; i < 6; i++)
-            {
-                CreateProp("主走廊导向线 " + i, new Vector3(-5.2f + i * 2.05f, -0.18f, -0.1f), new Vector3(0.78f, 0.055f, 0.05f), guide);
-                CreateProp("上层导向线 " + i, new Vector3(-5.3f + i * 2.12f, 3.65f, -0.1f), new Vector3(0.72f, 0.045f, 0.05f), new Color(0.54f, 0.62f, 0.62f, 1f));
-                CreateProp("下层导向线 " + i, new Vector3(-5.1f + i * 2.08f, -3.9f, -0.1f), new Vector3(0.72f, 0.045f, 0.05f), new Color(0.54f, 0.62f, 0.62f, 1f));
-            }
-        }
-
-        private void CreateShipCorridor(string name, Vector3 center, Vector3 size, Color color, bool round)
-        {
-            GameObject corridor = round
-                ? CreateShapeProp(name, roundedRectSprite, center, size, color)
-                : CreateShapeProp(name, roundedRectSprite, center, size, color);
-            corridor.transform.SetAsFirstSibling();
-            RegisterWalkableArea(center, size);
-        }
-
-        private void CreateShipNode(string name, Vector3 center, float radius, Color color)
-        {
-            CreateShapeProp(name, circleSprite, center, new Vector3(radius, radius, 0.08f), color);
-            CreateShapeProp(name + " 内圈", circleSprite, center + new Vector3(0f, 0f, 0.02f), new Vector3(radius * 0.58f, radius * 0.58f, 0.08f), new Color(0.16f, 0.19f, 0.2f, 1f));
-            RegisterWalkableArea(center, new Vector3(radius * 1.9f, radius * 1.9f, 0.08f));
-        }
-
-        private void CreateCorridorVolumeLayer()
-        {
-            Color rail = new Color(0.055f, 0.07f, 0.078f, 1f);
-            Color trim = new Color(0.48f, 0.56f, 0.56f, 1f);
-            Color light = new Color(0.08f, 0.78f, 0.92f, 1f);
-            CreateCorridorRails("主横连廊", new Vector3(0f, -0.18f, 0f), 15.3f, true, rail, trim);
-            CreateCorridorRails("上层主连廊", new Vector3(0f, 3.65f, 0f), 16.0f, true, rail, trim);
-            CreateCorridorRails("下层主连廊", new Vector3(0.12f, -3.9f, 0f), 15.0f, true, rail, trim);
-            CreateCorridorRails("左竖连廊", new Vector3(-6.85f, 0.15f, 0f), 8.0f, false, rail, trim);
-            CreateCorridorRails("右竖连廊", new Vector3(7.05f, 0.08f, 0f), 7.85f, false, rail, trim);
-            CreateCorridorRails("中心上连廊", new Vector3(0f, 1.85f, 0f), 2.8f, false, rail, trim);
-            CreateCorridorRails("中心下连廊", new Vector3(0f, -2.35f, 0f), 2.72f, false, rail, trim);
-
-            for (int i = 0; i < 9; i++)
-            {
-                float x = -7.2f + i * 1.8f;
-                CreateMeshBoxProp("屋顶 主走廊顶灯 " + i, new Vector3(x, 0.52f, 0.42f), new Vector3(0.46f, 0.055f, 0.08f), light);
-                CreateMeshBoxProp("屋顶 下走廊地灯 " + i, new Vector3(x + 0.28f, -4.42f, 0.28f), new Vector3(0.34f, 0.045f, 0.06f), Darken(light, 0.85f));
-                CreateMeshBoxProp("屋顶 上走廊地灯 " + i, new Vector3(x + 0.16f, 4.18f, 0.28f), new Vector3(0.34f, 0.045f, 0.06f), Darken(light, 0.85f));
-            }
-
-            CreateMeshPrimitiveProp("屋顶 会议舱圆形投影台", PrimitiveType.Cylinder, new Vector3(0f, -0.35f, 0.02f), new Vector3(0.92f, 0.03f, 0.92f), new Color(0.42f, 0.48f, 0.48f, 1f), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshBoxProp("屋顶 会议舱证据屏 A", new Vector3(-0.64f, 0.22f, 0.38f), new Vector3(0.38f, 0.045f, 0.22f), light);
-            CreateMeshBoxProp("屋顶 会议舱证据屏 B", new Vector3(0.64f, 0.22f, 0.38f), new Vector3(0.38f, 0.045f, 0.22f), new Color(0.95f, 0.22f, 0.18f, 1f));
-        }
-
-        private void CreateCorridorRails(string name, Vector3 center, float length, bool horizontal, Color rail, Color trim)
-        {
-            if (horizontal)
-            {
-                CreateMeshBoxProp("2.5D 建筑体 " + name + " 上沿立体护栏", center + new Vector3(0f, 0.58f, 0.22f), new Vector3(length, 0.08f, 0.22f), rail);
-                CreateMeshBoxProp("2.5D 建筑体 " + name + " 下沿立体护栏", center + new Vector3(0f, -0.58f, 0.22f), new Vector3(length, 0.08f, 0.22f), rail);
-
-                for (int i = 0; i < Mathf.CeilToInt(length / 2.1f); i++)
-                {
-                    float x = -length * 0.5f + 0.8f + i * 2.1f;
-                    CreateMeshBoxProp("屋顶 " + name + " 立柱 U" + i, center + new Vector3(x, 0.58f, 0.38f), new Vector3(0.08f, 0.08f, 0.34f), trim);
-                    CreateMeshBoxProp("屋顶 " + name + " 立柱 D" + i, center + new Vector3(x, -0.58f, 0.38f), new Vector3(0.08f, 0.08f, 0.34f), trim);
-                }
-
-                return;
-            }
-
-            CreateMeshBoxProp("2.5D 建筑体 " + name + " 左沿立体护栏", center + new Vector3(-0.52f, 0f, 0.22f), new Vector3(0.08f, length, 0.22f), rail);
-            CreateMeshBoxProp("2.5D 建筑体 " + name + " 右沿立体护栏", center + new Vector3(0.52f, 0f, 0.22f), new Vector3(0.08f, length, 0.22f), rail);
-
-            for (int i = 0; i < Mathf.CeilToInt(length / 1.8f); i++)
-            {
-                float y = -length * 0.5f + 0.7f + i * 1.8f;
-                CreateMeshBoxProp("屋顶 " + name + " 立柱 L" + i, center + new Vector3(-0.52f, y, 0.38f), new Vector3(0.08f, 0.08f, 0.34f), trim);
-                CreateMeshBoxProp("屋顶 " + name + " 立柱 R" + i, center + new Vector3(0.52f, y, 0.38f), new Vector3(0.08f, 0.08f, 0.34f), trim);
-            }
-        }
-
-        private void CreateShipRooms()
-        {
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                CreateShipRoom(room);
-            }
-        }
-
-
-        private void CreateShipRoom(OnlineMapService.ShipRoomSpec room)
-        {
-            Color wall = new Color(0.052f, 0.064f, 0.07f, 1f);
-            Color trim = new Color(0.62f, 0.62f, 0.54f, 1f);
-            float halfWidth = room.Size.x * 0.5f;
-            float halfHeight = room.Size.y * 0.5f;
-
-            CreateShapeProp("2.5D 建筑体 " + room.Name + " 外舱轮廓", roundedRectSprite, room.Center + new Vector3(0f, 0f, -0.1f), new Vector3(room.Size.x + 0.22f, room.Size.y + 0.22f, 0.08f), wall);
-            CreateShapeProp("2.5D 建筑体 " + room.Name + " 圆角房间底", roundedRectSprite, room.Center + new Vector3(0f, 0f, -0.07f), room.Size, Darken(room.Floor, 0.86f));
-            CreateShapeProp("2.5D 建筑体 " + room.Name + " 中央地板", roundedRectSprite, room.Center + new Vector3(0f, 0f, -0.04f), new Vector3(room.Size.x * 0.9f, room.Size.y * 0.76f, 0.08f), room.Floor);
-            CreateRoomVolumeShell(room, wall, trim);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 北厚墙", room.Center + new Vector3(0f, halfHeight - 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.North);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 南厚墙", room.Center + new Vector3(0f, -halfHeight + 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.South);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 西厚墙", room.Center + new Vector3(-halfWidth + 0.06f, 0f, 0.16f), new Vector3(0.14f, room.Size.y * 0.76f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.West);
-            CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 东厚墙", room.Center + new Vector3(halfWidth - 0.06f, 0f, 0.16f), new Vector3(0.14f, room.Size.y * 0.76f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.East);
-            CreateProp("屋顶 " + room.Name + " 北舱金属边", room.Center + new Vector3(0f, halfHeight - 0.22f, 0.19f), new Vector3(room.Size.x * 0.58f, 0.055f, 0.08f), trim);
-            CreateProp("屋顶 " + room.Name + " 舱门灯带", DoorLightPosition(room), DoorLightScale(room), DoorColor(room));
-            CreateWorldLabelAt(room.Label, mapService.ScaleMapPosition(room.Center + new Vector3(0f, halfHeight - 0.34f, -0.17f)), 0.052f);
-            CreateRoomFloorTiles(room.Name, room.Center, room.Size, room.Floor);
-            CreateRoomFurniture(room);
-            RegisterWalkableArea(room.Center, new Vector3(room.Size.x * 0.86f, room.Size.y * 0.7f, 0.08f));
-        }
-
-        private void CreateRoomVolumeShell(OnlineMapService.ShipRoomSpec room, Color wall, Color trim)
-        {
-            float halfWidth = room.Size.x * 0.5f;
-            float halfHeight = room.Size.y * 0.5f;
-            float height = RoomVisualHeight(room);
-            Color side = Darken(room.Floor, 0.52f);
-            Color roof = Darken(room.Floor, 0.74f);
-            Color glass = new Color(0.08f, 0.34f, 0.44f, 1f);
-
-            CreateMeshBoxProp("2.5D 建筑体 " + room.Name + " 后立面体", room.Center + new Vector3(0f, halfHeight + 0.12f, height * 0.5f), new Vector3(room.Size.x * 0.92f, 0.16f, height), side);
-            CreateMeshBoxProp("2.5D 建筑体 " + room.Name + " 左侧立面体", room.Center + new Vector3(-halfWidth - 0.06f, 0f, height * 0.43f), new Vector3(0.14f, room.Size.y * 0.72f, height * 0.86f), Darken(side, 0.86f));
-            CreateMeshBoxProp("2.5D 建筑体 " + room.Name + " 右侧立面体", room.Center + new Vector3(halfWidth + 0.06f, 0f, height * 0.43f), new Vector3(0.14f, room.Size.y * 0.72f, height * 0.86f), Darken(side, 0.88f));
-            CreateMeshBoxProp("屋顶 " + room.Name + " 主板体", room.Center + new Vector3(0f, halfHeight * 0.18f, height + 0.03f), new Vector3(room.Size.x * 0.68f, room.Size.y * 0.26f, 0.08f), roof);
-            CreateMeshBoxProp("屋顶 " + room.Name + " 前缘体", room.Center + new Vector3(0f, -halfHeight + 0.1f, height * 0.62f), new Vector3(room.Size.x * 0.48f, 0.12f, height * 0.18f), trim);
-
-            for (int i = 0; i < 3; i++)
-            {
-                float x = -room.Size.x * 0.25f + i * room.Size.x * 0.25f;
-                CreateMeshBoxProp("2.5D 建筑体 " + room.Name + " 窗格 " + i, room.Center + new Vector3(x, halfHeight + 0.215f, height * 0.58f), new Vector3(0.34f, 0.035f, 0.18f), glass);
-            }
-
-            CreateRooftopKit(room, height);
-        }
-
-        private void CreateRooftopKit(OnlineMapService.ShipRoomSpec room, float height)
-        {
-            float halfWidth = room.Size.x * 0.5f;
-            float halfHeight = room.Size.y * 0.5f;
-            Color metal = new Color(0.22f, 0.24f, 0.24f, 1f);
-            Color vent = new Color(0.055f, 0.07f, 0.075f, 1f);
-            Color light = DoorColor(room);
-
-            CreateMeshBoxProp("屋顶 " + room.Name + " 空调箱", room.Center + new Vector3(-halfWidth * 0.35f, halfHeight * 0.12f, height + 0.14f), new Vector3(0.34f, 0.22f, 0.18f), metal);
-            CreateMeshBoxProp("屋顶 " + room.Name + " 风管 A", room.Center + new Vector3(halfWidth * 0.24f, halfHeight * 0.06f, height + 0.12f), new Vector3(0.5f, 0.08f, 0.12f), vent);
-            CreateMeshBoxProp("屋顶 " + room.Name + " 风管 B", room.Center + new Vector3(halfWidth * 0.32f, -halfHeight * 0.12f, height + 0.12f), new Vector3(0.08f, 0.36f, 0.12f), vent);
-            CreateMeshPrimitiveProp("屋顶 " + room.Name + " 信号灯", PrimitiveType.Cylinder, room.Center + new Vector3(halfWidth * 0.42f, halfHeight * 0.28f, height + 0.22f), new Vector3(0.08f, 0.08f, 0.12f), light, Quaternion.Euler(90f, 0f, 0f));
-
-            if (room.Label.Contains("电力") || room.Label.Contains("监控") || room.Label.Contains("情报"))
-            {
-                CreateMeshBoxProp("屋顶 " + room.Name + " 天线杆", room.Center + new Vector3(0f, halfHeight * 0.24f, height + 0.32f), new Vector3(0.04f, 0.04f, 0.48f), new Color(0.72f, 0.76f, 0.72f, 1f));
-                CreateMeshBoxProp("屋顶 " + room.Name + " 天线横臂", room.Center + new Vector3(0f, halfHeight * 0.24f, height + 0.54f), new Vector3(0.42f, 0.035f, 0.04f), new Color(0.72f, 0.76f, 0.72f, 1f));
-            }
-        }
-
-        private static float RoomVisualHeight(OnlineMapService.ShipRoomSpec room)
-        {
-            if (room.Label.Contains("账房") || room.Label.Contains("监控") || room.Label.Contains("电力"))
-            {
-                return 0.82f;
-            }
-
-            if (room.Label.Contains("冷藏") || room.Label.Contains("诊疗") || room.Label.Contains("观测"))
-            {
-                return 0.72f;
-            }
-
-            if (room.Label.Contains("情报") || room.Label.Contains("黑市"))
-            {
-                return 0.58f;
-            }
-
-            return 0.66f;
-        }
-
-        private void CreateWallSegmentWithDoor(string wallName, Vector3 position, Vector3 scale, Color color, bool hasDoor)
-        {
-            if (!hasDoor)
-            {
-                CreateWallSegment(wallName, position, scale, color);
-                return;
-            }
-
-            bool horizontal = scale.x >= scale.y;
-            float length = horizontal ? scale.x : scale.y;
-            float gap = Mathf.Clamp(length * 0.36f, 0.64f, 0.95f);
-            float segmentLength = Mathf.Max(0.12f, (length - gap) * 0.5f);
-
-            if (horizontal)
-            {
-                float offset = gap * 0.5f + segmentLength * 0.5f;
-                CreateWallSegment(wallName + " L", position + new Vector3(-offset, 0f, 0f), new Vector3(segmentLength, scale.y, scale.z), color);
-                CreateWallSegment(wallName + " R", position + new Vector3(offset, 0f, 0f), new Vector3(segmentLength, scale.y, scale.z), color);
-                return;
-            }
-
-            float verticalOffset = gap * 0.5f + segmentLength * 0.5f;
-            CreateWallSegment(wallName + " B", position + new Vector3(0f, -verticalOffset, 0f), new Vector3(scale.x, segmentLength, scale.z), color);
-            CreateWallSegment(wallName + " T", position + new Vector3(0f, verticalOffset, 0f), new Vector3(scale.x, segmentLength, scale.z), color);
-        }
-
-        private static Vector3 DoorLightPosition(OnlineMapService.ShipRoomSpec room)
-        {
-            float halfWidth = room.Size.x * 0.5f;
-            float halfHeight = room.Size.y * 0.5f;
-
-            switch (room.Entrance)
-            {
-                case OnlineMapService.MapEntrance.North:
-                    return room.Center + new Vector3(0f, halfHeight - 0.12f, 0.22f);
-                case OnlineMapService.MapEntrance.South:
-                    return room.Center + new Vector3(0f, -halfHeight + 0.12f, 0.22f);
-                case OnlineMapService.MapEntrance.East:
-                    return room.Center + new Vector3(halfWidth - 0.12f, 0f, 0.22f);
-                default:
-                    return room.Center + new Vector3(-halfWidth + 0.12f, 0f, 0.22f);
-            }
-        }
-
-        private static Vector3 DoorLightScale(OnlineMapService.ShipRoomSpec room)
-        {
-            if (room.Entrance == OnlineMapService.MapEntrance.North || room.Entrance == OnlineMapService.MapEntrance.South)
-            {
-                return new Vector3(Mathf.Min(room.Size.x * 0.42f, 1.25f), 0.07f, 0.08f);
-            }
-
-            return new Vector3(0.07f, Mathf.Min(room.Size.y * 0.42f, 0.86f), 0.08f);
-        }
-
-        private static Color DoorColor(OnlineMapService.ShipRoomSpec room)
-        {
-            if (room.Label.Contains("情报") || room.Label.Contains("黑市"))
-            {
-                return new Color(0.95f, 0.18f, 0.32f, 1f);
-            }
-
-            if (room.Label.Contains("账房") || room.Label.Contains("指挥"))
-            {
-                return new Color(0.32f, 0.68f, 1f, 1f);
-            }
-
-            if (room.Label.Contains("诊疗") || room.Label.Contains("冷藏"))
-            {
-                return new Color(0.55f, 0.82f, 0.76f, 1f);
-            }
-
-            return new Color(0.95f, 0.72f, 0.1f, 1f);
-        }
-
-        private void CreateRoomFurniture(OnlineMapService.ShipRoomSpec room)
-        {
-            Color metal = new Color(0.08f, 0.1f, 0.11f, 1f);
-            Color screen = new Color(0.06f, 0.62f, 0.78f, 1f);
-            Color warning = new Color(0.9f, 0.68f, 0.08f, 1f);
-
-            switch (room.Name)
-            {
-                case "西码头货柜场":
-                    CreateWallConsoleSet(room, 0);
-                    CreateContainerRack(room.Center + new Vector3(-0.72f, 0.3f, 0.06f), 0);
-                    CreateContainerRack(room.Center + new Vector3(0.75f, -0.32f, 0.06f), 2);
-                    CreateSolidProp("货柜舱封锁箱", room.Center + new Vector3(0.4f, 0.56f, 0.06f), new Vector3(0.62f, 0.28f, 0.2f), new Color(0.78f, 0.55f, 0.08f, 1f));
-                    CreateSolidProp("货柜舱吊臂基座", room.Center + new Vector3(1.55f, 0.42f, 0.08f), new Vector3(0.28f, 0.74f, 0.22f), warning);
-                    CreateProp("货柜舱吊臂横梁", room.Center + new Vector3(1.2f, 0.72f, 0.2f), new Vector3(0.92f, 0.08f, 0.08f), warning);
-                    break;
-                case "海关查验区":
-                    CreateWallConsoleSet(room, 1);
-                    CreateSolidProp("查验舱扫描门", room.Center + new Vector3(0.82f, 0.15f, 0.1f), new Vector3(0.14f, 0.82f, 0.28f), metal);
-                    CreateSolidProp("查验舱检查桌", room.Center + new Vector3(-0.46f, 0.12f, 0.07f), new Vector3(0.8f, 0.34f, 0.18f), new Color(0.24f, 0.26f, 0.2f, 1f));
-                    CreateProp("查验舱屏幕", room.Center + new Vector3(-0.46f, 0.38f, 0.2f), new Vector3(0.46f, 0.06f, 0.08f), screen);
-                    break;
-                case "监控室":
-                    CreateWallConsoleSet(room, 2);
-                    for (int i = 0; i < 3; i++)
-                    {
-                        CreateProp("监控墙屏 " + i, room.Center + new Vector3(-0.62f + i * 0.48f, 0.45f, 0.18f), new Vector3(0.36f, 0.08f, 0.16f), screen);
-                    }
-
-                    CreateSolidProp("监控操控台", room.Center + new Vector3(-0.15f, -0.18f, 0.07f), new Vector3(0.92f, 0.28f, 0.18f), metal);
-                    break;
-                case "茶餐厅":
-                    CreateWallConsoleSet(room, 3);
-                    CreateSolidProp("休息舱吧台", room.Center + new Vector3(-0.78f, 0.08f, 0.07f), new Vector3(0.28f, 1.0f, 0.18f), new Color(0.46f, 0.25f, 0.12f, 1f));
-                    CreateBoothSet(room.Center + new Vector3(0.34f, 0.38f, 0.06f), "上");
-                    CreateBoothSet(room.Center + new Vector3(0.34f, -0.34f, 0.06f), "下");
-                    break;
-                case "夜市主街":
-                    CreateWallConsoleSet(room, 4);
-                    for (int i = 0; i < 3; i++)
-                    {
-                        CreateSolidProp("情报摊台 " + i, room.Center + new Vector3(-1.15f + i * 1.05f, 0.34f, 0.07f), new Vector3(0.62f, 0.26f, 0.18f), i % 2 == 0 ? new Color(0.62f, 0.12f, 0.1f, 1f) : new Color(0.12f, 0.36f, 0.4f, 1f));
-                        CreateProp("情报霓虹牌 " + i, room.Center + new Vector3(-1.15f + i * 1.05f, 0.56f, 0.2f), new Vector3(0.5f, 0.05f, 0.08f), i % 2 == 0 ? new Color(0.96f, 0.22f, 0.52f, 1f) : screen);
-                    }
-                    break;
-                case "金融楼":
-                    CreateWallConsoleSet(room, 5);
-                    CreateSolidProp("账房保险柜", room.Center + new Vector3(0.92f, -0.24f, 0.09f), new Vector3(0.48f, 0.46f, 0.28f), new Color(0.18f, 0.18f, 0.22f, 1f));
-                    CreateSolidProp("账房桌", room.Center + new Vector3(-0.34f, 0.12f, 0.07f), new Vector3(0.86f, 0.3f, 0.18f), new Color(0.26f, 0.22f, 0.18f, 1f));
-                    CreateProp("账房现金条", room.Center + new Vector3(-0.08f, 0.34f, 0.2f), new Vector3(0.52f, 0.05f, 0.06f), new Color(0.18f, 0.58f, 0.25f, 1f));
-                    break;
-                case "电房":
-                    CreateWallConsoleSet(room, 6);
-                    for (int i = 0; i < 3; i++)
-                    {
-                        CreateSolidProp("电力舱变压器 " + i, room.Center + new Vector3(-0.64f + i * 0.5f, 0.28f, 0.08f), new Vector3(0.32f, 0.46f, 0.28f), new Color(0.18f, 0.24f, 0.34f, 1f));
-                        CreateProp("电力舱指示灯 " + i, room.Center + new Vector3(-0.64f + i * 0.5f, 0.54f, 0.22f), new Vector3(0.06f, 0.04f, 0.05f), i == 1 ? Color.red : Color.green);
-                    }
-
-                    CreateProp("电力舱黄黑警戒线", room.Center + new Vector3(0f, -0.46f, 0.1f), new Vector3(1.45f, 0.08f, 0.08f), warning);
-                    break;
-                case "天台通道":
-                    CreateWallConsoleSet(room, 7);
-                    CreateSolidProp("观测舱望远镜座", room.Center + new Vector3(-0.28f, 0f, 0.08f), new Vector3(0.5f, 0.22f, 0.18f), metal);
-                    CreateProp("观测舱镜筒", room.Center + new Vector3(0.08f, 0.02f, 0.2f), new Vector3(0.42f, 0.08f, 0.08f), screen);
-                    CreateProp("观测舱气象屏", room.Center + new Vector3(0.82f, 0.38f, 0.18f), new Vector3(0.44f, 0.06f, 0.14f), screen);
-                    break;
-                case "指挥车广场":
-                    CreateWallConsoleSet(room, 8);
-                    CreateShapeProp("指挥舱圆桌", circleSprite, room.Center + new Vector3(0f, -0.02f, 0.08f), new Vector3(1.0f, 0.62f, 0.12f), new Color(0.5f, 0.52f, 0.48f, 1f));
-                    CreateSolidProp("行动白板", room.Center + new Vector3(-1.42f, 0.18f, 0.08f), new Vector3(0.54f, 0.16f, 0.22f), new Color(0.82f, 0.86f, 0.82f, 1f));
-                    CreateProp("指挥警灯条", room.Center + new Vector3(1.35f, 0.18f, 0.14f), new Vector3(0.82f, 0.08f, 0.08f), new Color(0.12f, 0.32f, 0.96f, 1f));
-                    break;
-                case "证物库":
-                    CreateWallConsoleSet(room, 9);
-                    for (int i = 0; i < 3; i++)
-                    {
-                        CreateSolidProp("证物舱货架 " + i, room.Center + new Vector3(-0.88f + i * 0.56f, 0.34f, 0.08f), new Vector3(0.34f, 0.18f, 0.24f), new Color(0.24f, 0.22f, 0.18f, 1f));
-                    }
-
-                    CreateSolidProp("证物舱冷柜", room.Center + new Vector3(0.62f, -0.3f, 0.07f), new Vector3(0.62f, 0.34f, 0.24f), new Color(0.16f, 0.34f, 0.38f, 1f));
-                    break;
-                case "后巷排档":
-                    CreateWallConsoleSet(room, 10);
-                    CreateSolidProp("维修舱炉台", room.Center + new Vector3(-0.48f, 0.24f, 0.07f), new Vector3(0.52f, 0.28f, 0.2f), metal);
-                    CreatePrimitiveProp("维修舱煤气瓶 A", PrimitiveType.Cylinder, room.Center + new Vector3(0.28f, 0.34f, 0.08f), new Vector3(0.11f, 0.16f, 0.11f), new Color(0.18f, 0.42f, 0.42f, 1f));
-                    CreateSolidProp("维修舱摩托", room.Center + new Vector3(0.82f, -0.34f, 0.06f), new Vector3(0.66f, 0.18f, 0.16f), new Color(0.08f, 0.08f, 0.1f, 1f));
-                    CreateProp("维修舱火苗", room.Center + new Vector3(-0.48f, 0.42f, 0.2f), new Vector3(0.16f, 0.08f, 0.08f), new Color(1f, 0.28f, 0.06f, 1f));
-                    break;
-                case "地下诊所":
-                    CreateWallConsoleSet(room, 11);
-                    CreateSolidProp("诊疗舱病床 A", room.Center + new Vector3(-0.58f, -0.22f, 0.07f), new Vector3(0.7f, 0.34f, 0.18f), new Color(0.72f, 0.72f, 0.66f, 1f));
-                    CreateSolidProp("诊疗舱病床 B", room.Center + new Vector3(0.52f, -0.22f, 0.07f), new Vector3(0.7f, 0.34f, 0.18f), new Color(0.72f, 0.72f, 0.66f, 1f));
-                    CreateSolidProp("诊疗舱药柜", room.Center + new Vector3(-1.18f, 0.32f, 0.09f), new Vector3(0.34f, 0.3f, 0.24f), new Color(0.2f, 0.34f, 0.28f, 1f));
-                    CreateProp("诊疗舱手术灯", room.Center + new Vector3(0.05f, 0.46f, 0.22f), new Vector3(0.34f, 0.06f, 0.08f), new Color(0.9f, 0.86f, 0.68f, 1f));
-                    break;
-            }
-        }
-
-        private void CreateWallConsoleSet(OnlineMapService.ShipRoomSpec room, int seed)
-        {
-            Color body = seed % 2 == 0 ? new Color(0.08f, 0.15f, 0.18f, 1f) : new Color(0.16f, 0.12f, 0.16f, 1f);
-            Color screen = seed % 3 == 0 ? new Color(0.05f, 0.68f, 0.82f, 1f) : new Color(0.2f, 0.78f, 0.56f, 1f);
-            float halfWidth = room.Size.x * 0.5f;
-            float halfHeight = room.Size.y * 0.5f;
-
-            CreateSolidProp("舱室边柜 " + room.Name + " A", room.Center + new Vector3(-halfWidth * 0.58f, halfHeight * 0.22f, 0.08f), new Vector3(0.28f, 0.34f, 0.22f), body);
-            CreateProp("舱室边柜屏 " + room.Name + " A", room.Center + new Vector3(-halfWidth * 0.58f, halfHeight * 0.42f, 0.22f), new Vector3(0.2f, 0.045f, 0.06f), screen);
-            CreateSolidProp("舱室边柜 " + room.Name + " B", room.Center + new Vector3(halfWidth * 0.58f, -halfHeight * 0.2f, 0.08f), new Vector3(0.28f, 0.34f, 0.22f), body);
-            CreateProp("舱室边柜屏 " + room.Name + " B", room.Center + new Vector3(halfWidth * 0.58f, 0f, 0.22f), new Vector3(0.2f, 0.045f, 0.06f), screen);
-            CreateProp("屋顶 " + room.Name + " 线缆槽 A", room.Center + new Vector3(0f, halfHeight * 0.34f, 0.12f), new Vector3(room.Size.x * 0.32f, 0.035f, 0.06f), new Color(0.04f, 0.055f, 0.06f, 1f));
-            CreateProp("屋顶 " + room.Name + " 线缆槽 B", room.Center + new Vector3(0f, -halfHeight * 0.34f, 0.12f), new Vector3(room.Size.x * 0.3f, 0.035f, 0.06f), new Color(0.04f, 0.055f, 0.06f, 1f));
-        }
-
-        private void CreateContainerRack(Vector3 center, int seed)
-        {
-            Color[] colors =
-            {
-                new Color(0.08f, 0.26f, 0.52f, 1f),
-                new Color(0.58f, 0.14f, 0.1f, 1f),
-                new Color(0.78f, 0.55f, 0.08f, 1f),
-                new Color(0.12f, 0.4f, 0.2f, 1f)
-            };
-
-            for (int i = 0; i < 3; i++)
-            {
-                CreateSolidProp("货柜舱迷你货柜 " + seed + "-" + i, center + new Vector3(-0.42f + i * 0.42f, 0f, 0f), new Vector3(0.34f, 0.24f, 0.18f), colors[(seed + i) % colors.Length]);
-            }
-        }
-
-        private void CreateBoothSet(Vector3 center, string suffix)
-        {
-            CreateSolidProp("休息舱餐桌 " + suffix, center, new Vector3(0.44f, 0.2f, 0.14f), new Color(0.58f, 0.36f, 0.18f, 1f));
-            CreateProp("休息舱座椅 L " + suffix, center + new Vector3(-0.34f, 0f, 0.05f), new Vector3(0.18f, 0.18f, 0.08f), new Color(0.22f, 0.16f, 0.28f, 1f));
-            CreateProp("休息舱座椅 R " + suffix, center + new Vector3(0.34f, 0f, 0.05f), new Vector3(0.18f, 0.18f, 0.08f), new Color(0.22f, 0.16f, 0.28f, 1f));
-        }
-
-        private void CreateShipRoomFrames()
-        {
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                CreateDoorMarker(room.Label + " 气闸门", DoorLightPosition(room), DoorLightScale(room), DoorColor(room));
-            }
-        }
-
-        private void CreateShipTaskDressing()
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                CreateTaskConsole("任务控制台 " + task.Name, new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.05f), i);
-            }
-        }
-
-        private void CreateTaskConsole(string name, Vector3 position, int index)
-        {
-            Color baseColor = index % 3 == 0 ? new Color(0.08f, 0.16f, 0.18f, 1f) : index % 3 == 1 ? new Color(0.16f, 0.13f, 0.18f, 1f) : new Color(0.16f, 0.12f, 0.08f, 1f);
-            string modelPath = index % 4 == 0 ? "Props/Prop_AccessPoint.fbx" : "Props/Prop_Computer.fbx";
-            CreateSolidModelProp(name + " CC0 控制台", modelPath, position + new Vector3(0f, 0f, 0.04f), new Vector3(0.55f, 0.38f, 0.3f), index % 2 == 0 ? 0f : 180f);
-            CreateSolidProp(name + " 底座碰撞体", position, new Vector3(0.44f, 0.28f, 0.14f), new Color(baseColor.r, baseColor.g, baseColor.b, 0.35f));
-            CreateMeshBoxProp(name + " 立体台座", position + new Vector3(0f, 0f, 0.14f), new Vector3(0.5f, 0.34f, 0.22f), baseColor);
-            CreateMeshBoxProp(name + " 立体斜屏", position + new Vector3(0f, 0.18f, 0.34f), new Vector3(0.38f, 0.05f, 0.18f), new Color(0.05f, 0.72f, 0.86f, 1f));
-            CreateMeshPrimitiveProp(name + " 实体状态灯", PrimitiveType.Cylinder, position + new Vector3(0.22f, -0.12f, 0.36f), new Vector3(0.06f, 0.06f, 0.08f), new Color(0.95f, 0.72f, 0.1f, 1f), Quaternion.Euler(90f, 0f, 0f));
-            CreateProp(name + " 屏幕发光层", position + new Vector3(0f, 0.16f, 0.12f), new Vector3(0.32f, 0.06f, 0.08f), new Color(0.05f, 0.72f, 0.86f, 1f));
-            CreateShapeProp(name + " 状态灯", circleSprite, position + new Vector3(0.2f, -0.1f, 0.16f), new Vector3(0.08f, 0.08f, 0.05f), new Color(0.95f, 0.72f, 0.1f, 1f));
-        }
-
-        private void CreateShipAmbientDressing()
-        {
-            CreateVentGrate("中心暗线通风口", new Vector3(-3.2f, 0.32f, -0.05f));
-            CreateVentGrate("东侧暗线通风口", new Vector3(4.9f, -0.32f, -0.05f));
-            CreateVentGrate("南舱暗线通风口", new Vector3(-1.2f, -3.98f, -0.05f));
-            CreateVentGrate("西侧主通风口", new Vector3(-6.85f, -1.2f, -0.05f));
-            CreateVentGrate("右上主通风口", new Vector3(7.05f, 2.45f, -0.05f));
-            CreateShapeProp("会议圆桌", circleSprite, new Vector3(0f, -0.35f, 0.08f), new Vector3(1.15f, 0.72f, 0.12f), new Color(0.42f, 0.45f, 0.4f, 1f));
-            CreateSolidProp("会议桌证物箱", new Vector3(0.55f, -0.36f, 0.12f), new Vector3(0.34f, 0.2f, 0.16f), new Color(0.16f, 0.12f, 0.08f, 1f));
-            CreateSolidProp("会议桌档案箱", new Vector3(-0.55f, -0.39f, 0.12f), new Vector3(0.34f, 0.2f, 0.16f), new Color(0.08f, 0.14f, 0.18f, 1f));
-            CreatePrimitiveProp("会议桌红灯", PrimitiveType.Sphere, new Vector3(-0.15f, -0.02f, 0.12f), new Vector3(0.08f, 0.08f, 0.08f), new Color(0.9f, 0.08f, 0.06f, 1f));
-            CreatePrimitiveProp("会议桌蓝灯", PrimitiveType.Sphere, new Vector3(0.15f, -0.02f, 0.12f), new Vector3(0.08f, 0.08f, 0.08f), new Color(0.08f, 0.35f, 0.95f, 1f));
-            CreateProp("会议座位弧 L", new Vector3(-0.92f, -0.35f, 0.1f), new Vector3(0.34f, 0.18f, 0.08f), new Color(0.1f, 0.18f, 0.22f, 1f));
-            CreateProp("会议座位弧 R", new Vector3(0.92f, -0.35f, 0.1f), new Vector3(0.34f, 0.18f, 0.08f), new Color(0.1f, 0.18f, 0.22f, 1f));
-            CreateProp("屋顶 舰桥指挥铭牌", new Vector3(0f, 0.92f, 0.18f), new Vector3(1.2f, 0.08f, 0.08f), new Color(0.42f, 0.72f, 0.84f, 1f));
-
-            for (int i = 0; i < 10; i++)
-            {
-                float x = -10f + i * 2.2f;
-                CreateProp("舱壁铆钉列 " + i, new Vector3(x, 6.75f, 0.04f), new Vector3(0.12f, 0.05f, 0.05f), new Color(0.48f, 0.54f, 0.54f, 1f));
-                CreateProp("南舱铆钉列 " + i, new Vector3(x, -6.85f, 0.04f), new Vector3(0.12f, 0.05f, 0.05f), new Color(0.48f, 0.54f, 0.54f, 1f));
-            }
-
-            CreateCorridorServiceProps();
-        }
-
-        private void CreateDenseMapMicroDressing()
-        {
-            CreateCorridorFloorPanels();
-            CreateCorridorCameraNetwork();
-            CreateCorridorCableRuns();
-            CreateRoomMicroProps();
-            CreateExteriorHullProps();
-        }
-
-        private void CreatePlayableScaleSetDressing()
-        {
-            CreateMainCorridorSetPieces();
-            CreateRoomForegroundSilhouettes();
-            CreateActionCameraForegroundOccluders();
-            CreateDistrictHeroSetPieces();
-            CreateLowerDeckActivitySets();
-            CreateOrganicRouteLanguage();
-            CreatePremiumTaskSetPieces();
-            CreateMatureDockyardSetPieces();
-            CreateTaskInteractionHalos();
-            CreateEmergencyMeetingTableSet();
-            CreatePhysicsCollisionMarkers();
-            CreateActionViewShowcaseLayer();
-        }
-
-        private void CreateActionViewShowcaseLayer()
-        {
-            Color floor = new Color(0.082f, 0.096f, 0.1f, 1f);
-            Color wall = new Color(0.018f, 0.026f, 0.03f, 1f);
-            Color glass = new Color(0.08f, 0.44f, 0.52f, 0.92f);
-            Color police = new Color(0.08f, 0.32f, 0.92f, 1f);
-            Color gang = new Color(0.84f, 0.08f, 0.06f, 1f);
-            Color amber = new Color(0.94f, 0.7f, 0.12f, 1f);
-            Color paper = new Color(0.82f, 0.82f, 0.72f, 1f);
-            Color shadow = new Color(0f, 0f, 0f, 0.58f);
-
-            CreateShapeProp("行动视角样板层 中央会议圆形地毯", circleSprite, new Vector3(0f, -0.35f, -0.025f), new Vector3(1.62f, 1.02f, 0.05f), new Color(0.14f, 0.17f, 0.18f, 1f));
-            CreateMeshPrimitiveProp("行动视角样板层 中央会议投票圆桌", PrimitiveType.Cylinder, new Vector3(0f, -0.35f, 0.16f), new Vector3(0.72f, 0.05f, 0.72f), new Color(0.32f, 0.36f, 0.34f, 1f), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshBoxProp("行动视角样板层 圆桌证据蓝线", new Vector3(-0.14f, -0.11f, 0.34f), new Vector3(0.86f, 0.035f, 0.05f), glass, 6f);
-            CreateMeshBoxProp("行动视角样板层 圆桌嫌疑红线", new Vector3(0.18f, -0.56f, 0.34f), new Vector3(0.58f, 0.035f, 0.05f), gang, -12f);
-
-            for (int i = 0; i < 10; i++)
-            {
-                float angle = i / 10f * Mathf.PI * 2f;
-                Vector3 seat = new Vector3(Mathf.Cos(angle) * 1.24f, -0.35f + Mathf.Sin(angle) * 0.72f, 0.13f);
-                CreateMeshPrimitiveProp("行动视角样板层 会议座位尺度点 " + i, PrimitiveType.Cylinder, seat, new Vector3(0.16f, 0.035f, 0.16f), i % 2 == 0 ? police : gang, Quaternion.Euler(90f, 0f, 0f));
-            }
-
-            (string name, Vector3 center, Vector3 size, Color color)[] roomSlices =
-            {
-                ("监控室近景切片", new Vector3(-2.85f, 0.92f, 0f), new Vector3(2.45f, 1.18f, 0.08f), new Color(0.1f, 0.18f, 0.24f, 1f)),
-                ("茶餐厅近景切片", new Vector3(-3.92f, -1.58f, 0f), new Vector3(2.15f, 1.04f, 0.08f), new Color(0.3f, 0.17f, 0.1f, 1f)),
-                ("情报夜市近景切片", new Vector3(1.72f, 1.18f, 0f), new Vector3(2.65f, 1.1f, 0.08f), new Color(0.24f, 0.12f, 0.08f, 1f)),
-                ("主干道封控近景切片", new Vector3(2.55f, -1.58f, 0f), new Vector3(2.32f, 1.05f, 0.08f), new Color(0.12f, 0.16f, 0.17f, 1f))
-            };
-
-            for (int i = 0; i < roomSlices.Length; i++)
-            {
-                Vector3 center = roomSlices[i].center;
-                Vector3 size = roomSlices[i].size;
-                float halfWidth = size.x * 0.5f;
-                float halfHeight = size.y * 0.5f;
-                CreateShapeProp("行动视角样板层 " + roomSlices[i].name + " 圆角地面", roundedRectSprite, center + new Vector3(0f, 0f, -0.035f), size, roomSlices[i].color);
-                CreateMeshBoxProp("行动视角样板层 " + roomSlices[i].name + " 后墙体", center + new Vector3(0f, halfHeight + 0.08f, 0.46f), new Vector3(size.x, 0.11f, 0.78f), wall);
-                CreateMeshBoxProp("行动视角样板层 " + roomSlices[i].name + " 前景檐影", center + new Vector3(0f, -halfHeight - 0.08f, 0.58f), new Vector3(size.x * 0.78f, 0.13f, 0.34f), shadow);
-                CreateMeshBoxProp("行动视角样板层 " + roomSlices[i].name + " 左侧厚墙", center + new Vector3(-halfWidth - 0.06f, 0f, 0.34f), new Vector3(0.1f, size.y * 0.72f, 0.52f), Darken(wall, 1.25f));
-                CreateMeshBoxProp("行动视角样板层 " + roomSlices[i].name + " 右侧厚墙", center + new Vector3(halfWidth + 0.06f, 0f, 0.34f), new Vector3(0.1f, size.y * 0.72f, 0.52f), Darken(wall, 1.18f));
-                CreateMeshBoxProp("行动视角样板层 " + roomSlices[i].name + " 门楣灯", center + new Vector3(0f, -halfHeight + 0.08f, 0.66f), new Vector3(size.x * 0.42f, 0.035f, 0.08f), i % 2 == 0 ? glass : amber);
-
-                for (int window = 0; window < 3; window++)
-                {
-                    float x = -halfWidth * 0.46f + window * halfWidth * 0.46f;
-                    CreateMeshBoxProp("行动视角样板层 " + roomSlices[i].name + " 后窗 " + window, center + new Vector3(x, halfHeight + 0.145f, 0.62f), new Vector3(0.28f, 0.035f, 0.14f), glass);
-                }
-            }
-
-            Vector3[] routePanels =
-            {
-                new Vector3(-3.05f, -0.22f, 0.02f),
-                new Vector3(-1.65f, 0.22f, 0.02f),
-                new Vector3(0.15f, 0.48f, 0.02f),
-                new Vector3(1.72f, 0.12f, 0.02f),
-                new Vector3(3.0f, -0.58f, 0.02f),
-                new Vector3(1.18f, -1.72f, 0.02f),
-                new Vector3(-0.72f, -1.52f, 0.02f),
-                new Vector3(-2.55f, -1.1f, 0.02f)
-            };
-
-            for (int i = 0; i < routePanels.Length; i++)
-            {
-                float rotation = i % 2 == 0 ? -14f : 16f;
-                CreateMeshBoxProp("行动视角样板层 非直角走廊地砖 " + i, routePanels[i], new Vector3(1.04f, 0.22f, 0.05f), floor, rotation);
-                CreateMeshBoxProp("行动视角样板层 非直角导向灯 " + i, routePanels[i] + new Vector3(0f, 0.16f, 0.08f), new Vector3(0.72f, 0.035f, 0.05f), i % 2 == 0 ? amber : glass, rotation);
-            }
-
-            (Vector3 position, Vector3 size, float rotation, Color color)[] floorBreakup =
-            {
-                (new Vector3(-0.72f, -0.82f, 0.035f), new Vector3(0.86f, 0.16f, 0.05f), -10f, new Color(0.14f, 0.17f, 0.18f, 1f)),
-                (new Vector3(0.62f, -0.92f, 0.035f), new Vector3(0.94f, 0.14f, 0.05f), 12f, new Color(0.12f, 0.15f, 0.16f, 1f)),
-                (new Vector3(-1.08f, 0.38f, 0.035f), new Vector3(0.78f, 0.14f, 0.05f), 8f, new Color(0.11f, 0.145f, 0.15f, 1f)),
-                (new Vector3(0.92f, 0.42f, 0.035f), new Vector3(0.72f, 0.14f, 0.05f), -8f, new Color(0.14f, 0.16f, 0.16f, 1f)),
-                (new Vector3(-2.2f, -0.36f, 0.035f), new Vector3(0.62f, 0.12f, 0.05f), -16f, new Color(0.08f, 0.42f, 0.5f, 1f)),
-                (new Vector3(2.08f, -0.28f, 0.035f), new Vector3(0.62f, 0.12f, 0.05f), 16f, new Color(0.86f, 0.62f, 0.12f, 1f)),
-                (new Vector3(-0.12f, -1.32f, 0.04f), new Vector3(1.36f, 0.035f, 0.05f), 0f, new Color(0.08f, 0.72f, 0.86f, 1f)),
-                (new Vector3(0.06f, 0.92f, 0.04f), new Vector3(1.24f, 0.035f, 0.05f), 0f, new Color(0.94f, 0.72f, 0.12f, 1f))
-            };
-
-            for (int i = 0; i < floorBreakup.Length; i++)
-            {
-                CreateMeshBoxProp("行动视角样板层 中心地面细节 " + i, floorBreakup[i].position, floorBreakup[i].size, floorBreakup[i].color, floorBreakup[i].rotation);
-            }
-
-            CreateActionViewTaskShowcase(13, new Vector3(-1.42f, -0.18f, 0f), "通讯干扰终端");
-            CreateActionViewTaskShowcase(5, new Vector3(-3.88f, 0.08f, 0f), "茶餐厅线人录音");
-            CreateActionViewTaskShowcase(20, new Vector3(-1.95f, 1.55f, 0f), "夜市暗号");
-            CreateActionViewTaskShowcase(18, new Vector3(1.74f, -2.18f, 0f), "车牌追踪");
-
-            (Vector3 position, Color primary, Color accent, string label)[] npcRefs =
-            {
-                (new Vector3(-2.42f, -0.82f, 0.16f), police, glass, "警方"),
-                (new Vector3(0.92f, -0.85f, 0.16f), gang, amber, "嫌疑"),
-                (new Vector3(-0.78f, 0.86f, 0.16f), new Color(0.22f, 0.48f, 0.32f, 1f), amber, "路人"),
-                (new Vector3(2.48f, 0.38f, 0.16f), new Color(0.36f, 0.28f, 0.42f, 1f), glass, "卧底")
-            };
-
-            for (int i = 0; i < npcRefs.Length; i++)
-            {
-                CreateActionViewScaleCharacter("行动视角样板层 尺度NPC " + i, npcRefs[i].position, npcRefs[i].primary, npcRefs[i].accent, npcRefs[i].label);
-            }
-
-            for (int i = 0; i < 12; i++)
-            {
-                float x = -4.8f + i * 0.86f;
-                float y = i % 2 == 0 ? -2.42f : 1.92f;
-                CreateMeshBoxProp("行动视角样板层 街区杂物箱 " + i, new Vector3(x, y, 0.13f), new Vector3(0.34f, 0.22f, 0.24f), i % 3 == 0 ? amber : i % 3 == 1 ? new Color(0.12f, 0.36f, 0.42f, 1f) : new Color(0.42f, 0.18f, 0.12f, 1f), i % 2 == 0 ? -8f : 10f);
-            }
-
-            CreateMeshBoxProp("行动视角样板层 近景警戒线 A", new Vector3(-1.88f, -2.38f, 0.22f), new Vector3(1.35f, 0.04f, 0.08f), amber, -10f);
-            CreateMeshBoxProp("行动视角样板层 近景警戒线 B", new Vector3(1.35f, -2.12f, 0.22f), new Vector3(1.18f, 0.04f, 0.08f), amber, 12f);
-            CreateMeshBoxProp("行动视角样板层 近景电缆桥", new Vector3(0.05f, 1.58f, 0.74f), new Vector3(2.85f, 0.08f, 0.14f), wall);
-            CreateMeshBoxProp("行动视角样板层 电缆桥冷光条", new Vector3(0.05f, 1.48f, 0.88f), new Vector3(2.18f, 0.035f, 0.05f), glass);
-            CreateMeshBoxProp("行动视角样板层 证据白板主面", new Vector3(-0.78f, -1.88f, 0.52f), new Vector3(0.82f, 0.06f, 0.42f), paper, -8f);
-            CreateMeshBoxProp("行动视角样板层 证据白板红线", new Vector3(-0.9f, -1.84f, 0.78f), new Vector3(0.5f, 0.025f, 0.04f), gang, 8f);
-            CreateMeshBoxProp("行动视角样板层 证据白板蓝线", new Vector3(-0.62f, -1.84f, 0.66f), new Vector3(0.42f, 0.025f, 0.04f), police, -14f);
-        }
-
-        private void CreateActionViewTaskShowcase(int taskId, Vector3 position, string label)
-        {
-            Color accent = TaskPanelAccent(taskId);
-            Color dark = new Color(0.035f, 0.045f, 0.05f, 1f);
-            Color amber = new Color(0.94f, 0.72f, 0.12f, 1f);
-
-            CreateShapeProp("行动视角样板层 " + label + " 任务地面光圈", softCircleSprite, position + new Vector3(0f, 0f, 0.035f), new Vector3(1.16f, 0.72f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.26f));
-            CreateMeshBoxProp("行动视角样板层 " + label + " 大型任务台", position + new Vector3(0f, 0f, 0.28f), new Vector3(0.72f, 0.38f, 0.38f), dark);
-            CreateMeshBoxProp("行动视角样板层 " + label + " 高亮交互屏", position + new Vector3(0f, 0.24f, 0.62f), new Vector3(0.52f, 0.04f, 0.22f), accent);
-            CreateMeshBoxProp("行动视角样板层 " + label + " E键提示牌", position + new Vector3(-0.48f, 0.18f, 0.72f), new Vector3(0.22f, 0.035f, 0.14f), amber);
-            CreateMeshPrimitiveProp("行动视角样板层 " + label + " 顶部信标", PrimitiveType.Cylinder, position + new Vector3(0.46f, -0.16f, 0.68f), new Vector3(0.06f, 0.06f, 0.46f), accent, Quaternion.identity);
-            CreateMeshBoxProp("行动视角样板层 " + label + " 信标灯帽", position + new Vector3(0.46f, -0.16f, 0.96f), new Vector3(0.18f, 0.035f, 0.08f), amber);
-            CreateWorldLabelAt(label, mapService.ScaleMapPosition(position + new Vector3(0f, 0.6f, 0.1f)), 0.06f);
-        }
-
-        private void CreateActionViewScaleCharacter(string name, Vector3 position, Color primary, Color accent, string label)
-        {
-            GameObject root = new GameObject(name);
-            root.transform.SetParent(worldRoot.transform, false);
-            root.transform.position = mapService.ScaleMapPosition(position);
-            root.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
-            CreateMeshPrimitiveChild(root.transform, "Shadow", PrimitiveType.Cylinder, new Vector3(0f, -0.32f, -0.12f), new Vector3(0.52f, 0.08f, 0.28f), new Color(0f, 0f, 0f, 0.32f), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshPrimitiveChild(root.transform, "Body", PrimitiveType.Capsule, new Vector3(0f, -0.04f, 0.2f), new Vector3(0.26f, 0.26f, 0.56f), primary, Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshPrimitiveChild(root.transform, "Head", PrimitiveType.Sphere, new Vector3(0.04f, 0.25f, 0.52f), new Vector3(0.3f, 0.26f, 0.26f), primary, Quaternion.identity);
-            CreateMeshBoxChild(root.transform, "Visor", new Vector3(0.13f, 0.42f, 0.56f), new Vector3(0.22f, 0.035f, 0.1f), new Color(0.58f, 0.9f, 1f, 1f));
-            CreateMeshPrimitiveChild(root.transform, "Arm L", PrimitiveType.Capsule, new Vector3(-0.22f, -0.04f, 0.28f), new Vector3(0.07f, 0.07f, 0.28f), accent, Quaternion.Euler(90f, 0f, 12f));
-            CreateMeshPrimitiveChild(root.transform, "Arm R", PrimitiveType.Capsule, new Vector3(0.22f, -0.04f, 0.28f), new Vector3(0.07f, 0.07f, 0.28f), accent, Quaternion.Euler(90f, 0f, -12f));
-            CreateMeshBoxChild(root.transform, "Role Strip " + label, new Vector3(0f, 0.05f, 0.5f), new Vector3(0.2f, 0.035f, 0.06f), accent);
-            SetSortingFromZ(root);
-        }
-
-        private void CreateMainCorridorSetPieces()
-        {
-            Color dark = new Color(0.035f, 0.045f, 0.048f, 1f);
-            Color metal = new Color(0.12f, 0.145f, 0.15f, 1f);
-            Color screen = new Color(0.04f, 0.7f, 0.84f, 1f);
-            Color warning = new Color(0.92f, 0.72f, 0.08f, 1f);
-
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7.1f + i * 2.05f;
-                CreateModelProp("CC0 主廊强化舱板 " + i, i % 2 == 0 ? "Walls/TopCables_Straight.fbx" : "Walls/TopAstra_Straight.fbx", new Vector3(x, -0.78f, 0.18f), new Vector3(0.92f, 0.18f, 0.34f), 0f, true);
-                CreateModelProp("CC0 主廊上墙窗 " + i, "Walls/WallAstra_Straight_Window.fbx", new Vector3(x + 0.16f, 0.92f, 0.2f), new Vector3(0.96f, 0.22f, 0.36f), 180f, true);
-                CreateMeshBoxProp("主廊检修盖发光边 " + i, new Vector3(x, -0.18f, 0.06f), new Vector3(0.54f, 0.035f, 0.04f), i % 2 == 0 ? screen : warning);
-            }
-
-            for (int i = 0; i < 6; i++)
-            {
-                float x = -5.8f + i * 2.3f;
-                CreateModelProp("CC0 上层连廊窗墙 " + i, "Walls/TopWindow_Straight.fbx", new Vector3(x, 4.33f, 0.2f), new Vector3(1.05f, 0.2f, 0.36f), 0f, true);
-                CreateModelProp("CC0 下层连廊电缆墙 " + i, "Walls/TopCables_Straight_Hanging.fbx", new Vector3(x + 0.26f, -4.58f, 0.2f), new Vector3(1.05f, 0.2f, 0.36f), 180f, true);
-            }
-
-            Vector3[] kioskPositions =
-            {
-                new Vector3(-3.8f, -0.84f, 0.1f),
-                new Vector3(3.65f, 0.66f, 0.1f),
-                new Vector3(-6.1f, -3.42f, 0.1f),
-                new Vector3(6.36f, 3.18f, 0.1f)
-            };
-
-            for (int i = 0; i < kioskPositions.Length; i++)
-            {
-                Vector3 position = kioskPositions[i];
-                CreateSolidModelProp("CC0 巡逻服务柜 " + i, "Props/Prop_AccessPoint.fbx", position + new Vector3(0f, 0f, 0.03f), new Vector3(0.42f, 0.32f, 0.32f), i % 2 == 0 ? 0f : 180f);
-                CreateMeshBoxProp("巡逻服务柜屏 " + i, position + new Vector3(0f, 0.18f, 0.32f), new Vector3(0.28f, 0.04f, 0.1f), screen);
-                CreateMeshBoxProp("巡逻服务柜黄黑边 " + i, position + new Vector3(0f, -0.18f, 0.2f), new Vector3(0.38f, 0.04f, 0.06f), warning);
-            }
-
-            CreateSolidProp("主廊移动拒马 A", new Vector3(-2.3f, 0.45f, 0.07f), new Vector3(0.68f, 0.14f, 0.2f), dark);
-            CreateSolidProp("主廊移动拒马 B", new Vector3(2.48f, -0.78f, 0.07f), new Vector3(0.68f, 0.14f, 0.2f), dark);
-            CreateMeshBoxProp("拒马反光条 A", new Vector3(-2.3f, 0.5f, 0.22f), new Vector3(0.52f, 0.035f, 0.05f), warning);
-            CreateMeshBoxProp("拒马反光条 B", new Vector3(2.48f, -0.73f, 0.22f), new Vector3(0.52f, 0.035f, 0.05f), warning);
-            CreateMeshBoxProp("主廊地面油污暗斑", new Vector3(4.9f, -0.12f, -0.02f), new Vector3(0.64f, 0.18f, 0.04f), new Color(0.015f, 0.018f, 0.018f, 1f));
-            CreateMeshBoxProp("下廊刹车痕 A", new Vector3(-2.2f, -3.68f, -0.02f), new Vector3(0.72f, 0.045f, 0.04f), dark, -8f);
-            CreateMeshBoxProp("下廊刹车痕 B", new Vector3(-1.48f, -3.8f, -0.02f), new Vector3(0.62f, 0.045f, 0.04f), dark, -8f);
-            CreateMeshBoxProp("中心交叉口巡逻箭头 A", new Vector3(-0.62f, -1.15f, 0.02f), new Vector3(0.28f, 0.18f, 0.04f), warning, -22f);
-            CreateMeshBoxProp("中心交叉口巡逻箭头 B", new Vector3(0.72f, 0.52f, 0.02f), new Vector3(0.28f, 0.18f, 0.04f), screen, 22f);
-            CreateModelProp("CC0 中心环形护栏 L", "Props/Prop_Rail_Round_Big.fbx", new Vector3(-0.72f, -0.35f, 0.18f), new Vector3(0.62f, 0.42f, 0.24f), 90f, true);
-            CreateModelProp("CC0 中心环形护栏 R", "Props/Prop_Rail_Round_Big.fbx", new Vector3(0.72f, -0.35f, 0.18f), new Vector3(0.62f, 0.42f, 0.24f), -90f, true);
-            CreateMeshBoxProp("主廊管线桥", new Vector3(0f, 0.96f, 0.32f), new Vector3(2.4f, 0.07f, 0.12f), metal);
-            CreateModelProp("CC0 管线桥夹具 A", "Props/Prop_PipeHolder.fbx", new Vector3(-1.12f, 0.98f, 0.38f), new Vector3(0.2f, 0.16f, 0.18f), 0f);
-            CreateModelProp("CC0 管线桥夹具 B", "Props/Prop_PipeHolder.fbx", new Vector3(1.12f, 0.98f, 0.38f), new Vector3(0.2f, 0.16f, 0.18f), 180f);
-        }
-
-        private void CreateRoomForegroundSilhouettes()
-        {
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                float halfWidth = room.Size.x * 0.5f;
-                float halfHeight = room.Size.y * 0.5f;
-                Color shadow = new Color(0.015f, 0.018f, 0.02f, 0.42f);
-                Color glass = new Color(0.16f, 0.38f, 0.45f, 0.92f);
-
-                CreateMeshBoxProp("前景墙体阴影 " + room.Name + " N", room.Center + new Vector3(0f, halfHeight + 0.08f, 0.22f), new Vector3(room.Size.x * 0.9f, 0.08f, 0.18f), shadow);
-                CreateMeshBoxProp("前景墙体阴影 " + room.Name + " S", room.Center + new Vector3(0f, -halfHeight - 0.08f, 0.2f), new Vector3(room.Size.x * 0.82f, 0.08f, 0.16f), shadow);
-                CreateModelProp("CC0 " + room.Name + " 顶部窗墙", "Walls/WallWindow_Straight.fbx", room.Center + new Vector3(0f, halfHeight - 0.08f, 0.28f), new Vector3(Mathf.Min(room.Size.x * 0.64f, 1.9f), 0.2f, 0.36f), 0f, true);
-                CreateMeshBoxProp("房间玻璃反光 " + room.Name, room.Center + new Vector3(halfWidth * 0.38f, halfHeight - 0.2f, 0.38f), new Vector3(Mathf.Min(0.72f, room.Size.x * 0.24f), 0.035f, 0.08f), glass);
-                CreateMeshBoxProp("房间地面编号条 " + room.Name, room.Center + new Vector3(-halfWidth * 0.32f, -halfHeight * 0.34f, 0.04f), new Vector3(Mathf.Min(0.86f, room.Size.x * 0.24f), 0.04f, 0.04f), DoorColor(room));
-
-                if (room.Size.x > 3.3f)
-                {
-                    CreateModelProp("CC0 " + room.Name + " 角落圆柱 A", "Columns/Column_Round.fbx", room.Center + new Vector3(-halfWidth + 0.38f, halfHeight - 0.32f, 0.18f), new Vector3(0.22f, 0.22f, 0.4f), 0f);
-                    CreateModelProp("CC0 " + room.Name + " 角落圆柱 B", "Columns/Column_Pipes.fbx", room.Center + new Vector3(halfWidth - 0.4f, -halfHeight + 0.32f, 0.18f), new Vector3(0.22f, 0.22f, 0.4f), 0f);
-                }
-            }
-        }
-
-        private void CreateActionCameraForegroundOccluders()
-        {
-            Color deepShadow = new Color(0.006f, 0.009f, 0.011f, 0.74f);
-            Color bulkhead = new Color(0.018f, 0.025f, 0.03f, 0.92f);
-            Color glass = new Color(0.12f, 0.32f, 0.38f, 0.68f);
-            Color trim = new Color(0.44f, 0.52f, 0.52f, 0.86f);
-
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                float halfWidth = room.Size.x * 0.5f;
-                float halfHeight = room.Size.y * 0.5f;
-                float topY = halfHeight + 0.2f;
-                float bottomY = -halfHeight - 0.16f;
-
-                CreateMeshBoxProp("前景遮挡层 " + room.Name + " 上檐阴影", room.Center + new Vector3(0f, topY, 0.78f), new Vector3(room.Size.x * 0.82f, 0.18f, 0.42f), deepShadow);
-                CreateMeshBoxProp("前景遮挡层 " + room.Name + " 下檐黑边", room.Center + new Vector3(0f, bottomY, 0.58f), new Vector3(room.Size.x * 0.58f, 0.12f, 0.32f), bulkhead);
-
-                if (room.Entrance == OnlineMapService.MapEntrance.East || room.Entrance == OnlineMapService.MapEntrance.West)
-                {
-                    float side = room.Entrance == OnlineMapService.MapEntrance.East ? halfWidth + 0.18f : -halfWidth - 0.18f;
-                    CreateMeshBoxProp("前景遮挡层 " + room.Name + " 侧门厚框", room.Center + new Vector3(side, 0f, 0.62f), new Vector3(0.18f, room.Size.y * 0.56f, 0.36f), bulkhead);
-                    CreateMeshBoxProp("前景遮挡层 " + room.Name + " 侧门玻璃", room.Center + new Vector3(side, 0f, 0.88f), new Vector3(0.05f, room.Size.y * 0.32f, 0.18f), glass);
-                }
-                else
-                {
-                    float side = room.Entrance == OnlineMapService.MapEntrance.North ? topY : bottomY;
-                    CreateMeshBoxProp("前景遮挡层 " + room.Name + " 横门厚框", room.Center + new Vector3(0f, side, 0.62f), new Vector3(room.Size.x * 0.36f, 0.14f, 0.36f), bulkhead);
-                    CreateMeshBoxProp("前景遮挡层 " + room.Name + " 横门灯缝", room.Center + new Vector3(0f, side, 0.88f), new Vector3(room.Size.x * 0.28f, 0.035f, 0.08f), DoorColor(room));
-                }
-
-                CreateMeshBoxProp("前景遮挡层 " + room.Name + " 识别灯带", room.Center + new Vector3(-halfWidth * 0.35f, topY - 0.1f, 0.98f), new Vector3(Mathf.Min(room.Size.x * 0.26f, 0.96f), 0.035f, 0.08f), trim);
-            }
-
-            Vector3[] corridorOccluders =
-            {
-                new Vector3(-5.3f, 0.7f, 0.74f),
-                new Vector3(-0.8f, 0.82f, 0.74f),
-                new Vector3(3.9f, 0.68f, 0.74f),
-                new Vector3(-5.2f, -4.5f, 0.72f),
-                new Vector3(0.2f, -4.55f, 0.72f),
-                new Vector3(5.35f, -4.5f, 0.72f)
-            };
-
-            for (int i = 0; i < corridorOccluders.Length; i++)
-            {
-                Vector3 position = corridorOccluders[i];
-                CreateMeshBoxProp("前景遮挡层 主廊低顶梁 " + i, position, new Vector3(1.36f, 0.12f, 0.36f), bulkhead);
-                CreateMeshBoxProp("前景遮挡层 主廊顶梁冷光 " + i, position + new Vector3(0f, -0.08f, 0.22f), new Vector3(1.0f, 0.035f, 0.06f), new Color(0.08f, 0.72f, 0.86f, 0.92f));
-            }
-        }
-
-        private void CreateDistrictHeroSetPieces()
-        {
-            CreateDockyardHeroSet();
-            CreateMarketHeroSet();
-            CreateCommandAndEvidenceHeroSet();
-            CreateClinicAndBackLaneHeroSet();
-            CreateFinancePowerHeroSet();
-        }
-
-        private void CreateDockyardHeroSet()
-        {
-            Color crane = new Color(0.84f, 0.56f, 0.06f, 1f);
-            Color steel = new Color(0.06f, 0.075f, 0.08f, 1f);
-            Color blue = new Color(0.08f, 0.18f, 0.28f, 0.78f);
-            Color red = new Color(0.28f, 0.1f, 0.08f, 0.78f);
-
-            CreateSolidProp("2.5D 建筑体 巨型货柜龙门架左脚", new Vector3(-10.7f, 5.18f, 0.22f), new Vector3(0.16f, 1.78f, 0.64f), crane);
-            CreateSolidProp("2.5D 建筑体 巨型货柜龙门架右脚", new Vector3(-8.2f, 5.18f, 0.22f), new Vector3(0.16f, 1.78f, 0.64f), crane);
-            CreateMeshBoxProp("屋顶 巨型货柜龙门架横梁", new Vector3(-9.45f, 6.05f, 0.98f), new Vector3(2.85f, 0.12f, 0.14f), crane);
-            CreateMeshBoxProp("屋顶 巨型货柜龙门架吊轨", new Vector3(-9.45f, 5.62f, 0.74f), new Vector3(2.32f, 0.06f, 0.08f), steel);
-            CreateMeshBoxProp("屋顶 巨型货柜龙门架吊钩线", new Vector3(-9.05f, 5.35f, 0.52f), new Vector3(0.04f, 0.52f, 0.06f), steel);
-            CreateSolidProp("2.5D 建筑体 高层货柜底影一层", new Vector3(-9.55f, 5.46f, 0.06f), new Vector3(1.18f, 0.38f, 0.08f), blue);
-            CreateSolidProp("2.5D 建筑体 高层货柜底影二层", new Vector3(-9.08f, 5.86f, 0.26f), new Vector3(1.08f, 0.34f, 0.08f), red);
-            CreateModelProp("成熟港区设施 龙门架下免费货柜一层", "Props/Prop_Crate4.fbx", new Vector3(-9.55f, 5.46f, 0.16f), new Vector3(1.02f, 0.36f, 0.34f), 0f, true);
-            CreateModelProp("成熟港区设施 龙门架下免费货柜二层", "Props/Prop_Crate3.fbx", new Vector3(-9.08f, 5.86f, 0.38f), new Vector3(0.92f, 0.32f, 0.32f), 180f, true);
-            CreateMeshBoxProp("前景遮挡层 货柜区吊机暗影", new Vector3(-9.62f, 4.38f, 0.86f), new Vector3(2.1f, 0.16f, 0.28f), new Color(0f, 0f, 0f, 0.62f));
-        }
-
-        private void CreateMarketHeroSet()
-        {
-            Color redCanvas = new Color(0.72f, 0.12f, 0.08f, 1f);
-            Color greenCanvas = new Color(0.12f, 0.38f, 0.22f, 1f);
-            Color neon = new Color(0.95f, 0.16f, 0.46f, 1f);
-            Color amber = new Color(0.94f, 0.72f, 0.18f, 1f);
-
-            for (int i = 0; i < 4; i++)
-            {
-                float x = -2.45f + i * 0.98f;
-                CreateMeshBoxProp("2.5D 建筑体 夜市折叠棚立柱 " + i, new Vector3(x, 3.42f, 0.3f), new Vector3(0.06f, 0.5f, 0.44f), new Color(0.06f, 0.045f, 0.04f, 1f));
-                CreateMeshBoxProp("屋顶 夜市彩棚 " + i, new Vector3(x, 3.64f, 0.68f), new Vector3(0.92f, 0.18f, 0.18f), i % 2 == 0 ? redCanvas : greenCanvas);
-                CreateMeshBoxProp("屋顶 夜市招牌灯字 " + i, new Vector3(x, 3.76f, 0.86f), new Vector3(0.54f, 0.035f, 0.06f), i % 2 == 0 ? neon : amber);
-            }
-
-            CreateMeshBoxProp("前景遮挡层 夜市人潮顶棚阴影", new Vector3(-0.84f, 2.62f, 0.82f), new Vector3(3.2f, 0.14f, 0.28f), new Color(0.03f, 0.012f, 0.01f, 0.68f));
-            CreateMeshBoxProp("2.5D 建筑体 茶餐厅骑楼雨棚", new Vector3(-4.82f, 2.6f, 0.62f), new Vector3(1.82f, 0.2f, 0.18f), new Color(0.72f, 0.42f, 0.14f, 1f));
-            CreateMeshBoxProp("屋顶 茶餐厅霓虹长牌", new Vector3(-4.82f, 2.82f, 0.86f), new Vector3(1.4f, 0.04f, 0.08f), neon);
-        }
-
-        private void CreateCommandAndEvidenceHeroSet()
-        {
-            Color policeBlue = new Color(0.08f, 0.28f, 0.9f, 1f);
-            Color policeRed = new Color(0.9f, 0.08f, 0.06f, 1f);
-            Color paper = new Color(0.82f, 0.82f, 0.74f, 1f);
-            Color uv = new Color(0.45f, 0.24f, 0.92f, 1f);
-
-            CreateMeshBoxProp("2.5D 建筑体 指挥车车身高体", new Vector3(0.12f, -5.34f, 0.38f), new Vector3(1.82f, 0.82f, 0.62f), new Color(0.06f, 0.11f, 0.15f, 1f));
-            CreateMeshBoxProp("屋顶 指挥车顶灯红", new Vector3(-0.34f, -4.78f, 0.9f), new Vector3(0.34f, 0.06f, 0.08f), policeRed);
-            CreateMeshBoxProp("屋顶 指挥车顶灯蓝", new Vector3(0.48f, -4.78f, 0.9f), new Vector3(0.34f, 0.06f, 0.08f), policeBlue);
-            CreateMeshBoxProp("前景遮挡层 指挥车车头阴影", new Vector3(0.12f, -4.72f, 0.72f), new Vector3(1.9f, 0.16f, 0.28f), new Color(0f, 0f, 0f, 0.64f));
-            CreateMeshBoxProp("2.5D 建筑体 行动白板高架", new Vector3(-1.35f, -5.72f, 0.48f), new Vector3(0.96f, 0.08f, 0.56f), paper);
-            CreateMeshBoxProp("屋顶 行动白板红线", new Vector3(-1.46f, -5.66f, 0.78f), new Vector3(0.66f, 0.025f, 0.06f), policeRed, 12f);
-
-            CreateMeshBoxProp("2.5D 建筑体 证物冷柜高体", new Vector3(-8.3f, -5.16f, 0.38f), new Vector3(1.42f, 0.5f, 0.58f), new Color(0.12f, 0.28f, 0.34f, 1f));
-            CreateMeshBoxProp("屋顶 证物紫外扫描架", new Vector3(-8.3f, -4.78f, 0.78f), new Vector3(1.2f, 0.055f, 0.08f), uv);
-            CreateMeshBoxProp("前景遮挡层 证物库冷柜门影", new Vector3(-8.3f, -4.58f, 0.72f), new Vector3(1.28f, 0.12f, 0.24f), new Color(0f, 0f, 0f, 0.62f));
-        }
-
-        private void CreateClinicAndBackLaneHeroSet()
-        {
-            Color clinic = new Color(0.36f, 0.72f, 0.62f, 1f);
-            Color metal = new Color(0.08f, 0.09f, 0.09f, 1f);
-            Color canvas = new Color(0.48f, 0.1f, 0.08f, 1f);
-
-            CreateMeshBoxProp("2.5D 建筑体 诊所招牌高体", new Vector3(7.55f, -5.05f, 0.76f), new Vector3(0.16f, 1.08f, 0.56f), new Color(0.06f, 0.14f, 0.1f, 1f));
-            CreateMeshBoxProp("屋顶 诊所绿十字竖", new Vector3(7.62f, -5.05f, 1.1f), new Vector3(0.04f, 0.52f, 0.08f), clinic);
-            CreateMeshBoxProp("屋顶 诊所绿十字横", new Vector3(7.62f, -5.05f, 1.1f), new Vector3(0.04f, 0.08f, 0.34f), clinic);
-            CreateMeshBoxProp("前景遮挡层 诊所帘影", new Vector3(6.18f, -4.28f, 0.76f), new Vector3(1.6f, 0.12f, 0.34f), new Color(0.02f, 0.04f, 0.035f, 0.66f));
-
-            CreateMeshBoxProp("2.5D 建筑体 后巷排档雨棚高体", new Vector3(5.62f, -1.92f, 0.62f), new Vector3(1.7f, 0.24f, 0.22f), canvas);
-            CreateMeshBoxProp("屋顶 后巷油烟管", new Vector3(4.92f, -1.58f, 0.84f), new Vector3(0.14f, 0.14f, 0.52f), metal);
-            CreateMeshBoxProp("前景遮挡层 后巷暗门阴影", new Vector3(6.28f, -0.72f, 0.68f), new Vector3(1.12f, 0.12f, 0.28f), new Color(0f, 0f, 0f, 0.64f));
-        }
-
-        private void CreateFinancePowerHeroSet()
-        {
-            Color glass = new Color(0.08f, 0.36f, 0.48f, 1f);
-            Color gold = new Color(0.92f, 0.7f, 0.16f, 1f);
-            Color warning = new Color(0.92f, 0.18f, 0.08f, 1f);
-            Color blue = new Color(0.16f, 0.52f, 0.92f, 1f);
-
-            CreateMeshBoxProp("2.5D 建筑体 金融楼玻璃幕墙", new Vector3(4.78f, 3.75f, 0.78f), new Vector3(1.8f, 0.12f, 0.72f), glass);
-            for (int i = 0; i < 4; i++)
-            {
-                CreateMeshBoxProp("屋顶 金融楼窗格 " + i, new Vector3(4.18f + i * 0.38f, 3.82f, 0.98f), new Vector3(0.22f, 0.03f, 0.08f), blue);
-            }
-            CreateMeshBoxProp("屋顶 金融楼金色招牌", new Vector3(4.78f, 3.94f, 1.18f), new Vector3(1.34f, 0.035f, 0.07f), gold);
-
-            CreateMeshBoxProp("2.5D 建筑体 电房高压母线架", new Vector3(8.78f, 6.08f, 0.72f), new Vector3(1.74f, 0.12f, 0.56f), new Color(0.09f, 0.12f, 0.18f, 1f));
-            CreateMeshBoxProp("屋顶 电房红色警报条", new Vector3(8.78f, 6.18f, 1.08f), new Vector3(1.42f, 0.035f, 0.07f), warning);
-            CreateMeshBoxProp("前景遮挡层 电房电缆阴影", new Vector3(8.78f, 4.42f, 0.74f), new Vector3(1.6f, 0.14f, 0.3f), new Color(0f, 0f, 0f, 0.62f));
-        }
-
-        private void CreateLowerDeckActivitySets()
-        {
-            Color commandBlue = new Color(0.08f, 0.36f, 0.72f, 1f);
-            Color evidencePurple = new Color(0.42f, 0.24f, 0.84f, 1f);
-            Color clinicGreen = new Color(0.24f, 0.58f, 0.46f, 1f);
-            Color metal = new Color(0.07f, 0.085f, 0.09f, 1f);
-            Color paper = new Color(0.82f, 0.82f, 0.72f, 1f);
-
-            CreateSolidModelProp("CC0 指挥车车头", "Props/Prop_Crate4.fbx", new Vector3(-1.28f, -5.22f, 0.12f), new Vector3(0.72f, 0.4f, 0.32f), 0f);
-            CreateSolidModelProp("CC0 指挥车设备箱", "Props/Prop_AccessPoint.fbx", new Vector3(1.18f, -5.25f, 0.12f), new Vector3(0.58f, 0.38f, 0.32f), 180f);
-            CreateMeshBoxProp("指挥车蓝白灯 A", new Vector3(-0.72f, -4.78f, 0.28f), new Vector3(0.42f, 0.055f, 0.08f), commandBlue);
-            CreateMeshBoxProp("指挥车红白灯 B", new Vector3(0.62f, -4.78f, 0.28f), new Vector3(0.42f, 0.055f, 0.08f), new Color(0.82f, 0.1f, 0.08f, 1f));
-            CreateMeshBoxProp("行动路线白板主面", new Vector3(-0.18f, -5.74f, 0.22f), new Vector3(1.36f, 0.06f, 0.28f), paper);
-            CreateMeshBoxProp("行动路线红线", new Vector3(-0.28f, -5.72f, 0.38f), new Vector3(0.72f, 0.025f, 0.04f), new Color(0.86f, 0.08f, 0.06f, 1f), 8f);
-            CreateMeshBoxProp("行动路线蓝线", new Vector3(0.18f, -5.7f, 0.39f), new Vector3(0.62f, 0.025f, 0.04f), commandBlue, -12f);
-
-            for (int i = 0; i < 4; i++)
-            {
-                float x = -9.62f + i * 0.58f;
-                CreateSolidModelProp("CC0 证物库矮架 " + i, i % 2 == 0 ? "Props/Prop_Chest.fbx" : "Props/Prop_Crate3.fbx", new Vector3(x, -5.32f, 0.1f), new Vector3(0.42f, 0.28f, 0.28f), i * 12f);
-                CreateMeshBoxProp("证物库紫外编号 " + i, new Vector3(x, -5.05f, 0.34f), new Vector3(0.22f, 0.035f, 0.05f), evidencePurple);
-            }
-
-            CreateSolidProp("证物库移动冷柜", new Vector3(-7.68f, -4.58f, 0.08f), new Vector3(0.72f, 0.34f, 0.22f), new Color(0.16f, 0.32f, 0.36f, 1f));
-            CreateMeshBoxProp("证物库冷柜温度屏", new Vector3(-7.68f, -4.34f, 0.26f), new Vector3(0.38f, 0.04f, 0.08f), new Color(0.06f, 0.74f, 0.86f, 1f));
-            CreateMeshBoxProp("证物库脚印胶片", new Vector3(-8.58f, -5.72f, 0.06f), new Vector3(0.48f, 0.12f, 0.04f), new Color(0.02f, 0.025f, 0.028f, 1f), -14f);
-
-            CreateSolidModelProp("CC0 诊所推车", "Props/Prop_ItemHolder.fbx", new Vector3(5.28f, -4.62f, 0.12f), new Vector3(0.42f, 0.32f, 0.28f), 0f);
-            CreateSolidModelProp("CC0 诊所仪器柜", "Props/Prop_AccessPoint.fbx", new Vector3(7.12f, -5.42f, 0.12f), new Vector3(0.42f, 0.34f, 0.3f), 180f);
-            CreateMeshBoxProp("诊所生命监护绿线", new Vector3(7.12f, -5.16f, 0.34f), new Vector3(0.32f, 0.035f, 0.05f), clinicGreen);
-            CreateMeshBoxProp("诊所隔帘轨", new Vector3(6.16f, -4.34f, 0.35f), new Vector3(1.45f, 0.04f, 0.07f), metal);
-            CreateMeshBoxProp("诊所半透明隔帘 A", new Vector3(5.72f, -4.48f, 0.24f), new Vector3(0.08f, 0.38f, 0.16f), new Color(0.5f, 0.78f, 0.72f, 0.78f));
-            CreateMeshBoxProp("诊所半透明隔帘 B", new Vector3(6.58f, -4.48f, 0.24f), new Vector3(0.08f, 0.38f, 0.16f), new Color(0.5f, 0.78f, 0.72f, 0.78f));
-
-            CreateSolidModelProp("CC0 后巷油桶堆", "Props/Prop_Barrel_Large.fbx", new Vector3(5.1f, -2.22f, 0.1f), new Vector3(0.36f, 0.32f, 0.28f), 0f);
-            CreateSolidModelProp("CC0 后巷工具箱", "Props/Prop_Chest.fbx", new Vector3(6.48f, -1.2f, 0.1f), new Vector3(0.48f, 0.32f, 0.28f), 90f);
-            CreateMeshBoxProp("后巷雨棚阴影", new Vector3(5.68f, -1.92f, 0.28f), new Vector3(1.55f, 0.08f, 0.1f), new Color(0.1f, 0.035f, 0.03f, 1f));
-        }
-
-        private void CreateOrganicRouteLanguage()
-        {
-            Color routeShadow = new Color(0.045f, 0.052f, 0.052f, 1f);
-            Color routeEdge = new Color(0.32f, 0.39f, 0.39f, 1f);
-            Color yellow = new Color(0.9f, 0.68f, 0.1f, 1f);
-            Color blue = new Color(0.08f, 0.58f, 0.8f, 1f);
-
-            Vector3[] nodes =
-            {
-                new Vector3(-7.18f, 3.92f, -0.06f),
-                new Vector3(-4.22f, 2.42f, -0.06f),
-                new Vector3(-0.72f, 0.78f, -0.06f),
-                new Vector3(3.22f, 1.2f, -0.06f),
-                new Vector3(6.98f, 3.78f, -0.06f),
-                new Vector3(-6.92f, -3.78f, -0.06f),
-                new Vector3(-2.48f, -2.18f, -0.06f),
-                new Vector3(2.28f, -2.42f, -0.06f),
-                new Vector3(6.88f, -3.58f, -0.06f)
-            };
-
-            for (int i = 0; i < nodes.Length; i++)
-            {
-                Vector3 node = nodes[i];
-                CreateShapeProp("非直角动线 弯角缓冲区 " + i, softCircleSprite, node, new Vector3(i % 2 == 0 ? 1.18f : 0.92f, i % 2 == 0 ? 0.68f : 0.56f, 0.06f), routeShadow);
-                CreateMeshBoxProp("非直角动线 弯角导向灯 " + i, node + new Vector3(0f, 0.28f, 0.08f), new Vector3(0.54f, 0.035f, 0.05f), i % 2 == 0 ? yellow : blue, i % 3 == 0 ? -12f : 10f);
-            }
-
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7.2f + i * 2.05f;
-                CreateRotatedProp("非直角动线 主廊错位地砖 " + i, new Vector3(x, i % 2 == 0 ? -0.52f : 0.18f, -0.05f), new Vector3(0.62f, 0.18f, 0.05f), routeEdge, i % 2 == 0 ? -9f : 8f);
-            }
-
-            CreateMeshBoxProp("非直角动线 夜市蛇形标线 A", new Vector3(-2.1f, 2.28f, 0.04f), new Vector3(1.18f, 0.04f, 0.05f), yellow, -18f);
-            CreateMeshBoxProp("非直角动线 夜市蛇形标线 B", new Vector3(-0.72f, 2.9f, 0.04f), new Vector3(1.08f, 0.04f, 0.05f), blue, 16f);
-            CreateMeshBoxProp("非直角动线 后巷急弯灯带", new Vector3(5.7f, -2.72f, 0.04f), new Vector3(1.32f, 0.04f, 0.05f), yellow, -14f);
-            CreateMeshBoxProp("非直角动线 证物库转角冷光", new Vector3(-7.25f, -4.28f, 0.04f), new Vector3(1.02f, 0.04f, 0.05f), blue, 18f);
-        }
-
-        private void CreatePremiumTaskSetPieces()
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                Vector3 position = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0f);
-                CreatePremiumTaskSetPiece(task.Id, task.Name, position);
-            }
-        }
-
-        private void CreatePremiumTaskSetPiece(int taskId, string taskName, Vector3 position)
-        {
-            Color accent = TaskPanelAccent(taskId);
-            Color dark = new Color(0.035f, 0.045f, 0.05f, 1f);
-            Color metal = new Color(0.14f, 0.16f, 0.16f, 1f);
-            Color warning = new Color(0.92f, 0.7f, 0.08f, 1f);
-            int mode = TaskTemplateMode(taskId);
-
-            CreateShapeProp("成熟任务站 " + taskName + " 地面工作区", roundedRectSprite, position + new Vector3(0f, 0f, -0.045f), new Vector3(0.98f, 0.58f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.16f));
-            CreateMeshBoxProp("成熟任务站 " + taskName + " 立体背板", position + new Vector3(0f, 0.34f, 0.44f), new Vector3(0.82f, 0.08f, 0.48f), Darken(accent, 0.36f));
-            CreateMeshBoxProp("成熟任务站 " + taskName + " 主操作台", position + new Vector3(0f, -0.02f, 0.26f), new Vector3(0.72f, 0.36f, 0.28f), dark);
-            CreateMeshBoxProp("成熟任务站 " + taskName + " 状态屏", position + new Vector3(0f, 0.24f, 0.62f), new Vector3(0.46f, 0.04f, 0.18f), accent);
-            CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 警示灯", PrimitiveType.Cylinder, position + new Vector3(0.42f, -0.18f, 0.54f), new Vector3(0.08f, 0.08f, 0.1f), warning, Quaternion.Euler(90f, 0f, 0f));
-
-            if (mode == 0)
-            {
-                for (int i = 0; i < 3; i++)
-                {
-                    CreateMeshBoxProp("成熟任务站 " + taskName + " 多屏矩阵 " + i, position + new Vector3(-0.28f + i * 0.28f, 0.36f, 0.76f), new Vector3(0.2f, 0.035f, 0.12f), new Color(0.04f, 0.74f, 0.86f, 1f));
-                }
-            }
-            else if (mode == 1)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 封条闸门左", position + new Vector3(-0.36f, 0.02f, 0.46f), new Vector3(0.08f, 0.52f, 0.34f), metal);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 封条闸门右", position + new Vector3(0.36f, 0.02f, 0.46f), new Vector3(0.08f, 0.52f, 0.34f), metal);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 黄色封条", position + new Vector3(0f, -0.26f, 0.58f), new Vector3(0.76f, 0.04f, 0.06f), warning);
-            }
-            else if (mode == 2)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 高压闸刀", position + new Vector3(0.2f, 0.04f, 0.7f), new Vector3(0.08f, 0.5f, 0.08f), new Color(0.86f, 0.12f, 0.08f, 1f), -18f);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 电缆线束 A", position + new Vector3(-0.22f, -0.18f, 0.48f), new Vector3(0.42f, 0.04f, 0.05f), metal, 12f);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 电缆线束 B", position + new Vector3(-0.18f, 0.1f, 0.5f), new Vector3(0.36f, 0.04f, 0.05f), metal, -10f);
-            }
-            else if (mode == 3)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 证物托盘", position + new Vector3(0f, -0.1f, 0.48f), new Vector3(0.52f, 0.24f, 0.08f), new Color(0.82f, 0.84f, 0.76f, 1f));
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 扫描光带", position + new Vector3(0f, 0.08f, 0.68f), new Vector3(0.52f, 0.035f, 0.08f), new Color(0.4f, 0.24f, 0.86f, 1f));
-                CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 样本管", PrimitiveType.Cylinder, position + new Vector3(0.26f, -0.18f, 0.62f), new Vector3(0.05f, 0.05f, 0.16f), accent, Quaternion.identity);
-            }
-            else if (mode == 4)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 账本抽屉", position + new Vector3(-0.22f, -0.18f, 0.5f), new Vector3(0.28f, 0.16f, 0.08f), new Color(0.46f, 0.34f, 0.16f, 1f));
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 现金捆", position + new Vector3(0.2f, -0.18f, 0.5f), new Vector3(0.22f, 0.14f, 0.08f), new Color(0.16f, 0.5f, 0.22f, 1f));
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 冻结蓝屏", position + new Vector3(0f, 0.36f, 0.82f), new Vector3(0.58f, 0.035f, 0.08f), new Color(0.08f, 0.46f, 0.88f, 1f));
-            }
-            else
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 路线板", position + new Vector3(0f, 0.28f, 0.74f), new Vector3(0.56f, 0.04f, 0.24f), new Color(0.78f, 0.72f, 0.54f, 1f));
-                CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 路线红点", PrimitiveType.Cylinder, position + new Vector3(-0.16f, 0.32f, 0.86f), new Vector3(0.05f, 0.05f, 0.04f), new Color(0.88f, 0.1f, 0.06f, 1f), Quaternion.Euler(90f, 0f, 0f));
-                CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 路线蓝点", PrimitiveType.Cylinder, position + new Vector3(0.18f, 0.22f, 0.86f), new Vector3(0.05f, 0.05f, 0.04f), new Color(0.08f, 0.32f, 0.9f, 1f), Quaternion.Euler(90f, 0f, 0f));
-            }
-        }
-
-        private void CreateMatureDockyardSetPieces()
-        {
-            CreateMatureAssetCluster("北货柜泊位", new Vector3(-9.42f, 5.16f, 0f), 0f, 0);
-            CreateMatureAssetCluster("西侧水警泊位", new Vector3(-9.78f, 1.6f, 0f), -90f, 1);
-            CreateMatureAssetCluster("夜市后勤口", new Vector3(-3.68f, 2.94f, 0f), 8f, 2);
-            CreateMatureAssetCluster("金融楼卸货口", new Vector3(4.98f, 3.12f, 0f), -6f, 3);
-            CreateMatureAssetCluster("电房维修坪", new Vector3(8.42f, 5.58f, 0f), 2f, 4);
-            CreateMatureAssetCluster("后巷诊所口", new Vector3(6.08f, -3.82f, 0f), -12f, 5);
-            CreateMatureAssetCluster("证物库外场", new Vector3(-8.34f, -4.86f, 0f), 5f, 6);
-            CreateMatureAssetCluster("指挥车警戒线", new Vector3(0.36f, -5.16f, 0f), 0f, 7);
-
-            string[] railModels =
-            {
-                "Props/Prop_Rail_2.fbx",
-                "Props/Prop_Rail_3.fbx",
-                "Props/Prop_Rail_4.fbx",
-                "Props/Prop_Rail_Round_Small.fbx"
-            };
-
-            Vector3[] railLine =
-            {
-                new Vector3(-7.4f, 4.22f, 0f),
-                new Vector3(-5.54f, 3.18f, 0f),
-                new Vector3(-2.22f, 1.86f, 0f),
-                new Vector3(1.08f, 1.38f, 0f),
-                new Vector3(4.78f, 2.32f, 0f),
-                new Vector3(7.4f, 3.96f, 0f),
-                new Vector3(6.38f, -2.92f, 0f),
-                new Vector3(2.42f, -3.12f, 0f),
-                new Vector3(-2.26f, -3.0f, 0f),
-                new Vector3(-6.72f, -3.72f, 0f)
-            };
-
-            for (int i = 0; i < railLine.Length; i++)
-            {
-                float rotation = i % 2 == 0 ? 18f : -14f;
-                CreateModelProp("成熟港区设施 免费护栏动线 " + i, railModels[i % railModels.Length], railLine[i], new Vector3(0.58f, 0.22f, 0.2f), rotation, true);
-                CreateModelProp("成熟港区设施 免费地面箭头标识 " + i, i % 3 == 0 ? "Decals/Decal_Line_Bend1_R.fbx" : "Decals/Decal_Line_Straight.fbx", railLine[i] + new Vector3(0.0f, -0.28f, -0.02f), new Vector3(0.48f, 0.22f, 0.04f), rotation, true);
-            }
-
-            OnlineMapService.ShipRoomSpec[] rooms = mapService.ShipRooms();
-
-            for (int i = 0; i < rooms.Length; i++)
-            {
-                OnlineMapService.ShipRoomSpec room = rooms[i];
-                float halfWidth = room.Size.x * 0.5f;
-                Vector3 left = room.Center + new Vector3(-halfWidth + 0.48f, 0.12f, 0.16f);
-                Vector3 right = room.Center + new Vector3(halfWidth - 0.48f, -0.18f, 0.16f);
-                CreateModelProp("成熟港区设施 房间免费通风机 " + room.Name, "Props/Prop_Vent_Wide.fbx", left, new Vector3(0.52f, 0.18f, 0.18f), i % 2 == 0 ? 0f : 180f, true);
-                CreateModelProp("成熟港区设施 房间免费照明灯 " + room.Name, i % 2 == 0 ? "Props/Prop_Light_Wide.fbx" : "Props/Prop_Light_Small.fbx", right, new Vector3(0.46f, 0.18f, 0.16f), i % 2 == 0 ? 180f : 0f, true);
-            }
-
-            CreateMatureDockyardVehicleAndStreetLayer();
-            CreateMatureDockyardCrowdScaleProps();
-        }
-
-        private void CreateMatureDockyardVehicleAndStreetLayer()
-        {
-            Color policeBlue = new Color(0.08f, 0.24f, 0.78f, 1f);
-            Color policeRed = new Color(0.86f, 0.08f, 0.06f, 1f);
-            Color taxiRed = new Color(0.7f, 0.08f, 0.06f, 1f);
-            Color taxiWhite = new Color(0.86f, 0.86f, 0.78f, 1f);
-            Color van = new Color(0.1f, 0.16f, 0.18f, 1f);
-
-            CreateVehicleSetPiece("成熟港区设施 警用冲锋车", new Vector3(-0.15f, -5.38f, 0.1f), new Vector3(1.55f, 0.72f, 0.42f), van, policeBlue, 0f);
-            CreateVehicleSetPiece("成熟港区设施 茶餐厅红的士", new Vector3(-4.15f, 0.78f, 0.1f), new Vector3(1.25f, 0.54f, 0.34f), taxiRed, taxiWhite, 8f);
-            CreateVehicleSetPiece("成熟港区设施 后巷黑色面包车", new Vector3(6.62f, -2.32f, 0.1f), new Vector3(1.38f, 0.58f, 0.38f), new Color(0.035f, 0.04f, 0.045f, 1f), new Color(0.38f, 0.46f, 0.48f, 1f), -10f);
-
-            CreateMeshBoxProp("成熟港区设施 警车顶灯红", new Vector3(-0.55f, -4.86f, 0.52f), new Vector3(0.24f, 0.05f, 0.07f), policeRed);
-            CreateMeshBoxProp("成熟港区设施 警车顶灯蓝", new Vector3(0.45f, -4.86f, 0.52f), new Vector3(0.24f, 0.05f, 0.07f), policeBlue);
-
-            Vector3[] roadblockPositions =
-            {
-                new Vector3(-3.25f, -3.64f, 0.1f),
-                new Vector3(-2.62f, -3.78f, 0.1f),
-                new Vector3(1.82f, -4.18f, 0.1f),
-                new Vector3(2.48f, -4.02f, 0.1f),
-                new Vector3(4.18f, 1.34f, 0.1f),
-                new Vector3(4.8f, 1.12f, 0.1f),
-                new Vector3(-7.38f, 4.28f, 0.1f),
-                new Vector3(-6.78f, 4.08f, 0.1f)
-            };
-
-            for (int i = 0; i < roadblockPositions.Length; i++)
-            {
-                Vector3 position = roadblockPositions[i];
-                CreateSolidMeshBoxProp("成熟港区设施 可碰撞水马路障 " + i, position, new Vector3(0.46f, 0.12f, 0.22f), i % 2 == 0 ? policeBlue : policeRed, i % 2 == 0 ? -12f : 14f);
-                CreateMeshBoxProp("成熟港区设施 水马反光白条 " + i, position + new Vector3(0f, 0.02f, 0.18f), new Vector3(0.34f, 0.035f, 0.04f), new Color(0.86f, 0.86f, 0.78f, 1f), i % 2 == 0 ? -12f : 14f);
-            }
-        }
-
-        private void CreateVehicleSetPiece(string name, Vector3 position, Vector3 size, Color body, Color stripe, float rotationDegrees)
-        {
-            CreateSolidMeshBoxProp(name + " 车身", position + new Vector3(0f, 0f, 0.18f), size, body, rotationDegrees);
-            CreateMeshBoxProp(name + " 前挡风玻璃", position + new Vector3(size.x * 0.18f, size.y * 0.28f, 0.48f), new Vector3(size.x * 0.24f, 0.04f, 0.1f), new Color(0.12f, 0.42f, 0.52f, 1f), rotationDegrees);
-            CreateMeshBoxProp(name + " 侧面识别条", position + new Vector3(0f, -size.y * 0.28f, 0.42f), new Vector3(size.x * 0.72f, 0.035f, 0.06f), stripe, rotationDegrees);
-
-            for (int i = 0; i < 4; i++)
-            {
-                float x = i < 2 ? -size.x * 0.32f : size.x * 0.32f;
-                float y = i % 2 == 0 ? -size.y * 0.36f : size.y * 0.36f;
-                CreateMeshPrimitiveProp(name + " 轮胎 " + i, PrimitiveType.Cylinder, position + new Vector3(x, y, 0.14f), new Vector3(0.12f, 0.04f, 0.12f), new Color(0.015f, 0.015f, 0.018f, 1f), Quaternion.Euler(90f, 0f, rotationDegrees));
-            }
-        }
-
-        private void CreateMatureDockyardCrowdScaleProps()
-        {
-            Color cone = new Color(0.9f, 0.34f, 0.08f, 1f);
-            Color white = new Color(0.86f, 0.86f, 0.78f, 1f);
-            Color sign = new Color(0.92f, 0.72f, 0.08f, 1f);
-
-            for (int i = 0; i < 24; i++)
-            {
-                float band = i % 6;
-                float row = i / 6;
-                Vector3 position = new Vector3(-5.9f + band * 2.25f + (row % 2) * 0.38f, -6.25f + row * 0.62f, 0.08f);
-                CreateMeshPrimitiveProp("成熟港区设施 路锥阵列 " + i, PrimitiveType.Cylinder, position, new Vector3(0.1f, 0.08f, 0.12f), cone, Quaternion.Euler(90f, 0f, 0f));
-                CreateMeshBoxProp("成熟港区设施 路锥白条 " + i, position + new Vector3(0f, 0f, 0.11f), new Vector3(0.11f, 0.035f, 0.025f), white);
-            }
-
-            Vector3[] signPositions =
-            {
-                new Vector3(-8.88f, 3.86f, 0.32f),
-                new Vector3(-3.28f, 2.26f, 0.32f),
-                new Vector3(2.68f, -3.36f, 0.32f),
-                new Vector3(7.72f, 3.78f, 0.32f),
-                new Vector3(6.34f, -4.12f, 0.32f)
-            };
-
-            for (int i = 0; i < signPositions.Length; i++)
-            {
-                CreateMeshBoxProp("成熟港区设施 港区警示立牌 " + i, signPositions[i], new Vector3(0.46f, 0.055f, 0.34f), sign, i % 2 == 0 ? 8f : -8f);
-                CreateMeshBoxProp("成熟港区设施 警示立牌黑条 " + i, signPositions[i] + new Vector3(0f, 0.04f, 0.1f), new Vector3(0.32f, 0.025f, 0.04f), new Color(0.04f, 0.04f, 0.04f, 1f), i % 2 == 0 ? 8f : -8f);
-            }
-        }
-
-        private void CreateMatureAssetCluster(string clusterName, Vector3 center, float rotation, int variant)
-        {
-            string[] bulkyProps =
-            {
-                "Props/Prop_Crate3.fbx",
-                "Props/Prop_Crate4.fbx",
-                "Props/Prop_Chest.fbx",
-                "Props/Prop_Barrel_Large.fbx"
-            };
-
-            string[] utilityProps =
-            {
-                "Props/Prop_AccessPoint.fbx",
-                "Props/Prop_Computer.fbx",
-                "Props/Prop_ItemHolder.fbx",
-                "Props/Prop_Cable_1.fbx",
-                "Props/Prop_Cable_3.fbx",
-                "Props/Prop_Vent_Big.fbx",
-                "Props/Prop_Light_Floor.fbx",
-                "Props/Prop_PipeHolder.fbx"
-            };
-
-            string[] platformProps =
-            {
-                "Platforms/Platform_Metal2.fbx",
-                "Platforms/Platform_DarkPlates.fbx",
-                "Platforms/Platform_3Plates.fbx",
-                "Platforms/Platform_Rails_4Wide.fbx",
-                "Platforms/Platform_Stairs_2.fbx",
-                "Platforms/Door_Frame_A.fbx"
-            };
-
-            Vector3[] offsets =
-            {
-                new Vector3(-0.72f, 0.22f, 0.08f),
-                new Vector3(-0.28f, -0.22f, 0.08f),
-                new Vector3(0.34f, 0.22f, 0.08f),
-                new Vector3(0.76f, -0.16f, 0.08f)
-            };
-
-            for (int i = 0; i < offsets.Length; i++)
-            {
-                Vector3 offset = RotateOffset(offsets[i], rotation);
-                CreateModelProp("成熟港区设施 " + clusterName + " 免费货物组 " + i, bulkyProps[(variant + i) % bulkyProps.Length], center + offset, new Vector3(0.48f, 0.34f, 0.32f), rotation + i * 11f, false);
-            }
-
-            for (int i = 0; i < utilityProps.Length; i++)
-            {
-                float angle = rotation + i * 31f;
-                Vector3 ring = RotateOffset(new Vector3(Mathf.Cos(i * 0.72f) * 1.02f, Mathf.Sin(i * 0.72f) * 0.58f, 0.1f), rotation);
-                Vector3 footprint = i % 3 == 0 ? new Vector3(0.38f, 0.24f, 0.28f) : new Vector3(0.32f, 0.2f, 0.24f);
-                CreateModelProp("成熟港区设施 " + clusterName + " 免费设备件 " + i, utilityProps[i], center + ring, footprint, angle, false);
-            }
-
-            for (int i = 0; i < platformProps.Length; i++)
-            {
-                Vector3 strip = RotateOffset(new Vector3(-1.12f + i * 0.45f, 0.78f, -0.02f), rotation);
-                CreateModelProp("成熟港区设施 " + clusterName + " 免费平台件 " + i, platformProps[i], center + strip, new Vector3(0.52f, 0.26f, 0.14f), rotation + (i % 2 == 0 ? 0f : 180f), true);
-            }
-
-            CreateMeshBoxProp("成熟港区设施 " + clusterName + " 警戒反光地线 A", center + RotateOffset(new Vector3(0f, -0.72f, 0.04f), rotation), new Vector3(1.68f, 0.035f, 0.05f), new Color(0.92f, 0.7f, 0.08f, 1f), rotation);
-            CreateMeshBoxProp("成熟港区设施 " + clusterName + " 冷光编号条 B", center + RotateOffset(new Vector3(0.42f, 0.62f, 0.06f), rotation), new Vector3(0.92f, 0.035f, 0.05f), new Color(0.08f, 0.72f, 0.86f, 1f), rotation + 8f);
-            CreateShapeProp("成熟港区设施 " + clusterName + " 作业区底影", roundedRectSprite, center + new Vector3(0f, 0f, -0.055f), new Vector3(2.38f, 1.28f, 0.04f), new Color(0.02f, 0.026f, 0.028f, 0.68f));
-        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         private static Vector3 RotateOffset(Vector3 offset, float degrees)
         {
@@ -11062,1116 +4809,45 @@ namespace GanglandUndercover.Online
             return new Vector3(offset.x * cos - offset.y * sin, offset.x * sin + offset.y * cos, offset.z);
         }
 
-        private void CreateTaskInteractionHalos()
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0f);
-                Color accent = TaskPanelAccent(task.Id);
-                CreateShapeProp("任务交互范围环 " + task.Name, circleSprite, designPosition + new Vector3(0f, 0f, -0.03f), new Vector3(0.72f, 0.46f, 0.04f), new Color(accent.r, accent.g, accent.b, 0.2f));
-                CreateShapeProp("任务可读性 外发光底环 " + task.Name, softCircleSprite, designPosition + new Vector3(0f, 0f, 0.03f), new Vector3(0.96f, 0.62f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.24f));
-                CreateMeshBoxProp("任务可读性 交互键 E " + task.Name, designPosition + new Vector3(-0.36f, 0.34f, 0.52f), new Vector3(0.18f, 0.035f, 0.12f), new Color(0.94f, 0.76f, 0.12f, 1f));
-                CreateMeshBoxProp("任务可读性 状态灯条 " + task.Name, designPosition + new Vector3(0.02f, 0.38f, 0.58f), new Vector3(0.52f, 0.04f, 0.08f), accent);
-                CreateMeshPrimitiveProp("任务可读性 竖向信标 " + task.Name, PrimitiveType.Cylinder, designPosition + new Vector3(0.42f, 0.18f, 0.42f), new Vector3(0.04f, 0.04f, 0.58f), accent, Quaternion.identity);
-                CreateMeshBoxProp("任务可读性 信标顶灯 " + task.Name, designPosition + new Vector3(0.42f, 0.18f, 0.74f), new Vector3(0.16f, 0.035f, 0.08f), new Color(0.96f, 0.92f, 0.42f, 1f));
-
-                if (task.Id % 3 == 0)
-                {
-                    CreateModelProp("CC0 任务备用小终端 " + task.Name, "Props/Prop_Computer.fbx", designPosition + new Vector3(0.36f, -0.22f, 0.08f), new Vector3(0.32f, 0.24f, 0.24f), 180f);
-                }
-                else if (task.Id % 3 == 1)
-                {
-                    CreateModelProp("CC0 任务工具架 " + task.Name, "Props/Prop_ItemHolder.fbx", designPosition + new Vector3(-0.36f, 0.2f, 0.08f), new Vector3(0.28f, 0.22f, 0.24f), 0f);
-                }
-                else
-                {
-                    CreateModelProp("CC0 任务线缆夹 " + task.Name, "Props/Prop_Clamp.fbx", designPosition + new Vector3(0.32f, 0.18f, 0.08f), new Vector3(0.24f, 0.2f, 0.22f), 90f);
-                }
-            }
-        }
-
-        private void CreateEmergencyMeetingTableSet()
-        {
-            Color table = new Color(0.24f, 0.28f, 0.28f, 1f);
-            Color seat = new Color(0.08f, 0.12f, 0.14f, 1f);
-            CreateMeshPrimitiveProp("会议桌低矮圆台", PrimitiveType.Cylinder, new Vector3(0f, -0.35f, 0.08f), new Vector3(0.74f, 0.035f, 0.74f), table, Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshBoxProp("会议桌证据投影线 A", new Vector3(0f, -0.12f, 0.28f), new Vector3(0.82f, 0.035f, 0.04f), new Color(0.05f, 0.72f, 0.86f, 1f));
-            CreateMeshBoxProp("会议桌证据投影线 B", new Vector3(0.18f, -0.56f, 0.28f), new Vector3(0.46f, 0.035f, 0.04f), new Color(0.95f, 0.22f, 0.18f, 1f));
-
-            for (int i = 0; i < 10; i++)
-            {
-                float angle = i / 10f * Mathf.PI * 2f;
-                Vector3 position = new Vector3(Mathf.Cos(angle) * 1.18f, -0.35f + Mathf.Sin(angle) * 0.78f, 0.09f);
-                CreateMeshPrimitiveProp("会议玩家座位 " + i, PrimitiveType.Cylinder, position, new Vector3(0.16f, 0.025f, 0.16f), seat, Quaternion.Euler(90f, 0f, 0f));
-            }
-        }
-
-        private void CreatePhysicsCollisionMarkers()
-        {
-            Color bumper = new Color(0.04f, 0.05f, 0.052f, 1f);
-            Color stripe = new Color(0.92f, 0.72f, 0.08f, 1f);
-
-            Vector3[] positions =
-            {
-                new Vector3(-7.65f, 0.92f, 0.08f),
-                new Vector3(7.86f, -0.72f, 0.08f),
-                new Vector3(-4.1f, -4.46f, 0.08f),
-                new Vector3(4.35f, 4.14f, 0.08f)
-            };
-
-            for (int i = 0; i < positions.Length; i++)
-            {
-                Vector3 position = positions[i];
-                CreateSolidProp("实体碰撞防撞墩 " + i, position, new Vector3(0.22f, 0.42f, 0.2f), bumper);
-                CreateMeshBoxProp("防撞墩反光贴 " + i, position + new Vector3(0f, 0.18f, 0.2f), new Vector3(0.18f, 0.035f, 0.05f), stripe);
-            }
-        }
-
-        private void CreateLargeScalePortSetPieces()
-        {
-            CreateExteriorDockVista();
-            CreateDistrictIdentityLandmarks();
-            CreateShipLikeSightlineWalls();
-            CreateLargeHongKongPortBackdrop();
-            CreateLargeDistrictDepthSilhouettes();
-            CreateLargePlayableSightlineSetPieces();
-            CreateRoundEndShowcaseSet();
-        }
-
-        private void CreateLargeRoomReadabilityLayer()
-        {
-            Color outerWall = new Color(0.018f, 0.026f, 0.03f, 1f);
-            Color innerWall = new Color(0.05f, 0.064f, 0.07f, 1f);
-            Color shadow = new Color(0.004f, 0.006f, 0.008f, 0.62f);
-            Color glass = new Color(0.08f, 0.38f, 0.46f, 1f);
-
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                float halfWidth = room.Size.x * 0.5f;
-                float halfHeight = room.Size.y * 0.5f;
-                float height = RoomVisualHeight(room) + 0.24f;
-                Color light = DoorColor(room);
-
-                CreateMeshBoxProp("大场景港区层 房间高外壳北 " + room.Name, room.Center + new Vector3(0f, halfHeight + 0.2f, height * 0.56f), new Vector3(room.Size.x + 0.52f, 0.18f, height), outerWall);
-                CreateMeshBoxProp("大场景港区层 房间高外壳西 " + room.Name, room.Center + new Vector3(-halfWidth - 0.18f, 0f, height * 0.46f), new Vector3(0.18f, room.Size.y + 0.26f, height * 0.82f), innerWall);
-                CreateMeshBoxProp("大场景港区层 房间高外壳东 " + room.Name, room.Center + new Vector3(halfWidth + 0.18f, 0f, height * 0.46f), new Vector3(0.18f, room.Size.y + 0.26f, height * 0.82f), innerWall);
-                CreateMeshBoxProp("前景遮挡层 房间前檐阴影 " + room.Name, room.Center + new Vector3(0f, -halfHeight - 0.12f, 0.86f), new Vector3(room.Size.x * 0.82f, 0.18f, 0.44f), shadow);
-                CreateMeshBoxProp("屋顶 房间厚檐发光边 " + room.Name, room.Center + new Vector3(0f, halfHeight + 0.32f, height + 0.1f), new Vector3(room.Size.x * 0.62f, 0.05f, 0.08f), light);
-
-                for (int i = 0; i < 3; i++)
-                {
-                    float x = -room.Size.x * 0.28f + i * room.Size.x * 0.28f;
-                    CreateMeshBoxProp("大场景港区层 房间远窗 " + room.Name + " " + i, room.Center + new Vector3(x, halfHeight + 0.31f, height * 0.62f), new Vector3(0.26f, 0.035f, 0.16f), glass);
-                }
-
-                CreateRoomPortalKit(room);
-            }
-
-            CreateCurvedCorridorReadability();
-            CreatePlayableSightlineBlockers();
-        }
-
-        private void CreateRoomPortalKit(OnlineMapService.ShipRoomSpec room)
-        {
-            Vector3 door = DoorLightPosition(room);
-            Vector3 doorScale = DoorLightScale(room);
-            Color light = DoorColor(room);
-            bool horizontal = room.Entrance == OnlineMapService.MapEntrance.North || room.Entrance == OnlineMapService.MapEntrance.South;
-            float rotation = horizontal ? 0f : 90f;
-            Vector3 frameSize = horizontal
-                ? new Vector3(Mathf.Max(0.7f, doorScale.x + 0.3f), 0.34f, 0.6f)
-                : new Vector3(0.34f, Mathf.Max(0.7f, doorScale.y + 0.3f), 0.6f);
-            Vector3 offset = Vector3.zero;
-
-            switch (room.Entrance)
-            {
-                case OnlineMapService.MapEntrance.North:
-                    offset = new Vector3(0f, 0.28f, 0.1f);
-                    break;
-                case OnlineMapService.MapEntrance.South:
-                    offset = new Vector3(0f, -0.28f, 0.1f);
-                    break;
-                case OnlineMapService.MapEntrance.East:
-                    offset = new Vector3(0.28f, 0f, 0.1f);
-                    break;
-                case OnlineMapService.MapEntrance.West:
-                    offset = new Vector3(-0.28f, 0f, 0.1f);
-                    break;
-            }
-
-            Vector3 portalCenter = door + offset;
-            CreateModelProp("大场景港区层 房间门框模型 " + room.Name, "Platforms/Door_Frame_SquareTall.fbx", portalCenter, frameSize, rotation, true);
-            CreateMeshBoxProp("大场景港区层 房间门楣灯 " + room.Name, portalCenter + new Vector3(0f, 0f, 0.34f), horizontal ? new Vector3(frameSize.x * 0.58f, 0.04f, 0.08f) : new Vector3(0.04f, frameSize.y * 0.58f, 0.08f), light, rotation);
-            CreateMeshBoxProp("前景遮挡层 门口短阴影 " + room.Name, portalCenter + new Vector3(0f, -0.08f, 0.46f), horizontal ? new Vector3(frameSize.x * 0.76f, 0.1f, 0.22f) : new Vector3(0.1f, frameSize.y * 0.76f, 0.22f), new Color(0f, 0f, 0f, 0.46f), rotation);
-        }
-
-        private void CreateCurvedCorridorReadability()
-        {
-            Color routeBlue = new Color(0.08f, 0.55f, 0.72f, 1f);
-            Color routeAmber = new Color(0.95f, 0.68f, 0.1f, 1f);
-            Color floorDark = new Color(0.045f, 0.056f, 0.06f, 1f);
-
-            Vector3[] routeCenters =
-            {
-                new Vector3(-6.4f, 3.72f, 0.04f),
-                new Vector3(-3.9f, 3.08f, 0.04f),
-                new Vector3(-1.25f, 1.55f, 0.04f),
-                new Vector3(1.82f, 1.42f, 0.04f),
-                new Vector3(4.4f, 0.26f, 0.04f),
-                new Vector3(6.62f, -1.92f, 0.04f),
-                new Vector3(3.28f, -3.42f, 0.04f),
-                new Vector3(-0.22f, -3.28f, 0.04f),
-                new Vector3(-4.55f, -3.55f, 0.04f),
-                new Vector3(-7.2f, -1.72f, 0.04f)
-            };
-
-            for (int i = 0; i < routeCenters.Length; i++)
-            {
-                float rotation = i % 2 == 0 ? -16f : 18f;
-                CreateMeshBoxProp("非直角动线 主路弧形地板块 " + i, routeCenters[i], new Vector3(1.28f, 0.18f, 0.05f), floorDark, rotation);
-                CreateModelProp("非直角动线 免费弯线地贴 " + i, i % 2 == 0 ? "Decals/Decal_Line_Bend1_R.fbx" : "Decals/Decal_Line_Bend2_L.fbx", routeCenters[i] + new Vector3(0f, 0f, 0.03f), new Vector3(0.72f, 0.36f, 0.04f), rotation, true);
-                CreateMeshBoxProp("非直角动线 巡逻导光条 " + i, routeCenters[i] + new Vector3(0f, 0.16f, 0.08f), new Vector3(0.82f, 0.035f, 0.04f), i % 2 == 0 ? routeBlue : routeAmber, rotation);
-            }
-        }
-
-        private void CreatePlayableSightlineBlockers()
-        {
-            Color darkMetal = new Color(0.025f, 0.032f, 0.035f, 1f);
-            Color cable = new Color(0.08f, 0.09f, 0.09f, 1f);
-            Color policeLight = new Color(0.08f, 0.38f, 0.95f, 1f);
-            Color gangLight = new Color(0.9f, 0.12f, 0.08f, 1f);
-
-            (Vector3 center, Vector3 size, float rotation)[] blockers =
-            {
-                (new Vector3(-5.92f, 0.55f, 0.2f), new Vector3(1.05f, 0.18f, 0.5f), -12f),
-                (new Vector3(-3.05f, -1.18f, 0.2f), new Vector3(0.18f, 1.05f, 0.5f), 10f),
-                (new Vector3(2.68f, -1.02f, 0.2f), new Vector3(1.1f, 0.18f, 0.5f), 12f),
-                (new Vector3(5.02f, 1.02f, 0.2f), new Vector3(0.18f, 1.02f, 0.5f), -10f),
-                (new Vector3(-7.82f, 3.18f, 0.2f), new Vector3(0.92f, 0.18f, 0.46f), 18f),
-                (new Vector3(7.58f, 3.32f, 0.2f), new Vector3(0.92f, 0.18f, 0.46f), -18f),
-                (new Vector3(-5.98f, -4.72f, 0.2f), new Vector3(0.92f, 0.18f, 0.46f), -8f),
-                (new Vector3(3.68f, -4.72f, 0.2f), new Vector3(0.92f, 0.18f, 0.46f), 8f)
-            };
-
-            for (int i = 0; i < blockers.Length; i++)
-            {
-                CreateSolidMeshBoxProp("大场景港区层 可玩视线阻挡墙 " + i, blockers[i].center, blockers[i].size, darkMetal, blockers[i].rotation);
-                CreateMeshBoxProp("大场景港区层 阻挡墙电缆 " + i, blockers[i].center + new Vector3(0f, 0f, 0.32f), new Vector3(blockers[i].size.x * 0.64f, 0.035f, 0.06f), cable, blockers[i].rotation);
-                CreateMeshBoxProp("大场景港区层 阻挡墙警匪状态灯 " + i, blockers[i].center + new Vector3(0f, 0.11f, 0.42f), new Vector3(Mathf.Max(0.16f, blockers[i].size.x * 0.38f), 0.035f, 0.05f), i % 2 == 0 ? policeLight : gangLight, blockers[i].rotation);
-            }
-        }
-
-        private void CreateOfficialFreeAssetStoreLayer()
-        {
-            CreateOfficialFreeRoadTiles();
-            CreateOfficialFreeBuildingShells();
-            CreateOfficialFreeStreetFurniture();
-            CreateOfficialFreeVehicleSetPieces();
-            CreateOfficialFreeCrowdAndTaskDressing();
-            CreateDenseOfficialFreeStreetLayer();
-        }
-
-        private void CreateOfficialFreeRoadTiles()
-        {
-            (string path, Vector3 position, Vector3 footprint, float rotation)[] roadTiles =
-            {
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Crossroads_1", new Vector3(0f, -0.08f, -0.22f), new Vector3(1.55f, 1.15f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(-3.85f, 0.08f, -0.22f), new Vector3(3.1f, 0.48f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(4.15f, -0.15f, -0.22f), new Vector3(3.25f, 0.48f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(-6.95f, 3.78f, -0.22f), new Vector3(3.6f, 0.46f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(5.15f, 3.98f, -0.22f), new Vector3(3.95f, 0.46f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(-6.25f, -3.72f, -0.22f), new Vector3(3.7f, 0.46f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(4.9f, -3.58f, -0.22f), new Vector3(3.6f, 0.46f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(-7.18f, 1.45f, -0.22f), new Vector3(2.65f, 0.46f, 0.06f), 90f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_10m", new Vector3(7.12f, 1.18f, -0.22f), new Vector3(2.85f, 0.46f, 0.06f), 90f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_turn", new Vector3(8.82f, 4.18f, -0.21f), new Vector3(0.92f, 0.82f, 0.06f), 0f),
-                (AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_turn", new Vector3(-7.0f, -4.42f, -0.21f), new Vector3(0.82f, 0.92f, 0.06f), 180f)
-            };
-
-            for (int i = 0; i < roadTiles.Length; i++)
-            {
-                GameObject tile = CreateAssetStoreProp("官方免费素材层 模块化道路 " + i, roadTiles[i].path, roadTiles[i].position, roadTiles[i].footprint, roadTiles[i].rotation, true);
-
-                if (tile != null)
-                {
-                    tile.transform.SetAsFirstSibling();
-                }
-            }
-
-            for (int i = 0; i < 10; i++)
-            {
-                float x = -8.5f + i * 1.9f;
-                CreateAssetStoreProp("官方免费素材层 道路标记 " + i, AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Roads/Road_1_line", new Vector3(x, i % 2 == 0 ? 0.44f : -0.58f, -0.18f), new Vector3(0.42f, 0.16f, 0.04f), i % 2 == 0 ? 0f : 12f, false);
-            }
-        }
-
-        private void CreateOfficialFreeBuildingShells()
-        {
-            (string path, Vector3 position, Vector3 footprint, float rotation, bool solid)[] buildings =
-            {
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Factory", new Vector3(-10.75f, 6.72f, 0.04f), new Vector3(1.35f, 0.78f, 0.9f), 0f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building Sky_big_color01", new Vector3(4.75f, 4.38f, 0.04f), new Vector3(1.22f, 0.78f, 1.28f), 0f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Coffee Shop", new Vector3(-4.82f, 2.68f, 0.04f), new Vector3(1.0f, 0.64f, 0.66f), 0f, false),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Restaurant", new Vector3(-0.9f, 3.95f, 0.04f), new Vector3(1.25f, 0.7f, 0.72f), 0f, false),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Drug Store", new Vector3(6.85f, -4.18f, 0.04f), new Vector3(1.0f, 0.64f, 0.74f), 0f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Auto Service", new Vector3(6.15f, -2.62f, 0.04f), new Vector3(1.1f, 0.7f, 0.72f), 0f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building Sky_small_color02", new Vector3(8.82f, 2.72f, 0.04f), new Vector3(0.92f, 0.62f, 1.0f), 0f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Super Market", new Vector3(-8.92f, -4.0f, 0.04f), new Vector3(1.18f, 0.72f, 0.76f), 0f, true)
-            };
-
-            for (int i = 0; i < buildings.Length; i++)
-            {
-                string name = "官方免费素材层 城市建筑壳 " + i;
-
-                if (buildings[i].solid)
-                {
-                    CreateSolidAssetStoreProp(name, buildings[i].path, buildings[i].position, buildings[i].footprint, buildings[i].rotation, false);
-                }
-                else
-                {
-                    CreateAssetStoreProp(name, buildings[i].path, buildings[i].position, buildings[i].footprint, buildings[i].rotation, false);
-                }
-            }
-
-            string[] syntyBuildings =
-            {
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Building/SM_Gen_Bld_Background_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Building/SM_Gen_Bld_Background_04",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Building/SM_Gen_Bld_Background_07",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Building/SM_Gen_Bld_Background_10"
-            };
-
-            for (int i = 0; i < syntyBuildings.Length; i++)
-            {
-                CreateAssetStoreProp("官方免费素材层 远景楼宇补强 " + i, syntyBuildings[i], new Vector3(-10.2f + i * 6.6f, 7.02f, 0.22f), new Vector3(1.45f, 0.34f, 1.05f + i * 0.12f), 0f, false);
-            }
-        }
-
-        private void CreateOfficialFreeStreetFurniture()
-        {
-            string[] furniture =
-            {
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Bench_1",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Hydrant",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Traffic_cone",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Trash_can_1",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Pole_traffic_light",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Pole1",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Sewer_hatch",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic Control Barrier Fence",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_medium",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Street Light"
-            };
-
-            Vector3[] positions =
-            {
-                new Vector3(-5.1f, 0.78f, 0.1f),
-                new Vector3(-8.4f, 3.42f, 0.1f),
-                new Vector3(-3.4f, -3.12f, 0.1f),
-                new Vector3(2.4f, -3.18f, 0.1f),
-                new Vector3(4.25f, 0.92f, 0.1f),
-                new Vector3(7.88f, 3.42f, 0.1f),
-                new Vector3(-1.12f, -0.82f, 0.1f),
-                new Vector3(0.68f, -4.74f, 0.1f),
-                new Vector3(-1.05f, 4.02f, 0.1f),
-                new Vector3(8.92f, -0.86f, 0.1f),
-                new Vector3(-7.7f, -4.92f, 0.1f),
-                new Vector3(6.8f, -4.84f, 0.1f),
-                new Vector3(-10.2f, 4.24f, 0.1f),
-                new Vector3(10.15f, -3.52f, 0.1f)
-            };
-
-            for (int i = 0; i < positions.Length; i++)
-            {
-                string path = furniture[i % furniture.Length];
-                Vector3 footprint = i % 4 == 0 ? new Vector3(0.38f, 0.24f, 0.42f) : new Vector3(0.28f, 0.2f, 0.32f);
-
-                if (i % 3 != 1)
-                {
-                    CreateSolidAssetStoreProp("官方免费素材层 街道小物 " + i, path, positions[i], footprint, i * 17f, false);
-                }
-                else
-                {
-                    CreateAssetStoreProp("官方免费素材层 街道小物 " + i, path, positions[i], footprint, i * 17f, false);
-                }
-            }
-
-            for (int i = 0; i < 8; i++)
-            {
-                CreateAssetStoreProp("官方免费素材层 行道树 " + i, AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Tree1", new Vector3(-10.8f + i * 3.05f, i % 2 == 0 ? 6.7f : -6.62f, 0.08f), new Vector3(0.42f, 0.42f, 0.82f), 0f, false);
-            }
-        }
-
-        private void CreateOfficialFreeVehicleSetPieces()
-        {
-            (string path, Vector3 position, Vector3 footprint, float rotation)[] vehicles =
-            {
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Police Car", new Vector3(0.88f, -6.0f, 0.1f), new Vector3(0.88f, 0.42f, 0.34f), 0f),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Taxi", new Vector3(5.45f, -2.58f, 0.1f), new Vector3(0.82f, 0.4f, 0.32f), -12f),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Container_color01", new Vector3(-10.42f, 5.62f, 0.12f), new Vector3(1.05f, 0.45f, 0.42f), 4f),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Container_color02", new Vector3(-8.9f, 6.18f, 0.12f), new Vector3(1.05f, 0.45f, 0.42f), -4f),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Ambulance", new Vector3(7.1f, -5.62f, 0.1f), new Vector3(0.92f, 0.42f, 0.34f), 0f),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Bus_color01", new Vector3(-2.1f, 6.82f, 0.1f), new Vector3(1.25f, 0.48f, 0.38f), 0f)
-            };
-
-            for (int i = 0; i < vehicles.Length; i++)
-            {
-                CreateSolidAssetStoreProp("官方免费素材层 车辆道具 " + i, vehicles[i].path, vehicles[i].position, vehicles[i].footprint, vehicles[i].rotation, false);
-            }
-        }
-
-        private void CreateOfficialFreeCrowdAndTaskDressing()
-        {
-            string[] crowd =
-            {
-                AssetStoreResourceRoot + "Synty/PolygonStarter/Prefabs/Characters/SM_Bean_Cop_01",
-                AssetStoreResourceRoot + "Synty/PolygonStarter/Prefabs/Characters/SM_Chr_Male_01",
-                AssetStoreResourceRoot + "Synty/PolygonStarter/Prefabs/Characters/SM_Chr_Female_01",
-                AssetStoreResourceRoot + "Synty/PolygonStarter/Prefabs/Characters/SM_Bean_Town_Female_01"
-            };
-
-            Vector3[] crowdPositions =
-            {
-                new Vector3(-5.55f, 4.54f, 0.12f),
-                new Vector3(-4.22f, 1.26f, 0.12f),
-                new Vector3(-1.88f, 3.55f, 0.12f),
-                new Vector3(4.1f, 2.02f, 0.12f),
-                new Vector3(5.82f, -0.82f, 0.12f),
-                new Vector3(-8.25f, -4.52f, 0.12f)
-            };
-
-            for (int i = 0; i < crowdPositions.Length; i++)
-            {
-                GameObject character = CreateAssetStoreProp("官方免费素材层 场景人群 " + i, crowd[i % crowd.Length], crowdPositions[i], new Vector3(0.24f, 0.24f, 0.58f), i % 2 == 0 ? 0f : 180f, false);
-
-                if (character != null)
-                {
-                    character.transform.localScale *= 0.78f;
-                }
-            }
-
-            string[] taskProps =
-            {
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Crate_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Cardboard_Box_02",
-                AssetStoreResourceRoot + "Synty/PolygonStarter/Prefabs/SM_PolygonPrototype_Prop_Ladder_1x2_01P",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Bus Stop"
-            };
-
-            for (int i = 0; i < tasks.Count; i += 3)
-            {
-                OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.18f);
-                CreateAssetStoreProp("官方免费素材层 任务旁实物 " + task.Id, taskProps[i % taskProps.Length], designPosition + new Vector3(0.42f, -0.28f, 0f), new Vector3(0.34f, 0.26f, 0.32f), i * 11f, false);
-            }
-        }
-
-        private void CreateDenseOfficialFreeStreetLayer()
-        {
-            string[] shopBuildings =
-            {
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Bar",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Bakery",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Chicken Shop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Clothing",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Fast Food",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Fruits  Shop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Gas Station",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Gift Shop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Music Store",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Pizza",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Residential_color01",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building Sky_big_color02"
-            };
-
-            (Vector3 position, Vector3 footprint, float rotation, bool solid)[] buildingPlacements =
-            {
-                (new Vector3(-11.2f, 5.48f, 0.18f), new Vector3(1.08f, 0.62f, 0.96f), 2f, true),
-                (new Vector3(-9.92f, 6.86f, 0.18f), new Vector3(1.02f, 0.58f, 0.82f), -5f, true),
-                (new Vector3(-5.92f, 6.72f, 0.18f), new Vector3(0.96f, 0.56f, 0.78f), 3f, true),
-                (new Vector3(-4.1f, 2.94f, 0.18f), new Vector3(0.92f, 0.52f, 0.72f), -8f, false),
-                (new Vector3(-2.05f, 4.2f, 0.18f), new Vector3(0.98f, 0.56f, 0.76f), 7f, false),
-                (new Vector3(0.85f, 4.26f, 0.18f), new Vector3(1.05f, 0.58f, 0.8f), -6f, false),
-                (new Vector3(3.52f, 3.95f, 0.18f), new Vector3(1.08f, 0.58f, 0.92f), 4f, true),
-                (new Vector3(6.1f, 3.72f, 0.18f), new Vector3(1.0f, 0.56f, 0.76f), -3f, true),
-                (new Vector3(8.4f, 4.02f, 0.18f), new Vector3(1.08f, 0.58f, 0.96f), 6f, true),
-                (new Vector3(9.62f, 1.72f, 0.18f), new Vector3(0.96f, 0.52f, 0.84f), -7f, true),
-                (new Vector3(7.55f, -2.2f, 0.18f), new Vector3(1.02f, 0.58f, 0.82f), 8f, true),
-                (new Vector3(5.82f, -4.78f, 0.18f), new Vector3(1.1f, 0.62f, 0.88f), -4f, true),
-                (new Vector3(1.72f, -6.28f, 0.18f), new Vector3(1.18f, 0.62f, 0.84f), 3f, true),
-                (new Vector3(-3.68f, -5.98f, 0.18f), new Vector3(1.08f, 0.58f, 0.82f), -5f, true),
-                (new Vector3(-7.82f, -5.92f, 0.18f), new Vector3(1.0f, 0.56f, 0.8f), 6f, true),
-                (new Vector3(-10.35f, -3.64f, 0.18f), new Vector3(1.08f, 0.58f, 0.84f), -7f, true)
-            };
-
-            for (int i = 0; i < buildingPlacements.Length; i++)
-            {
-                string name = "官方免费街区密度层 临街铺面 " + i;
-
-                if (buildingPlacements[i].solid)
-                {
-                    CreateSolidAssetStoreProp(name, shopBuildings[i % shopBuildings.Length], buildingPlacements[i].position, buildingPlacements[i].footprint, buildingPlacements[i].rotation, false);
-                }
-                else
-                {
-                    CreateAssetStoreProp(name, shopBuildings[i % shopBuildings.Length], buildingPlacements[i].position, buildingPlacements[i].footprint, buildingPlacements[i].rotation, false);
-                }
-            }
-
-            CreateDenseOfficialFreeRoadFurniture();
-            CreateDenseOfficialFreeTransitAndVehicleProps();
-            CreateDenseOfficialFreeTaskAnchors();
-        }
-
-        private void CreateDenseOfficialFreeRoadFurniture()
-        {
-            string[] furniture =
-            {
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Traffic_cone",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Traffic_light",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Pole_traffic_light",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Sewer_hatch",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Bench_1",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Trash_can_1",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Hydrant",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Pole1",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic cone",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic Sign_stop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic Signal_small",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Street Light",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_small",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Switch_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Keypad_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Papers_05",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic Control Barrier Fence",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_large",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof Solar Panel",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof Antenna"
-            };
-
-            Vector3[] positions =
-            {
-                new Vector3(-8.78f, 4.28f, 0.14f),
-                new Vector3(-7.42f, 4.12f, 0.14f),
-                new Vector3(-5.85f, 3.54f, 0.14f),
-                new Vector3(-4.62f, 2.42f, 0.14f),
-                new Vector3(-3.16f, 0.72f, 0.14f),
-                new Vector3(-1.62f, 1.46f, 0.14f),
-                new Vector3(0.68f, 0.86f, 0.14f),
-                new Vector3(2.2f, 1.28f, 0.14f),
-                new Vector3(3.92f, 0.72f, 0.14f),
-                new Vector3(5.18f, 1.55f, 0.14f),
-                new Vector3(6.82f, 3.42f, 0.14f),
-                new Vector3(8.18f, 4.55f, 0.14f),
-                new Vector3(8.42f, 2.52f, 0.14f),
-                new Vector3(7.62f, 0.12f, 0.14f),
-                new Vector3(6.4f, -1.62f, 0.14f),
-                new Vector3(4.52f, -2.62f, 0.14f),
-                new Vector3(2.6f, -3.72f, 0.14f),
-                new Vector3(0.42f, -4.62f, 0.14f),
-                new Vector3(-1.62f, -4.48f, 0.14f),
-                new Vector3(-3.85f, -3.68f, 0.14f),
-                new Vector3(-5.92f, -3.85f, 0.14f),
-                new Vector3(-7.52f, -4.55f, 0.14f),
-                new Vector3(-8.72f, -2.18f, 0.14f),
-                new Vector3(-7.82f, -0.42f, 0.14f),
-                new Vector3(-6.92f, 1.28f, 0.14f),
-                new Vector3(-4.02f, 4.12f, 0.14f),
-                new Vector3(-0.85f, 3.84f, 0.14f),
-                new Vector3(2.88f, 3.32f, 0.14f),
-                new Vector3(5.65f, 4.32f, 0.14f),
-                new Vector3(9.35f, -3.95f, 0.14f)
-            };
-
-            for (int i = 0; i < positions.Length; i++)
-            {
-                bool solid = i % 5 == 0 || i % 7 == 0;
-                Vector3 footprint = i % 4 == 0
-                    ? new Vector3(0.34f, 0.24f, 0.48f)
-                    : i % 4 == 1
-                        ? new Vector3(0.24f, 0.2f, 0.36f)
-                        : new Vector3(0.2f, 0.18f, 0.3f);
-
-                if (solid)
-                {
-                    CreateSolidAssetStoreProp("官方免费街区密度层 路边物件 " + i, furniture[i % furniture.Length], positions[i], footprint, i * 13f, false);
-                }
-                else
-                {
-                    CreateAssetStoreProp("官方免费街区密度层 路边物件 " + i, furniture[i % furniture.Length], positions[i], footprint, i * 13f, false);
-                }
-            }
-        }
-
-        private void CreateDenseOfficialFreeTransitAndVehicleProps()
-        {
-            (string path, Vector3 position, Vector3 footprint, float rotation, bool solid)[] vehicles =
-            {
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Police Car", new Vector3(-1.1f, -5.92f, 0.14f), new Vector3(0.9f, 0.42f, 0.36f), 4f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Police Car", new Vector3(1.42f, -5.78f, 0.14f), new Vector3(0.9f, 0.42f, 0.36f), -6f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Taxi", new Vector3(-3.05f, 3.98f, 0.14f), new Vector3(0.84f, 0.38f, 0.32f), -11f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Taxi", new Vector3(3.25f, -3.38f, 0.14f), new Vector3(0.84f, 0.38f, 0.32f), 14f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Bus_color02", new Vector3(-3.8f, 6.68f, 0.14f), new Vector3(1.2f, 0.48f, 0.4f), 0f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Truck_color01", new Vector3(-10.3f, 6.02f, 0.14f), new Vector3(1.12f, 0.46f, 0.4f), 3f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Container_color03", new Vector3(-9.45f, 4.82f, 0.14f), new Vector3(1.12f, 0.46f, 0.42f), -2f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Ambulance", new Vector3(7.78f, -5.15f, 0.14f), new Vector3(0.92f, 0.42f, 0.34f), -8f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_SUV_color02", new Vector3(8.45f, -1.88f, 0.14f), new Vector3(0.86f, 0.4f, 0.34f), 8f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Pick up Truck_color02", new Vector3(5.52f, -0.62f, 0.14f), new Vector3(0.88f, 0.4f, 0.34f), -12f, true)
-            };
-
-            for (int i = 0; i < vehicles.Length; i++)
-            {
-                if (vehicles[i].solid)
-                {
-                    CreateSolidAssetStoreProp("官方免费街区密度层 交通车辆 " + i, vehicles[i].path, vehicles[i].position, vehicles[i].footprint, vehicles[i].rotation, false);
-                }
-                else
-                {
-                    CreateAssetStoreProp("官方免费街区密度层 交通车辆 " + i, vehicles[i].path, vehicles[i].position, vehicles[i].footprint, vehicles[i].rotation, false);
-                }
-            }
-
-            string[] pavement =
-            {
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Roads/Pavement",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_5m",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Roads/Road_1_line",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Roads/Crossroads_1_lines_walk"
-            };
-
-            for (int i = 0; i < 14; i++)
-            {
-                float x = -10.2f + i * 1.58f;
-                float y = i % 2 == 0 ? 6.36f : -6.12f;
-                CreateAssetStoreProp("官方免费街区密度层 人行道铺面 " + i, pavement[i % pavement.Length], new Vector3(x, y, -0.2f), new Vector3(0.78f, 0.32f, 0.04f), i % 2 == 0 ? 0f : 180f, true);
-            }
-        }
-
-        private void CreateDenseOfficialFreeTaskAnchors()
-        {
-            string[] anchors =
-            {
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof prop air",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof_prop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Bus Stop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Dustbin",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Switch_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Manhole_01",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Sewer_hatch",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_medium"
-            };
-
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.22f);
-                Vector3 offset = new Vector3(i % 2 == 0 ? -0.38f : 0.38f, i % 3 == 0 ? 0.3f : -0.26f, 0f);
-                CreateAssetStoreProp("官方免费街区密度层 任务实体锚点 " + task.Id, anchors[i % anchors.Length], designPosition + offset, new Vector3(0.34f, 0.26f, 0.34f), i * 19f, false);
-            }
-        }
-
-        private void CreateLargeHongKongPortBackdrop()
-        {
-            Color skylineDark = new Color(0.024f, 0.032f, 0.04f, 1f);
-            Color skylineMid = new Color(0.038f, 0.052f, 0.064f, 1f);
-            Color windowBlue = new Color(0.08f, 0.44f, 0.58f, 1f);
-            Color windowAmber = new Color(0.86f, 0.62f, 0.18f, 1f);
-
-            for (int i = 0; i < 14; i++)
-            {
-                float x = -11.4f + i * 1.75f;
-                float height = 0.46f + i % 5 * 0.16f;
-                CreateMeshBoxProp("大场景港区层 远景香港楼宇体 " + i, new Vector3(x, 7.36f, height * 0.5f), new Vector3(1.0f + i % 3 * 0.22f, 0.16f, height), i % 2 == 0 ? skylineDark : skylineMid);
-
-                for (int w = 0; w < 3; w++)
-                {
-                    CreateMeshBoxProp("大场景港区层 远景楼宇窗格 " + i + "-" + w, new Vector3(x - 0.28f + w * 0.28f, 7.47f, 0.22f + w * 0.12f), new Vector3(0.12f, 0.026f, 0.045f), (i + w) % 2 == 0 ? windowBlue : windowAmber);
-                }
-            }
-
-            for (int i = 0; i < 10; i++)
-            {
-                float y = -5.8f + i * 1.18f;
-                CreateMeshBoxProp("大场景港区层 西侧海面码头反光 " + i, new Vector3(-12.25f, y, -0.2f), new Vector3(0.74f, 0.035f, 0.04f), new Color(0.16f, 0.36f, 0.44f, 1f));
-                CreateMeshBoxProp("大场景港区层 东侧海面码头反光 " + i, new Vector3(12.25f, y + 0.5f, -0.2f), new Vector3(0.66f, 0.035f, 0.04f), new Color(0.12f, 0.32f, 0.42f, 1f));
-            }
-
-            CreateMeshBoxProp("大场景港区层 远景青马桥剪影", new Vector3(0f, 7.05f, 0.42f), new Vector3(8.6f, 0.06f, 0.08f), new Color(0.08f, 0.1f, 0.1f, 1f));
-            CreateMeshBoxProp("大场景港区层 远景桥塔左", new Vector3(-3.2f, 7.12f, 0.72f), new Vector3(0.08f, 0.08f, 0.78f), new Color(0.08f, 0.1f, 0.1f, 1f));
-            CreateMeshBoxProp("大场景港区层 远景桥塔右", new Vector3(3.25f, 7.12f, 0.74f), new Vector3(0.08f, 0.08f, 0.82f), new Color(0.08f, 0.1f, 0.1f, 1f));
-        }
-
-        private void CreateLargeDistrictDepthSilhouettes()
-        {
-            Color nearShadow = new Color(0.006f, 0.008f, 0.01f, 0.82f);
-            Color metalDark = new Color(0.035f, 0.044f, 0.048f, 1f);
-            Color trim = new Color(0.42f, 0.48f, 0.48f, 1f);
-
-            Vector3[] gantries =
-            {
-                new Vector3(-9.5f, 6.42f, 0.86f),
-                new Vector3(-5.18f, 6.24f, 0.74f),
-                new Vector3(8.7f, 6.12f, 0.8f),
-                new Vector3(5.85f, -4.12f, 0.72f),
-                new Vector3(-8.55f, -4.12f, 0.76f)
-            };
-
-            for (int i = 0; i < gantries.Length; i++)
-            {
-                Vector3 center = gantries[i];
-                CreateMeshBoxProp("大场景港区层 区域门架横梁 " + i, center, new Vector3(2.25f, 0.12f, 0.14f), metalDark);
-                CreateMeshBoxProp("大场景港区层 区域门架左柱 " + i, center + new Vector3(-1.05f, -0.18f, -0.32f), new Vector3(0.1f, 0.1f, 0.7f), metalDark);
-                CreateMeshBoxProp("大场景港区层 区域门架右柱 " + i, center + new Vector3(1.05f, -0.18f, -0.32f), new Vector3(0.1f, 0.1f, 0.7f), metalDark);
-                CreateMeshBoxProp("大场景港区层 区域门架冷光 " + i, center + new Vector3(0f, -0.08f, 0.08f), new Vector3(1.7f, 0.035f, 0.05f), trim);
-            }
-
-            Vector3[] foregroundShadows =
-            {
-                new Vector3(-9.4f, 3.58f, 0.82f),
-                new Vector3(-4.8f, 0.72f, 0.78f),
-                new Vector3(4.75f, 1.22f, 0.8f),
-                new Vector3(8.85f, 3.72f, 0.82f),
-                new Vector3(0.0f, -4.1f, 0.78f),
-                new Vector3(6.15f, -3.68f, 0.8f)
-            };
-
-            for (int i = 0; i < foregroundShadows.Length; i++)
-            {
-                CreateMeshBoxProp("大场景港区层 近景房檐投影 " + i, foregroundShadows[i], new Vector3(2.4f, 0.18f, 0.42f), nearShadow, i % 2 == 0 ? 0f : 4f);
-            }
-        }
-
-        private void CreateLargePlayableSightlineSetPieces()
-        {
-            Color wall = new Color(0.025f, 0.034f, 0.038f, 1f);
-            Color accent = new Color(0.08f, 0.68f, 0.84f, 1f);
-            Color warning = new Color(0.9f, 0.68f, 0.08f, 1f);
-
-            Vector3[] blockers =
-            {
-                new Vector3(-5.68f, 4.18f, 0.22f),
-                new Vector3(-3.22f, 3.18f, 0.22f),
-                new Vector3(2.85f, 3.12f, 0.22f),
-                new Vector3(5.88f, 1.08f, 0.22f),
-                new Vector3(3.48f, -2.78f, 0.22f),
-                new Vector3(-4.72f, -2.82f, 0.22f),
-                new Vector3(-8.18f, -1.12f, 0.22f),
-                new Vector3(7.88f, -1.12f, 0.22f)
-            };
-
-            for (int i = 0; i < blockers.Length; i++)
-            {
-                bool horizontal = i % 2 == 0;
-                Vector3 scale = horizontal ? new Vector3(1.35f, 0.16f, 0.42f) : new Vector3(0.18f, 1.08f, 0.42f);
-                CreateSolidMeshBoxProp("大场景港区层 真实视线阻挡设备 " + i, blockers[i], scale, wall, i % 3 == 0 ? -8f : 8f);
-                CreateMeshBoxProp("大场景港区层 阻挡设备编号灯 " + i, blockers[i] + new Vector3(0f, 0.08f, 0.28f), horizontal ? new Vector3(0.78f, 0.035f, 0.05f) : new Vector3(0.035f, 0.62f, 0.05f), i % 2 == 0 ? accent : warning, i % 3 == 0 ? -8f : 8f);
-            }
-
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7.4f + i * 2.1f;
-                CreateMeshBoxProp("大场景港区层 可读性道路弧线 " + i, new Vector3(x, i % 2 == 0 ? -0.92f : 0.68f, 0.04f), new Vector3(0.92f, 0.035f, 0.04f), i % 2 == 0 ? warning : accent, i % 2 == 0 ? -14f : 14f);
-            }
-        }
-
-        private void CreateCommercialArtAdapterLayer()
-        {
-            Color policeBlue = new Color(0.08f, 0.28f, 0.88f, 1f);
-            Color gangRed = new Color(0.82f, 0.1f, 0.08f, 1f);
-            Color neonCyan = new Color(0.08f, 0.72f, 0.9f, 1f);
-            Color neonAmber = new Color(0.9f, 0.68f, 0.12f, 1f);
-            Color neonPink = new Color(0.94f, 0.18f, 0.46f, 1f);
-            Color steel = new Color(0.08f, 0.1f, 0.12f, 1f);
-            Color glass = new Color(0.12f, 0.38f, 0.46f, 1f);
-
-            CreateMeshBoxProp("资源适配层 港区主门头", new Vector3(0f, 6.95f, 0.96f), new Vector3(4.2f, 0.16f, 0.26f), policeBlue);
-            CreateMeshBoxProp("资源适配层 港区副门头", new Vector3(-8.95f, 4.72f, 0.9f), new Vector3(2.2f, 0.12f, 0.22f), gangRed);
-            CreateMeshBoxProp("资源适配层 港区夜市大灯牌", new Vector3(-1.1f, 4.02f, 0.82f), new Vector3(2.42f, 0.1f, 0.24f), neonPink);
-            CreateMeshBoxProp("资源适配层 港区证物区门头", new Vector3(-8.7f, -3.98f, 0.86f), new Vector3(2.0f, 0.1f, 0.22f), neonCyan);
-            CreateMeshBoxProp("资源适配层 港区诊所灯箱", new Vector3(7.62f, -4.9f, 0.88f), new Vector3(1.72f, 0.1f, 0.22f), neonAmber);
-            CreateMeshBoxProp("资源适配层 港区金融楼顶牌", new Vector3(4.8f, 4.1f, 0.9f), new Vector3(1.98f, 0.1f, 0.22f), neonAmber);
-            CreateMeshBoxProp("资源适配层 港区电房告示墙", new Vector3(8.9f, 6.0f, 0.86f), new Vector3(1.7f, 0.08f, 0.2f), policeBlue);
-            CreateMeshBoxProp("资源适配层 港区指挥车指示板", new Vector3(0f, -6.02f, 0.84f), new Vector3(2.1f, 0.08f, 0.2f), neonCyan);
-
-            CreateModelProp("资源适配层 港区门卫岗亭", "Props/Prop_AccessPoint.fbx", new Vector3(-7.52f, 4.92f, 0.12f), new Vector3(0.72f, 0.48f, 0.38f), 90f);
-            CreateModelProp("资源适配层 港区广播终端", "Props/Prop_Computer.fbx", new Vector3(0.88f, 6.28f, 0.12f), new Vector3(0.72f, 0.46f, 0.36f), 0f);
-            CreateModelProp("资源适配层 港区门禁闸机", "Platforms/Door_Frame_A.fbx", new Vector3(-4.95f, 5.06f, 0.14f), new Vector3(0.56f, 0.98f, 0.42f), 90f, true);
-            CreateModelProp("资源适配层 港区大箱体", "Props/Prop_Chest.fbx", new Vector3(6.8f, -1.92f, 0.12f), new Vector3(0.74f, 0.52f, 0.42f), -8f);
-            CreateModelProp("资源适配层 港区灯柱", "Props/Prop_Light_Wide.fbx", new Vector3(9.62f, 4.92f, 0.18f), new Vector3(0.68f, 0.22f, 0.22f), 0f, true);
-            CreateModelProp("资源适配层 港区通风架", "Props/Prop_Vent_Big.fbx", new Vector3(-2.1f, -0.94f, 0.12f), new Vector3(0.74f, 0.42f, 0.24f), 0f, true);
-            CreateModelProp("资源适配层 港区钢架", "Platforms/Platform_Rails_4Wide.fbx", new Vector3(2.2f, 0.84f, 0.16f), new Vector3(1.28f, 0.26f, 0.38f), 0f, true);
-
-            CreateSolidMeshBoxProp("资源适配层 港区入口钢箱", new Vector3(-10.16f, 5.48f, 0.1f), new Vector3(1.28f, 0.42f, 0.36f), steel, 4f);
-            CreateSolidMeshBoxProp("资源适配层 港区侧边玻璃棚", new Vector3(6.16f, 2.42f, 0.12f), new Vector3(1.14f, 0.28f, 0.26f), glass, -6f);
-            CreateSolidMeshBoxProp("资源适配层 港区检修高柜", new Vector3(-6.48f, -4.12f, 0.12f), new Vector3(0.72f, 0.42f, 0.46f), steel, 10f);
-        }
-
-        private void CreateExteriorDockVista()
-        {
-            Color water = new Color(0.03f, 0.08f, 0.1f, 1f);
-            Color dock = new Color(0.12f, 0.14f, 0.13f, 1f);
-            Color crane = new Color(0.84f, 0.58f, 0.08f, 1f);
-            CreateShapeProp("维港远景水面西", roundedRectSprite, new Vector3(-12.2f, 3.0f, -0.32f), new Vector3(1.6f, 8.6f, 0.06f), water);
-            CreateShapeProp("维港远景水面东", roundedRectSprite, new Vector3(12.2f, -2.8f, -0.32f), new Vector3(1.6f, 8.4f, 0.06f), water);
-            CreateMeshBoxProp("码头外缘泊位线西", new Vector3(-10.72f, 4.32f, 0.08f), new Vector3(0.08f, 2.65f, 0.12f), dock);
-            CreateMeshBoxProp("码头外缘泊位线东", new Vector3(10.72f, -2.72f, 0.08f), new Vector3(0.08f, 2.5f, 0.12f), dock);
-            CreateSolidProp("外景集装箱堆 A", new Vector3(-10.92f, 5.88f, 0.05f), new Vector3(0.74f, 0.34f, 0.18f), new Color(0.08f, 0.24f, 0.52f, 1f));
-            CreateSolidProp("外景集装箱堆 B", new Vector3(-10.98f, 5.42f, 0.05f), new Vector3(0.72f, 0.34f, 0.18f), new Color(0.58f, 0.12f, 0.08f, 1f));
-            CreateSolidProp("外景集装箱堆 C", new Vector3(10.86f, -4.72f, 0.05f), new Vector3(0.74f, 0.34f, 0.18f), new Color(0.12f, 0.38f, 0.2f, 1f));
-            CreateMeshBoxProp("外景龙门吊立柱 A", new Vector3(-10.72f, 5.2f, 0.44f), new Vector3(0.08f, 1.42f, 0.64f), crane);
-            CreateMeshBoxProp("外景龙门吊横梁 A", new Vector3(-10.72f, 5.86f, 0.84f), new Vector3(0.92f, 0.06f, 0.08f), crane);
-            CreateMeshBoxProp("外景龙门吊吊钩 A", new Vector3(-10.34f, 5.62f, 0.48f), new Vector3(0.08f, 0.42f, 0.08f), new Color(0.05f, 0.05f, 0.05f, 1f));
-            CreateMeshBoxProp("东侧巡逻船体", new Vector3(10.88f, -1.42f, 0.06f), new Vector3(0.92f, 0.36f, 0.16f), new Color(0.08f, 0.16f, 0.22f, 1f));
-            CreateMeshBoxProp("东侧巡逻船警灯", new Vector3(10.88f, -1.12f, 0.22f), new Vector3(0.52f, 0.05f, 0.06f), new Color(0.08f, 0.36f, 0.92f, 1f));
-
-            for (int i = 0; i < 8; i++)
-            {
-                float y = -5.8f + i * 1.42f;
-                CreateProp("水面反光西 " + i, new Vector3(-12.18f, y, -0.26f), new Vector3(0.68f, 0.035f, 0.04f), new Color(0.18f, 0.38f, 0.42f, 1f));
-                CreateProp("水面反光东 " + i, new Vector3(12.18f, y + 0.62f, -0.26f), new Vector3(0.62f, 0.035f, 0.04f), new Color(0.16f, 0.34f, 0.42f, 1f));
-            }
-        }
-
-        private void CreateDistrictIdentityLandmarks()
-        {
-            Color neonPink = new Color(0.96f, 0.16f, 0.46f, 1f);
-            Color neonBlue = new Color(0.06f, 0.72f, 0.9f, 1f);
-            Color amber = new Color(0.9f, 0.66f, 0.12f, 1f);
-            CreateMeshBoxProp("茶餐厅大型霓虹牌底", new Vector3(-4.8f, 2.42f, 0.52f), new Vector3(1.2f, 0.08f, 0.26f), new Color(0.08f, 0.035f, 0.03f, 1f));
-            CreateMeshBoxProp("茶餐厅大型霓虹字 A", new Vector3(-5.08f, 2.46f, 0.66f), new Vector3(0.42f, 0.035f, 0.05f), neonPink);
-            CreateMeshBoxProp("茶餐厅大型霓虹字 B", new Vector3(-4.52f, 2.46f, 0.66f), new Vector3(0.42f, 0.035f, 0.05f), amber);
-            CreateMeshBoxProp("金融楼洗钱账房招牌", new Vector3(4.78f, 3.72f, 0.62f), new Vector3(1.35f, 0.07f, 0.28f), new Color(0.04f, 0.05f, 0.08f, 1f));
-            CreateMeshBoxProp("金融楼招牌蓝线", new Vector3(4.78f, 3.76f, 0.78f), new Vector3(1.08f, 0.03f, 0.04f), neonBlue);
-            CreateMeshBoxProp("夜市棚顶排档灯箱", new Vector3(-1.02f, 3.74f, 0.48f), new Vector3(1.8f, 0.08f, 0.22f), new Color(0.2f, 0.04f, 0.04f, 1f));
-            CreateMeshBoxProp("夜市灯箱霓虹线", new Vector3(-1.02f, 3.78f, 0.62f), new Vector3(1.48f, 0.035f, 0.05f), neonPink);
-            CreateMeshBoxProp("证物库冷链大门", new Vector3(-7.08f, -5.05f, 0.42f), new Vector3(0.08f, 1.08f, 0.42f), new Color(0.08f, 0.24f, 0.28f, 1f));
-            CreateMeshBoxProp("证物库冷链状态灯", new Vector3(-7.02f, -4.72f, 0.68f), new Vector3(0.035f, 0.38f, 0.05f), neonBlue);
-            CreateMeshBoxProp("地下诊所唐楼外墙牌", new Vector3(7.62f, -5.02f, 0.54f), new Vector3(0.08f, 0.88f, 0.3f), new Color(0.08f, 0.16f, 0.12f, 1f));
-            CreateMeshBoxProp("地下诊所十字灯", new Vector3(7.66f, -5.02f, 0.72f), new Vector3(0.04f, 0.46f, 0.04f), new Color(0.52f, 0.92f, 0.78f, 1f));
-            CreateMeshBoxProp("地下诊所十字灯横", new Vector3(7.66f, -5.02f, 0.72f), new Vector3(0.04f, 0.08f, 0.24f), new Color(0.52f, 0.92f, 0.78f, 1f));
-
-            for (int i = 0; i < 6; i++)
-            {
-                CreateMeshBoxProp("货柜区编号灯 " + i, new Vector3(-10.78f + i * 0.58f, 6.08f, 0.32f), new Vector3(0.26f, 0.035f, 0.06f), i % 2 == 0 ? amber : neonBlue);
-                CreateMeshBoxProp("电房高压警示灯 " + i, new Vector3(8.0f + i * 0.34f, 6.1f, 0.36f), new Vector3(0.16f, 0.035f, 0.06f), i % 2 == 0 ? Color.red : amber);
-            }
-        }
-
-        private void CreateShipLikeSightlineWalls()
-        {
-            Color bulkhead = new Color(0.025f, 0.035f, 0.04f, 1f);
-            Color highlight = new Color(0.42f, 0.5f, 0.5f, 1f);
-            Vector3[] wallCenters =
-            {
-                new Vector3(-2.95f, 1.18f, 0.38f),
-                new Vector3(3.05f, 1.18f, 0.38f),
-                new Vector3(-3.05f, -1.58f, 0.36f),
-                new Vector3(3.05f, -1.58f, 0.36f),
-                new Vector3(-8.18f, -2.42f, 0.36f),
-                new Vector3(8.24f, 2.62f, 0.36f)
-            };
-
-            for (int i = 0; i < wallCenters.Length; i++)
-            {
-                Vector3 center = wallCenters[i];
-                bool horizontal = i < 4;
-                Vector3 scale = horizontal ? new Vector3(1.4f, 0.12f, 0.42f) : new Vector3(0.12f, 1.35f, 0.42f);
-                CreateSolidProp("视线遮挡厚舱壁 " + i, center, scale, bulkhead);
-                CreateMeshBoxProp("视线遮挡舱壁高光 " + i, center + new Vector3(0f, horizontal ? 0.08f : 0f, 0.26f), horizontal ? new Vector3(1.1f, 0.035f, 0.06f) : new Vector3(0.035f, 1.05f, 0.06f), highlight);
-            }
-        }
-
-        private void CreateRoundEndShowcaseSet()
-        {
-            Color police = new Color(0.08f, 0.32f, 0.82f, 1f);
-            Color gang = new Color(0.78f, 0.08f, 0.06f, 1f);
-            CreateMeshBoxProp("结算舞台警方投影", new Vector3(-0.62f, 0.18f, 0.58f), new Vector3(0.52f, 0.05f, 0.3f), police);
-            CreateMeshBoxProp("结算舞台黑帮投影", new Vector3(0.62f, 0.18f, 0.58f), new Vector3(0.52f, 0.05f, 0.3f), gang);
-            CreateMeshBoxProp("结算舞台证据时间线", new Vector3(0f, -0.92f, 0.18f), new Vector3(1.9f, 0.055f, 0.08f), new Color(0.84f, 0.72f, 0.22f, 1f));
-            CreateMeshBoxProp("结算舞台投票箱", new Vector3(0f, -0.35f, 0.42f), new Vector3(0.42f, 0.28f, 0.34f), new Color(0.12f, 0.16f, 0.17f, 1f));
-        }
-
-        private void CreateCorridorFloorPanels()
-        {
-            Color seam = new Color(0.34f, 0.4f, 0.4f, 1f);
-            Color plateA = new Color(0.14f, 0.165f, 0.17f, 1f);
-            Color plateB = new Color(0.12f, 0.145f, 0.15f, 1f);
-
-            for (int i = 0; i < 13; i++)
-            {
-                float x = -6.9f + i * 1.15f;
-                CreateProp("主横连廊可拆地板 " + i, new Vector3(x, -0.18f, -0.075f), new Vector3(0.82f, 0.34f, 0.04f), i % 2 == 0 ? plateA : plateB);
-                CreateProp("主横连廊地板编号条 " + i, new Vector3(x, 0.18f, -0.04f), new Vector3(0.34f, 0.035f, 0.04f), seam);
-            }
-
-            for (int i = 0; i < 12; i++)
-            {
-                float x = -6.5f + i * 1.18f;
-                CreateProp("上层连廊可拆地板 " + i, new Vector3(x, 3.65f, -0.075f), new Vector3(0.78f, 0.3f, 0.04f), i % 2 == 0 ? plateB : plateA);
-                CreateProp("下层连廊可拆地板 " + i, new Vector3(x + 0.18f, -3.9f, -0.075f), new Vector3(0.78f, 0.3f, 0.04f), i % 2 == 0 ? plateA : plateB);
-            }
-
-            for (int i = 0; i < 7; i++)
-            {
-                float y = -2.9f + i * 0.95f;
-                CreateProp("左竖连廊竖向舱板 " + i, new Vector3(-6.85f, y, -0.075f), new Vector3(0.3f, 0.62f, 0.04f), i % 2 == 0 ? plateA : plateB);
-                CreateProp("右竖连廊竖向舱板 " + i, new Vector3(7.05f, y, -0.075f), new Vector3(0.3f, 0.62f, 0.04f), i % 2 == 0 ? plateB : plateA);
-            }
-        }
-
-        private void CreateCorridorCameraNetwork()
-        {
-            Vector3[] positions =
-            {
-                new Vector3(-5.6f, 0.54f, 0.34f),
-                new Vector3(-0.8f, 0.54f, 0.34f),
-                new Vector3(4.25f, 0.38f, 0.34f),
-                new Vector3(-6.55f, 3.12f, 0.34f),
-                new Vector3(6.78f, 3.12f, 0.34f),
-                new Vector3(-6.55f, -3.34f, 0.34f),
-                new Vector3(6.95f, -3.34f, 0.34f)
-            };
-
-            for (int i = 0; i < positions.Length; i++)
-            {
-                CreateWallCamera("走廊监控 " + i, positions[i], i % 2 == 0 ? 0f : 180f);
-            }
-        }
-
-        private void CreateWallCamera(string name, Vector3 position, float rotation)
-        {
-            CreateModelProp(name + " CC0 支架", "Props/Prop_Clamp.fbx", position + new Vector3(0f, 0f, 0.02f), new Vector3(0.22f, 0.18f, 0.2f), rotation);
-            CreateMeshBoxProp(name + " 机身", position + new Vector3(0f, 0.08f, 0.08f), new Vector3(0.18f, 0.12f, 0.1f), new Color(0.04f, 0.055f, 0.06f, 1f), rotation);
-            CreateMeshPrimitiveProp(name + " 镜头", PrimitiveType.Sphere, position + new Vector3(0f, 0.17f, 0.08f), new Vector3(0.08f, 0.08f, 0.06f), new Color(0.08f, 0.78f, 0.92f, 1f), Quaternion.identity);
-        }
-
-        private void CreateCorridorCableRuns()
-        {
-            Color cable = new Color(0.025f, 0.035f, 0.038f, 1f);
-            Color signal = new Color(0.08f, 0.64f, 0.78f, 1f);
-
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7.2f + i * 2.05f;
-                CreateModelProp("CC0 主廊线缆 " + i, "Props/Prop_Cable_1.fbx", new Vector3(x, 0.5f, 0.18f), new Vector3(0.78f, 0.08f, 0.12f), i % 2 == 0 ? 0f : 180f, true);
-                CreateProp("主廊线缆阴影 " + i, new Vector3(x, 0.44f, 0.06f), new Vector3(0.78f, 0.035f, 0.04f), cable);
-            }
-
-            for (int i = 0; i < 6; i++)
-            {
-                float y = -2.45f + i * 0.98f;
-                CreateModelProp("CC0 左竖管线 " + i, "Props/Prop_Cable_3.fbx", new Vector3(-7.42f, y, 0.16f), new Vector3(0.08f, 0.62f, 0.12f), 90f, true);
-                CreateModelProp("CC0 右竖管线 " + i, "Props/Prop_Cable_3.fbx", new Vector3(7.58f, y, 0.16f), new Vector3(0.08f, 0.62f, 0.12f), 90f, true);
-                CreateProp("右竖状态光点 " + i, new Vector3(7.34f, y + 0.18f, 0.11f), new Vector3(0.06f, 0.045f, 0.04f), signal);
-            }
-        }
-
-        private void CreateRoomMicroProps()
-        {
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                float halfWidth = room.Size.x * 0.5f;
-                float halfHeight = room.Size.y * 0.5f;
-                Color label = DoorColor(room);
-
-                CreateModelProp("CC0 " + room.Name + " 墙面窄灯", "Props/Prop_Light_Small.fbx", room.Center + new Vector3(-halfWidth + 0.4f, halfHeight - 0.28f, 0.26f), new Vector3(0.18f, 0.18f, 0.16f), 0f);
-                CreateMeshBoxProp("屋顶 " + room.Name + " 门牌背光", room.Center + new Vector3(halfWidth * 0.18f, halfHeight - 0.3f, 0.31f), new Vector3(Mathf.Min(0.72f, room.Size.x * 0.22f), 0.04f, 0.08f), label);
-                CreateMeshBoxProp("2.5D 建筑体 " + room.Name + " 小型通风百叶", room.Center + new Vector3(halfWidth - 0.32f, halfHeight - 0.12f, 0.36f), new Vector3(0.28f, 0.035f, 0.13f), new Color(0.04f, 0.055f, 0.06f, 1f));
-
-                for (int i = 0; i < 3; i++)
-                {
-                    CreateMeshBoxProp("2.5D 建筑体 " + room.Name + " 百叶缝 " + i, room.Center + new Vector3(halfWidth - 0.32f, halfHeight - 0.095f, 0.32f + i * 0.045f), new Vector3(0.23f, 0.025f, 0.015f), new Color(0.46f, 0.52f, 0.52f, 1f));
-                }
-            }
-        }
-
-        private void CreateExteriorHullProps()
-        {
-            Color red = new Color(0.86f, 0.08f, 0.08f, 1f);
-            Color blue = new Color(0.08f, 0.28f, 0.82f, 1f);
-            Color amber = new Color(0.92f, 0.68f, 0.08f, 1f);
-
-            for (int i = 0; i < 9; i++)
-            {
-                float x = -8.6f + i * 2.15f;
-                CreateMeshPrimitiveProp("屋顶 外壳应急警灯红 " + i, PrimitiveType.Cylinder, new Vector3(x, 6.78f, 0.16f), new Vector3(0.12f, 0.12f, 0.08f), i % 2 == 0 ? red : blue, Quaternion.Euler(90f, 0f, 0f));
-                CreateMeshPrimitiveProp("屋顶 南外壳定位灯 " + i, PrimitiveType.Cylinder, new Vector3(x + 0.72f, -6.78f, 0.16f), new Vector3(0.1f, 0.1f, 0.08f), amber, Quaternion.Euler(90f, 0f, 0f));
-            }
-
-            CreateModelProp("CC0 左侧维修梯", "Platforms/Platform_Stairs_4Wide.fbx", new Vector3(-10.9f, -2.8f, 0.18f), new Vector3(0.64f, 1.2f, 0.36f), 90f, true);
-            CreateModelProp("CC0 右侧维修梯", "Platforms/Platform_Stairs_4Wide.fbx", new Vector3(10.75f, 2.7f, 0.18f), new Vector3(0.64f, 1.2f, 0.36f), -90f, true);
-        }
-
-        private void CreateCorridorServiceProps()
-        {
-            Color metal = new Color(0.08f, 0.1f, 0.11f, 1f);
-            Color screen = new Color(0.06f, 0.62f, 0.78f, 1f);
-            Color warning = new Color(0.86f, 0.66f, 0.08f, 1f);
-
-            for (int i = 0; i < 5; i++)
-            {
-                float x = -5.4f + i * 2.7f;
-                CreateSolidProp("主走廊壁柜 " + i, new Vector3(x, 0.58f, 0.07f), new Vector3(0.32f, 0.22f, 0.2f), metal);
-                CreateProp("主走廊壁柜屏 " + i, new Vector3(x, 0.72f, 0.2f), new Vector3(0.22f, 0.04f, 0.06f), screen);
-                CreateSolidProp("下层走廊补给箱 " + i, new Vector3(-5.2f + i * 2.55f, -4.42f, 0.07f), new Vector3(0.42f, 0.2f, 0.18f), i % 2 == 0 ? warning : metal);
-            }
-
-            for (int i = 0; i < 4; i++)
-            {
-                float y = -2.5f + i * 1.45f;
-                CreateSolidProp("左竖连廊封控箱 " + i, new Vector3(-7.45f, y, 0.07f), new Vector3(0.22f, 0.34f, 0.18f), metal);
-                CreateSolidProp("右竖连廊封控箱 " + i, new Vector3(7.65f, y, 0.07f), new Vector3(0.22f, 0.34f, 0.18f), metal);
-            }
-
-            CreateProp("主走廊红色警戒条", new Vector3(2.2f, 0.52f, 0.08f), new Vector3(1.2f, 0.08f, 0.08f), new Color(0.86f, 0.08f, 0.06f, 1f));
-            CreateProp("上层走廊证物导线", new Vector3(-1.8f, 4.14f, 0.08f), new Vector3(1.6f, 0.055f, 0.08f), new Color(0.48f, 0.84f, 0.82f, 1f));
-            CreateProp("下层走廊警戒导线", new Vector3(3.2f, -3.36f, 0.08f), new Vector3(1.4f, 0.055f, 0.08f), warning);
-        }
-
-        private void CreateQuaterniusModelDressing()
-        {
-            CreateModelRoomKits();
-            CreateModelCorridorKits();
-            CreateModelFloorPlates();
-        }
-
-        private void CreateModelRoomKits()
-        {
-            foreach (OnlineMapService.ShipRoomSpec room in mapService.ShipRooms())
-            {
-                float halfWidth = room.Size.x * 0.5f;
-                float halfHeight = room.Size.y * 0.5f;
-
-                CreateModelProp("CC0 舱内顶灯 " + room.Name, "Props/Prop_Light_Wide.fbx", room.Center + new Vector3(0f, halfHeight * 0.48f, 0.28f), new Vector3(0.72f, 0.18f, 0.18f), 0f);
-
-                switch (room.Name)
-                {
-                    case "西码头货柜场":
-                        CreateSolidModelProp("CC0 蓝色货柜 " + room.Name, "Props/Prop_Crate4.fbx", room.Center + new Vector3(-1.25f, 0.22f, 0.1f), new Vector3(0.78f, 0.46f, 0.42f), 0f);
-                        CreateSolidModelProp("CC0 封存货箱 " + room.Name, "Props/Prop_Chest.fbx", room.Center + new Vector3(0.45f, -0.35f, 0.1f), new Vector3(0.62f, 0.42f, 0.36f), 12f);
-                        CreateSolidModelProp("CC0 堆货箱 " + room.Name, "Props/Prop_Crate3.fbx", room.Center + new Vector3(1.28f, 0.42f, 0.1f), new Vector3(0.54f, 0.36f, 0.34f), -8f);
-                        break;
-                    case "海关查验区":
-                        CreateSolidModelProp("CC0 查验终端 " + room.Name, "Props/Prop_Computer.fbx", room.Center + new Vector3(-0.55f, 0.22f, 0.12f), new Vector3(0.62f, 0.42f, 0.38f), 180f);
-                        CreateModelProp("CC0 查验门框 " + room.Name, "Platforms/Door_Frame_SquareTall.fbx", room.Center + new Vector3(0.82f, 0.15f, 0.18f), new Vector3(0.42f, 0.96f, 0.46f), 90f, true);
-                        break;
-                    case "监控室":
-                        CreateSolidModelProp("CC0 监控电脑 A", "Props/Prop_Computer.fbx", room.Center + new Vector3(-0.52f, -0.18f, 0.12f), new Vector3(0.58f, 0.38f, 0.36f), 0f);
-                        CreateSolidModelProp("CC0 监控电脑 B", "Props/Prop_AccessPoint.fbx", room.Center + new Vector3(0.38f, -0.18f, 0.12f), new Vector3(0.54f, 0.36f, 0.34f), 0f);
-                        break;
-                    case "茶餐厅":
-                        CreateSolidModelProp("CC0 休息舱箱柜 A", "Props/Prop_Chest.fbx", room.Center + new Vector3(-0.86f, 0.35f, 0.12f), new Vector3(0.55f, 0.36f, 0.32f), 90f);
-                        CreateSolidModelProp("CC0 休息舱箱柜 B", "Props/Prop_Crate3.fbx", room.Center + new Vector3(0.82f, -0.28f, 0.1f), new Vector3(0.42f, 0.34f, 0.3f), -8f);
-                        break;
-                    case "夜市主街":
-                        for (int i = 0; i < 3; i++)
-                        {
-                            CreateSolidModelProp("CC0 情报摊设备 " + i, i == 1 ? "Props/Prop_ItemHolder.fbx" : "Props/Prop_Crate4.fbx", room.Center + new Vector3(-1.1f + i * 1.05f, 0.18f, 0.1f), new Vector3(0.56f, 0.38f, 0.34f), i * 9f);
-                        }
-                        break;
-                    case "金融楼":
-                        CreateSolidModelProp("CC0 账房保险柜", "Props/Prop_Chest.fbx", room.Center + new Vector3(0.92f, -0.24f, 0.12f), new Vector3(0.62f, 0.48f, 0.42f), -90f);
-                        CreateSolidModelProp("CC0 账房电脑", "Props/Prop_Computer.fbx", room.Center + new Vector3(-0.34f, 0.12f, 0.12f), new Vector3(0.62f, 0.38f, 0.36f), 0f);
-                        break;
-                    case "电房":
-                        for (int i = 0; i < 3; i++)
-                        {
-                            CreateSolidModelProp("CC0 电力设备 " + i, "Props/Prop_AccessPoint.fbx", room.Center + new Vector3(-0.64f + i * 0.5f, 0.22f, 0.12f), new Vector3(0.4f, 0.38f, 0.38f), i % 2 == 0 ? 0f : 180f);
-                        }
-                        break;
-                    case "天台通道":
-                        CreateSolidModelProp("CC0 观测平台", "Platforms/Platform_Round1.fbx", room.Center + new Vector3(-0.18f, 0f, 0.08f), new Vector3(0.72f, 0.62f, 0.18f), 0f, true);
-                        CreateSolidModelProp("CC0 观测灯", "Props/Prop_Light_Floor.fbx", room.Center + new Vector3(0.78f, 0.28f, 0.1f), new Vector3(0.35f, 0.35f, 0.38f), 0f);
-                        break;
-                    case "指挥车广场":
-                        CreateSolidModelProp("CC0 指挥圆桌箱", "Props/Prop_Chest.fbx", room.Center + new Vector3(0.0f, -0.04f, 0.14f), new Vector3(0.78f, 0.48f, 0.4f), 0f);
-                        CreateSolidModelProp("CC0 指挥终端", "Props/Prop_AccessPoint.fbx", room.Center + new Vector3(-1.25f, 0.22f, 0.12f), new Vector3(0.48f, 0.38f, 0.36f), 90f);
-                        break;
-                    case "证物库":
-                        for (int i = 0; i < 3; i++)
-                        {
-                            CreateSolidModelProp("CC0 证物箱 " + i, i == 2 ? "Props/Prop_Chest.fbx" : "Props/Prop_Crate3.fbx", room.Center + new Vector3(-0.9f + i * 0.6f, 0.25f, 0.1f), new Vector3(0.45f, 0.34f, 0.32f), i * 7f);
-                        }
-                        break;
-                    case "后巷排档":
-                        CreateSolidModelProp("CC0 维修箱", "Props/Prop_Crate4.fbx", room.Center + new Vector3(-0.5f, 0.24f, 0.1f), new Vector3(0.56f, 0.38f, 0.32f), 12f);
-                        CreateSolidModelProp("CC0 管线夹具", "Props/Prop_PipeHolder.fbx", room.Center + new Vector3(0.82f, -0.28f, 0.1f), new Vector3(0.62f, 0.3f, 0.32f), 90f);
-                        break;
-                    case "地下诊所":
-                        CreateSolidModelProp("CC0 诊疗柜", "Props/Prop_Chest.fbx", room.Center + new Vector3(-1.18f, 0.32f, 0.1f), new Vector3(0.48f, 0.38f, 0.34f), 90f);
-                        CreateModelProp("CC0 诊疗灯", "Props/Prop_Light_Floor.fbx", room.Center + new Vector3(0.05f, 0.46f, 0.14f), new Vector3(0.34f, 0.34f, 0.4f), 0f);
-                        break;
-                }
-
-                CreateModelProp("CC0 舱室立柱 L " + room.Name, "Columns/Column_MetalSupport.fbx", room.Center + new Vector3(-halfWidth + 0.26f, -halfHeight + 0.22f, 0.18f), new Vector3(0.22f, 0.22f, 0.42f), 0f);
-                CreateModelProp("CC0 舱室立柱 R " + room.Name, "Columns/Column_MetalSupport.fbx", room.Center + new Vector3(halfWidth - 0.26f, halfHeight - 0.22f, 0.18f), new Vector3(0.22f, 0.22f, 0.42f), 0f);
-            }
-        }
-
-        private static string RoomPlatformModel(OnlineMapService.ShipRoomSpec room)
-        {
-            if (room.Label.Contains("账房") || room.Label.Contains("监控") || room.Label.Contains("电力"))
-            {
-                return "Platforms/Platform_DarkPlates.fbx";
-            }
-
-            if (room.Label.Contains("指挥") || room.Label.Contains("观测"))
-            {
-                return "Platforms/Platform_CenterPlate.fbx";
-            }
-
-            return "Platforms/Platform_Simple.fbx";
-        }
-
-        private void CreateModelCorridorKits()
-        {
-            for (int i = 0; i < 7; i++)
-            {
-                float x = -6.2f + i * 2.05f;
-                CreateModelProp("CC0 主廊顶灯 " + i, "Props/Prop_Light_Wide.fbx", new Vector3(x, 0.5f, 0.18f), new Vector3(0.72f, 0.16f, 0.16f), 0f, true);
-                CreateModelProp("CC0 下廊地灯 " + i, "Props/Prop_Light_Small.fbx", new Vector3(x + 0.35f, -4.48f, 0.08f), new Vector3(0.25f, 0.25f, 0.18f), 0f);
-            }
-
-            for (int i = 0; i < 5; i++)
-            {
-                float y = -3.05f + i * 1.45f;
-                CreateModelProp("CC0 左廊栏杆 " + i, "Props/Prop_Rail_3.fbx", new Vector3(-7.48f, y, 0.12f), new Vector3(0.22f, 0.74f, 0.2f), 90f, true);
-                CreateModelProp("CC0 右廊栏杆 " + i, "Props/Prop_Rail_3.fbx", new Vector3(7.68f, y, 0.12f), new Vector3(0.22f, 0.74f, 0.2f), 90f, true);
-            }
-
-            CreateSolidModelProp("CC0 主廊封锁箱 A", "Props/Prop_Crate4.fbx", new Vector3(-1.05f, -0.68f, 0.1f), new Vector3(0.7f, 0.26f, 0.32f), 0f);
-            CreateSolidModelProp("CC0 主廊封锁箱 B", "Props/Prop_Crate3.fbx", new Vector3(1.05f, 0.68f, 0.1f), new Vector3(0.7f, 0.26f, 0.32f), 180f);
-            CreateModelProp("CC0 会议舱圆环平台", "Platforms/Platform_Round1.fbx", new Vector3(0f, -0.35f, -0.02f), new Vector3(1.55f, 1.25f, 0.1f), 0f, true);
-            CreateModelProp("CC0 中央门禁电脑", "Props/Prop_Computer.fbx", new Vector3(1.95f, 0.82f, 0.12f), new Vector3(0.42f, 0.36f, 0.34f), -90f);
-            CreateModelProp("CC0 墙面监控终端", "Props/Prop_AccessPoint.fbx", new Vector3(2.95f, -3.25f, 0.12f), new Vector3(0.3f, 0.82f, 0.36f), 90f, true);
-        }
-
-        private void CreateModelFloorPlates()
-        {
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7f + i * 2f;
-                CreateModelProp("CC0 上层地板模块 " + i, i % 2 == 0 ? "Platforms/Platform_3Plates.fbx" : "Platforms/Platform_Squares.fbx", new Vector3(x, 3.65f, 0.02f), new Vector3(0.46f, 0.32f, 0.05f), 0f);
-                CreateModelProp("CC0 下层地板模块 " + i, i % 2 == 0 ? "Platforms/Platform_Metal2.fbx" : "Platforms/Platform_Simple2.fbx", new Vector3(x, -3.9f, 0.02f), new Vector3(0.46f, 0.32f, 0.05f), 0f);
-            }
-        }
-
-        private void EnsureRuntimeSprites()
-        {
-            worldBuilder.EnsureRuntimeSprites();
-        }
-
-        private GameObject CreateSpriteObject(string objectName, Sprite sprite, Color color)
-        {
-            EnsureRuntimeSprites();
-            GameObject spriteObject = new GameObject(objectName);
-            SpriteRenderer renderer = spriteObject.AddComponent<SpriteRenderer>();
-            renderer.sprite = sprite != null ? sprite : roundedRectSprite;
-            renderer.color = color;
-            renderer.sortingOrder = SortingOrderForZ(spriteObject.transform.position.z);
-            return spriteObject;
-        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         private static Sprite CreateRoundedRectSprite(string spriteName, int size, int radius)
         {
@@ -12203,20 +4879,8 @@ namespace GanglandUndercover.Online
             OnlineWorldBuilder.BillboardLabel(labelTransform);
         }
 
-        private string BuildPlayerWorldLabel(OnlinePlayerState state, bool isLocal)
-        {
-            return worldBuilder.BuildPlayerWorldLabel(state, isLocal);
-        }
 
-        private bool ShouldShowPlayerWorldLabel(OnlinePlayerState state, bool isLocal)
-        {
-            return worldBuilder.ShouldShowPlayerWorldLabel(state, isLocal, phase, tacticalMapOpen);
-        }
 
-        private bool IsNearCameraSubject(Vector3 position)
-        {
-            return _cameraRig.IsNearSubject(position, LocalCameraTarget(), tacticalMapOpen, phase);
-        }
 
         private static void SetTextMeshVisible(TextMesh label, bool visible)
         {
@@ -12328,9 +4992,9 @@ namespace GanglandUndercover.Online
 
         private bool IsNearUnreportedBody(Vector3 position)
         {
-            for (int i = 0; i < bodies.Count; i++)
+            for (int i = 0; i < killSystem.bodies.Count; i++)
             {
-                OnlineBodyState body = bodies[i];
+                OnlineBodyState body = killSystem.bodies[i];
 
                 if (!body.Reported && Vector3.Distance(position, body.Position) <= ruleSet.ReportRange * 1.4f)
                 {
@@ -12346,10 +5010,6 @@ namespace GanglandUndercover.Online
             return OnlineWorldBuilder.FindChildTransform(root, names);
         }
 
-        private static void SetChildActive(GameObject root, string childName, bool active)
-        {
-            OnlineWorldBuilder.SetChildActive(root, childName, active);
-        }
 
         private static void SetSortingFromZ(GameObject target)
         {
@@ -12461,12 +5121,10 @@ namespace GanglandUndercover.Online
             localRole = OnlineRole.Unassigned;
             privateRoles.Clear();
             votes.Clear();
-            bodies.Clear();
-            killCooldowns.Clear();
+            killSystem.bodies.Clear();
+            killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
-            botThinkTimers.Clear();
-            botVoteTimers.Clear();
-            botTargets.Clear();
+            _botController?.Clear();
             migrationManager?.ResetState();
             BuildDefaultTasks();
             taskService.EvidenceScore = 0;
@@ -12553,23 +5211,6 @@ namespace GanglandUndercover.Online
         }
 
 
-
-        private static string BotName(int index)
-        {
-            string[] names =
-            {
-                "巡警陈",
-                "技侦周",
-                "线人林",
-                "便衣何",
-                "阿泰",
-                "疤脸",
-                "码头辉",
-                "诊所梁"
-            };
-
-            return names[(index - 1) % names.Length];
-        }
 
         private static string TaskNameFor(int id)
         {
@@ -12660,11 +5301,6 @@ namespace GanglandUndercover.Online
         private Vector3 GetPlayerPosition(ulong clientId)
         {
             return players.TryGetValue(clientId, out OnlinePlayerState state) ? state.Position : Vector3.zero;
-        }
-
-        private static OnlineProfession BotProfession(int index)
-        {
-            return OnlineBotController.BotProfession(index);
         }
 
         /// <summary>
@@ -12859,25 +5495,6 @@ namespace GanglandUndercover.Online
             return count;
         }
 
-        private int CountActiveNamedWorldObjects(string prefix)
-        {
-            if (worldRoot == null)
-            {
-                return 0;
-            }
-
-            int count = 0;
-
-            foreach (Transform child in worldRoot.GetComponentsInChildren<Transform>(true))
-            {
-                if (child.gameObject.activeInHierarchy && child.name.StartsWith(prefix, StringComparison.Ordinal))
-                {
-                    count++;
-                }
-            }
-
-            return count;
-        }
 
         private int CountConfiguredStageTwoRigs()
         {

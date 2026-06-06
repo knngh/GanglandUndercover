@@ -23,9 +23,9 @@ namespace GanglandUndercover.Online
     {
         // ── 常量 ──
         public const ulong BotClientIdBase = 900000UL;
-        private const float BotThinkMinSeconds = 1.2f;
-        private const float BotThinkMaxSeconds = 3.4f;
-        private const float BotInteractDistance = 0.45f;
+        internal const float BotThinkMinSeconds = 1.2f;
+        internal const float BotThinkMaxSeconds = 3.4f;
+        internal const float BotInteractDistance = 0.45f;
         private const float BotTaskCompleteSeconds = 2.5f;   // Bot 任务完成耗时
         private const float BotRepairSeconds = 2.0f;          // Bot 修复耗时
         private const ulong SkipVoteTarget = ulong.MaxValue;
@@ -54,6 +54,15 @@ namespace GanglandUndercover.Online
         public IReadOnlyDictionary<ulong, float> ThinkTimers => _thinkTimers;
         public IReadOnlyDictionary<ulong, float> VoteTimers => _voteTimers;
         public IReadOnlyDictionary<ulong, Vector3> Targets => _targets;
+
+        /// <summary>快照恢复：设置思考计时器</summary>
+        internal void SetThinkTimer(ulong clientId, float value) => _thinkTimers[clientId] = value;
+        /// <summary>快照恢复：设置投票计时器</summary>
+        internal void SetVoteTimer(ulong clientId, float value) => _voteTimers[clientId] = value;
+        /// <summary>快照恢复：设置目标位置</summary>
+        internal void SetTarget(ulong clientId, Vector3 target) => _targets[clientId] = target;
+        /// <summary>快照恢复：清除所有目标</summary>
+        internal void ClearTargets() => _targets.Clear();
 
         /// <summary>Bot 已完成的任务总数</summary>
         public int CompletedTaskCount => _completedTaskCount;
@@ -110,6 +119,13 @@ namespace GanglandUndercover.Online
                 "诊所梁"
             };
             return names[(index - 1) % names.Length];
+        }
+
+        /// <summary>对局开始时初始化 Bot 思考计时器和目标。</summary>
+        internal void InitBotState(ulong clientId)
+        {
+            _targets[clientId] = PickBotTarget(clientId);
+            _thinkTimers[clientId] = UnityEngine.Random.Range(BotThinkMinSeconds, BotThinkMaxSeconds);
         }
 
         // ── Bot 生命周期 ──

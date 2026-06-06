@@ -8,13 +8,9 @@ using UnityEngine.UI;
 namespace GanglandUndercover.Online
 {
     /// <summary>
-    /// 击杀系统（增强版）：
-    /// 1. 当本地 Gang 玩家靠近存活非 Gang 目标 1.5m 内时，显示"击杀"按钮
-    /// 2. 点击后通过 OnlineMatchHud.RequestKill() 执行击杀
-    /// 3. 击杀瞬间屏幕红色闪光
-    /// 4. 击杀冷却期间按钮灰色 + 倒计时数字
-    /// 5. 尸体上方创建 3D 世界空间"报告"按钮
-    /// 6. 冷却 18 秒（Inspector 可配）
+    /// 击杀系统（单一数据源）：
+    /// 持有击杀冷却、尸体、报告冷却等全部击杀相关状态。
+    /// 本地 Gang/Mole 靠近目标时显示击杀按钮，管理冷却与特效。
     /// </summary>
     public sealed class KillSystem : MonoBehaviour
     {
@@ -46,7 +42,17 @@ namespace GanglandUndercover.Online
         [Range(0.1f, 0.6f)]
         [SerializeField] private float flashPeakAlpha = 0.35f;
 
-        // -------- 运行时状态 --------
+        // ══════════════════════════════════════════════════════
+        // 击杀/尸体/报告状态（整个对战系统的唯一数据源）
+        // ══════════════════════════════════════════════════════
+        internal readonly Dictionary<ulong, float> killCooldowns = new Dictionary<ulong, float>();
+        internal readonly List<OnlineBodyState> bodies = new List<OnlineBodyState>();
+        internal readonly Dictionary<int, GameObject> bodyVisuals = new Dictionary<int, GameObject>();
+        internal int nextBodyId;
+        internal float reportCooldownTimer;
+        internal int killCount;
+
+        // -------- 本地击杀 UI 状态 --------
         private OnlineMatchController controller;
         private OnlineMatchHud hud;
         private float currentCooldown;
@@ -118,7 +124,7 @@ namespace GanglandUndercover.Online
             }
 
             // 查找最近可击杀目标
-            if (TryFindNearestVictim(out OnlinePlayerState victim, out ulong victimId))
+            if (TryFindNearestVictimForLocal(out OnlinePlayerState victim, out ulong victimId))
             {
                 currentVictim = victim;
                 currentVictimId = victimId;
@@ -130,6 +136,237 @@ namespace GanglandUndercover.Online
                 SetKillButtonVisible(false);
                 currentVictimId = 0;
             }
+        }
+
+        // ══════════════════════════════════════════════════════
+        // 击杀状态管理 API（供 OnlineMatchController 调用）
+        // ══════════════════════════════════════════════════════
+
+        internal void SetKillCooldown(ulong clientId, float value)
+        {
+            killCooldowns[clientId] = value;
+        }
+
+        internal bool TryGetKillCooldown(ulong clientId, out float value)
+        {
+            return killCooldowns.TryGetValue(clientId, out value);
+        }
+
+        /// <summary>
+        /// 服务器端：查找指定位置附近的最近可击杀目标。
+        /// 使用 controller 的 privateRoles 判断阵营。
+        /// </summary>
+        internal bool TryFindNearestVictim(Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
+        {
+            victimClientId = ulong.MaxValue;
+            victim = default;
+            if (controller == null) return false;
+
+            float bestDistance = controller.RuleSet.KillRange;
+
+            foreach (var pair in controller.Players)
+            {
+                OnlinePlayerState candidate = pair.Value;
+
+                if (!candidate.Alive || controller.GetPrivateRole(pair.Key) == OnlineRole.Gang)
+                {
+                    continue;
+                }
+
+                float distance = Vector3.Distance(position, candidate.Position);
+
+                if (distance <= bestDistance)
+                {
+                    victimClientId = pair.Key;
+                    victim = candidate;
+                    bestDistance = distance;
+                }
+            }
+
+            return victimClientId != ulong.MaxValue;
+        }
+
+        /// <summary>
+        /// 服务器端：查找指定位置附近的最近未报案尸体。
+        /// </summary>
+        internal bool TryFindNearestBody(Vector3 position, out int bodyIndex)
+        {
+            bodyIndex = -1;
+            if (controller == null) return false;
+            float bestDistance = controller.RuleSet.ReportRange;
+
+            for (int i = 0; i < bodies.Count; i++)
+            {
+                OnlineBodyState body = bodies[i];
+
+                if (body.Reported)
+                {
+                    continue;
+                }
+
+                float distance = Vector3.Distance(position, body.Position);
+
+                if (distance <= bestDistance)
+                {
+                    bodyIndex = i;
+                    bestDistance = distance;
+                }
+            }
+
+            return bodyIndex >= 0;
+        }
+
+        internal int CountUnreportedBodies()
+        {
+            int activeBodies = 0;
+
+            foreach (OnlineBodyState body in bodies)
+            {
+                if (!body.Reported)
+                {
+                    activeBodies++;
+                }
+            }
+
+            return activeBodies;
+        }
+
+        internal void RemoveReportedBodies()
+        {
+            for (int i = bodies.Count - 1; i >= 0; i--)
+            {
+                if (bodies[i].Reported)
+                {
+                    bodies.RemoveAt(i);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 服务器端：每帧 tick 击杀冷却。
+        /// </summary>
+        internal void TickKillCooldowns(float deltaTime)
+        {
+            if (controller == null) return;
+
+            List<ulong> keys = new List<ulong>(killCooldowns.Keys);
+
+            foreach (ulong clientId in keys)
+            {
+                killCooldowns[clientId] = Mathf.Max(0f, killCooldowns[clientId] - deltaTime);
+
+                if (controller.Players.TryGetValue(clientId, out OnlinePlayerState state))
+                {
+                    state.KillCooldown = killCooldowns[clientId];
+                    controller.Players[clientId] = state;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 服务器端：tick 报告冷却。
+        /// </summary>
+        internal void TickReportCooldown(float deltaTime)
+        {
+            if (reportCooldownTimer > 0f)
+            {
+                reportCooldownTimer = Mathf.Max(0f, reportCooldownTimer - deltaTime);
+            }
+        }
+
+        /// <summary>
+        /// M4.2: 会议结束后给所有黑帮阵营玩家施加击杀冷却宽容期。
+        /// </summary>
+        internal void ApplyPostMeetingKillGrace(float grace)
+        {
+            if (grace <= 0f || controller == null) return;
+
+            foreach (var kv in controller.Players)
+            {
+                if (!kv.Value.Alive) continue;
+                OnlineRole role = controller.GetPrivateRole(kv.Key);
+                if (role == OnlineRole.Gang || role == OnlineRole.Undercover)
+                {
+                    if (!killCooldowns.ContainsKey(kv.Key))
+                        killCooldowns[kv.Key] = grace;
+                    else if (killCooldowns[kv.Key] < grace)
+                        killCooldowns[kv.Key] = grace;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 创建尸体 GameObject 并添加到 bodyVisuals。
+        /// </summary>
+        internal void CreateBodyVisualFor(OnlineBodyState body)
+        {
+            if (controller == null || controller.WorldBuilder == null) return;
+
+            GameObject visual = controller.WorldBuilder.CreateBodyVisual(body);
+            if (visual != null)
+            {
+                bodyVisuals[body.Id] = visual;
+            }
+        }
+
+        /// <summary>
+        /// 更新所有尸体可视对象的位置，并清理过期可视。
+        /// </summary>
+        internal void UpdateBodyVisuals()
+        {
+            HashSet<int> seen = new HashSet<int>();
+
+            foreach (OnlineBodyState body in bodies)
+            {
+                if (body.Reported)
+                {
+                    continue;
+                }
+
+                seen.Add(body.Id);
+
+                if (!bodyVisuals.TryGetValue(body.Id, out GameObject visual) || visual == null)
+                {
+                    CreateBodyVisualFor(body);
+                    visual = bodyVisuals.TryGetValue(body.Id, out GameObject v) ? v : null;
+                }
+
+                if (visual != null)
+                {
+                    visual.transform.position = body.Position + new Vector3(0f, 0f, 0.11f);
+                    SetSortingFromZ(visual);
+                }
+            }
+
+            RemoveStaleBodyVisuals(seen);
+        }
+
+        internal void ClearBodyVisuals()
+        {
+            foreach (var visual in bodyVisuals.Values)
+            {
+                if (visual != null)
+                {
+                    if (Application.isPlaying)
+                        Destroy(visual);
+                    else
+                        DestroyImmediate(visual);
+                }
+            }
+            bodyVisuals.Clear();
+        }
+
+        /// <summary>
+        /// 清空所有击杀相关状态（对局结束/重置时调用）。
+        /// </summary>
+        internal void ClearAll()
+        {
+            killCooldowns.Clear();
+            bodies.Clear();
+            bodyVisuals.Clear();
+            nextBodyId = 0;
+            reportCooldownTimer = 0f;
+            killCount = 0;
         }
 
         // -------- 核心逻辑 --------
@@ -260,7 +497,6 @@ namespace GanglandUndercover.Online
         private void CheckNewBodies()
         {
             if (controller == null) return;
-            var bodies = controller.Bodies;
             if (bodies == null) return;
 
             foreach (var body in bodies)
@@ -424,7 +660,10 @@ namespace GanglandUndercover.Online
             return localRole == OnlineRole.Gang || localRole == OnlineRole.Mole;
         }
 
-        private bool TryFindNearestVictim(out OnlinePlayerState victim, out ulong victimId)
+        /// <summary>
+        /// 本地端：从本地玩家出发查找最近可击杀目标（用于显示击杀按钮）。
+        /// </summary>
+        private bool TryFindNearestVictimForLocal(out OnlinePlayerState victim, out ulong victimId)
         {
             victim = default;
             victimId = 0;
@@ -503,6 +742,45 @@ namespace GanglandUndercover.Online
 
             tex.Apply();
             return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
+        }
+
+        // ══════════════════════════════════════════════════════
+        // 内部工具
+        // ══════════════════════════════════════════════════════
+
+        private void RemoveStaleBodyVisuals(HashSet<int> seen)
+        {
+            List<int> stale = new List<int>();
+            foreach (var kv in bodyVisuals)
+            {
+                if (!seen.Contains(kv.Key))
+                {
+                    stale.Add(kv.Key);
+                }
+            }
+
+            foreach (int id in stale)
+            {
+                if (bodyVisuals.TryGetValue(id, out GameObject visual) && visual != null)
+                {
+                    if (Application.isPlaying)
+                        Destroy(visual);
+                    else
+                        DestroyImmediate(visual);
+                }
+                bodyVisuals.Remove(id);
+            }
+        }
+
+        private void SetSortingFromZ(GameObject visual)
+        {
+            if (visual == null) return;
+            SpriteRenderer sr = visual.GetComponent<SpriteRenderer>();
+            if (sr == null) sr = visual.GetComponentInChildren<SpriteRenderer>();
+            if (sr != null)
+            {
+                sr.sortingOrder = Mathf.RoundToInt(-visual.transform.position.z * 100f);
+            }
         }
     }
 }

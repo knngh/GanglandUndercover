@@ -6,9 +6,9 @@ namespace GanglandUndercover.Online
     /// <summary>
     /// Camera rig extracted from OnlineMatchController for M2 controller slimming.
     /// Handles camera configuration, follow, and subject switching.
-    /// Pure class — no MonoBehaviour dependency.
+    /// MonoBehaviour — accesses Camera.main directly.
     /// </summary>
-    public class OnlineCameraRig
+    public class OnlineCameraRig : MonoBehaviour
     {
         // ====================================================================
         //  Camera Constants
@@ -127,7 +127,6 @@ namespace GanglandUndercover.Online
         /// All camera rotation is identity — the world is rendered on the XY plane.
         /// </summary>
         public void Configure(
-            Camera camera,
             OnlineMatchPhase phase,
             bool tacticalMapOpen,
             int activeTaskId,
@@ -136,6 +135,7 @@ namespace GanglandUndercover.Online
             ulong localClientId,
             Vector3 localPosition)
         {
+            Camera camera = Camera.main;
             if (camera == null)
             {
                 return;
