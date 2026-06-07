@@ -135,7 +135,7 @@ namespace GanglandUndercover.PlayTests
             Invoke(players, "Add", 12UL, connectedPlayer);
             Invoke(players, "Add", 13UL, otherPlayer);
 
-            object bodies = GetField("bodies");
+            object bodies = GetProp("Bodies");
             Invoke(bodies, "Clear");
             Invoke(bodies, "Add", body);
 

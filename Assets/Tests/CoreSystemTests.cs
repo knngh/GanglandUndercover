@@ -163,7 +163,7 @@ namespace GanglandUndercover.Tests
         {
             Assert.AreEqual("hello", Sanitize("<b>hello</b>"));
             Assert.AreEqual("text", Sanitize("<script>alert('xss')</script>text"));
-            Assert.AreEqual(500, Sanitize(new string('a', 600)).Length);
+            Assert.AreEqual(256, Sanitize(new string('a', 600)).Length);
             Assert.AreEqual("Report body at Dockyard", Sanitize("Report body at Dockyard"));
             Assert.IsNull(Sanitize(null));
             Assert.AreEqual(string.Empty, Sanitize(string.Empty));
