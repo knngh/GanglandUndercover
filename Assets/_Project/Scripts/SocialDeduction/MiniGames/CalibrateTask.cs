@@ -42,7 +42,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             StopAllCoroutines();
             if (canvas != null)
             {
-                Destroy(canvas.gameObject);
+                DestroyRuntimeObject(canvas.gameObject);
                 canvas = null;
             }
             gameObject.SetActive(false);
@@ -237,7 +237,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
                 yield return null;
             }
 
-            Destroy(obj);
+            DestroyRuntimeObject(obj);
         }
 
         private GameObject CreatePanel(GameObject parent, string name, Color color)

@@ -34,6 +34,11 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<ulong, float> _thinkTimers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> _voteTimers = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, Vector3> _targets = new Dictionary<ulong, Vector3>();
+        // 卡住检测：记录 Bot 上次位置和卡住计时
+        private readonly Dictionary<ulong, Vector3> _lastPositions = new Dictionary<ulong, Vector3>();
+        private readonly Dictionary<ulong, float> _stuckTimers = new Dictionary<ulong, float>();
+        private const float StuckDistanceThreshold = 0.03f;
+        private const float StuckTimeBeforeReroute = 5.0f;
 
         // M8.3 新增状态
         private readonly Dictionary<ulong, float> _taskProgress = new Dictionary<ulong, float>();
@@ -561,6 +566,31 @@ namespace GanglandUndercover.Online
         /// </summary>
         private void MoveBotTowardTarget(ulong botId, OnlinePlayerState bot, OnlineRole role, OnlineProfession profession)
         {
+            // 卡住检测：若 Bot 长时间未移动，清除目标迫使其重新寻路
+            if (_lastPositions.TryGetValue(botId, out Vector3 lastPos) &&
+                _stuckTimers.TryGetValue(botId, out float stuckTimer))
+            {
+                if (Vector3.Distance(bot.Position, lastPos) < StuckDistanceThreshold)
+                {
+                    stuckTimer += Time.deltaTime;
+                    if (stuckTimer > StuckTimeBeforeReroute)
+                    {
+                        _targets.Remove(botId);
+                        _stuckTimers[botId] = 0f;
+                        bot.Input = Vector2.zero;
+                        _ctrl.Players[botId] = bot;
+                        return;
+                    }
+                }
+                else
+                {
+                    stuckTimer = 0f;
+                }
+                _stuckTimers[botId] = stuckTimer;
+            }
+            _lastPositions[botId] = bot.Position;
+            if (!_stuckTimers.ContainsKey(botId)) _stuckTimers[botId] = 0f;
+
             Vector3 target = _targets.TryGetValue(botId, out Vector3 t) ? t : bot.Position;
             Vector3 delta = target - bot.Position;
             Vector2 direction = new Vector2(delta.x, delta.y);

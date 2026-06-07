@@ -128,12 +128,58 @@ public static class CIRunner
     public static void BuildAll()
     {
         Debug.Log("[CI] Build starting...");
-        BuildScript.BuildMacOS();
-        BuildScript.BuildWindows();
+        InvokeBuildScriptMethod("BuildMacOS");
+        InvokeBuildScriptMethod("BuildWindows");
         Debug.Log("[CI] Build PASSED");
     }
 
     // ── Helpers ──
+    private static void InvokeBuildScriptMethod(string methodName)
+    {
+        var candidates = new[]
+        {
+            "BuildScript",
+            "GanglandUndercover.Editor.BuildScript",
+        };
+
+        foreach (var typeName in candidates)
+        {
+            var type = FindType(typeName);
+            if (type == null)
+            {
+                continue;
+            }
+
+            var method = type.GetMethod(
+                methodName,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (method == null)
+            {
+                continue;
+            }
+
+            method.Invoke(null, null);
+            return;
+        }
+
+        Debug.LogError($"[CI] Build FAILED — no BuildScript.{methodName} entry point found");
+        EditorApplication.Exit(1);
+    }
+
+    private static System.Type FindType(string typeName)
+    {
+        foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var type = assembly.GetType(typeName);
+            if (type != null)
+            {
+                return type;
+            }
+        }
+
+        return null;
+    }
+
     private class TestCallbacks : ICallbacks
     {
         private readonly System.Action<TestRunResult> onResult;
@@ -154,16 +200,13 @@ public static class CIRunner
                 skipCount = result.SkipCount,
                 resultState = result.FailCount > 0 ? TestRunState.Fail : TestRunState.Pass,
             });
+            onFinish();
         }
 
         public void RunStarted(ITestAdaptor testsToRun) { }
         public void TestStarted(ITestAdaptor test) { }
         public void TestFinished(ITestResultAdaptor result) { }
 
-        public void OnComplete()
-        {
-            onFinish();
-        }
     }
 
     private struct TestRunResult

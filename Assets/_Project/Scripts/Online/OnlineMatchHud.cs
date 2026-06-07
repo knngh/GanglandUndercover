@@ -18,17 +18,17 @@ namespace GanglandUndercover.Online
             Services
         }
 
-        private static readonly Color BackdropColor = new Color(0.015f, 0.019f, 0.021f, 0.18f);
-        private static readonly Color DockColor = new Color(0.035f, 0.045f, 0.048f, 0.88f);
-        private static readonly Color PanelColor = new Color(0.055f, 0.066f, 0.068f, 0.92f);
-        private static readonly Color PanelDeepColor = new Color(0.027f, 0.034f, 0.038f, 0.96f);
-        private static readonly Color TextColor = new Color(0.92f, 0.9f, 0.82f, 1f);
-        private static readonly Color MutedTextColor = new Color(0.63f, 0.68f, 0.66f, 1f);
-        private static readonly Color BlueAccent = new Color(0.08f, 0.62f, 0.82f, 1f);
-        private static readonly Color AmberAccent = new Color(0.86f, 0.65f, 0.13f, 1f);
-        private static readonly Color RedAccent = new Color(0.78f, 0.14f, 0.1f, 1f);
-        private static readonly Color GreenAccent = new Color(0.12f, 0.66f, 0.34f, 1f);
-        private static readonly Color VerticalSliceAccent = new Color(0.9f, 0.48f, 0.12f, 0.9f);
+        private static readonly Color BackdropColor = UIStyle.BgDeep;
+        private static readonly Color DockColor = UIStyle.BgDock;
+        private static readonly Color PanelColor = UIStyle.BgPanel;
+        private static readonly Color PanelDeepColor = UIStyle.BgOverlay;
+        private static readonly Color TextColor = UIStyle.TextPrimary;
+        private static readonly Color MutedTextColor = UIStyle.TextSecondary;
+        private static readonly Color BlueAccent = UIStyle.NeonBlue;
+        private static readonly Color AmberAccent = UIStyle.NeonAmber;
+        private static readonly Color RedAccent = UIStyle.NeonRed;
+        private static readonly Color GreenAccent = UIStyle.NeonGreen;
+        private static readonly Color VerticalSliceAccent = UIStyle.NeonPurple;
 
         private readonly List<GameObject> voteButtons = new List<GameObject>();
         private readonly List<GameObject> mapMarkers = new List<GameObject>();
@@ -454,14 +454,28 @@ namespace GanglandUndercover.Online
             hudBackdrop = CreatePanel("HUD Backdrop", transform, BackdropColor);
             Stretch(hudBackdrop.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
+            // CRT scanline overlay on full HUD
+            UIStyle.AddScanlines(transform, 0.03f);
+
+            // Header — styled with neon-blue bottom border accent
             Transform header = CreateHorizontalPanel(
                 "Header",
                 transform,
-                new Color(0.022f, 0.031f, 0.034f, 0.93f),
+                new Color(0.04f, 0.05f, 0.07f, 0.94f),
                 new Vector2(0.015f, 0.915f),
                 new Vector2(0.985f, 0.985f),
-                new RectOffset(16, 16, 10, 10),
+                new RectOffset(20, 20, 8, 8),
                 14f);
+            // Header bottom glow line
+            GameObject headerLine = new GameObject("HeaderGlow", typeof(RectTransform), typeof(Image));
+            headerLine.transform.SetParent(header, false);
+            RectTransform hlRt = headerLine.GetComponent<RectTransform>();
+            hlRt.anchorMin = new Vector2(0, 0);
+            hlRt.anchorMax = new Vector2(1, 0);
+            hlRt.sizeDelta = new Vector2(0, 2f);
+            hlRt.anchoredPosition = new Vector2(0, -2f);
+            headerLine.GetComponent<Image>().color = UIStyle.NeonBlue;
+            headerLine.GetComponent<Image>().raycastTarget = false;
             headerGroup = header.gameObject;
             titleText = CreateText("Title", header, 24, TextAnchor.MiddleLeft, TextColor);
             AddLayout(titleText.gameObject, 0f, 0f, 2f);
@@ -506,11 +520,21 @@ namespace GanglandUndercover.Online
             Transform footer = CreateHorizontalPanel(
                 "Footer",
                 transform,
-                new Color(0.02f, 0.026f, 0.028f, 0.9f),
+                new Color(0.04f, 0.05f, 0.07f, 0.92f),
                 new Vector2(0.015f, 0.015f),
                 new Vector2(0.985f, 0.078f),
                 new RectOffset(14, 14, 8, 8),
                 10f);
+            // Footer top accent line
+            GameObject footerLine = new GameObject("FooterGlow", typeof(RectTransform), typeof(Image));
+            footerLine.transform.SetParent(footer, false);
+            RectTransform flRt = footerLine.GetComponent<RectTransform>();
+            flRt.anchorMin = new Vector2(0, 1);
+            flRt.anchorMax = new Vector2(1, 1);
+            flRt.sizeDelta = new Vector2(0, 1.5f);
+            flRt.anchoredPosition = new Vector2(0, 1.5f);
+            footerLine.GetComponent<Image>().color = UIStyle.TextDim;
+            footerLine.GetComponent<Image>().raycastTarget = false;
             footerGroup = footer.gameObject;
             footerText = CreateText("Footer Text", footer, 14, TextAnchor.MiddleLeft, MutedTextColor);
             AddLayout(footerText.gameObject, 0f, 0f, 1f);
@@ -1009,7 +1033,7 @@ namespace GanglandUndercover.Online
             meetingTitleText.text = Localization.T("meeting.title") + " | " + (controller.Phase == OnlineMatchPhase.Meeting ? Localization.T("meeting.discuss") : Localization.T("meeting.vote"))
                 + " " + Mathf.CeilToInt(controller.PhaseTimer) + "s";
             meetingBodyText.text = Localization.T("meeting.reason") + controller.LastMeetingReason
-                + "\n" + Localization.T("meeting.evidence") + controller.MeetingEvidenceDigest
+                + "\n" + Localization.T("meeting.evidence") + controller.MeetingEvidenceDossier
                 + "\n" + Localization.T("meeting.tally") + controller.VoteTallySummary
                 + "\n" + Localization.T("meeting.voice") + controller.VoiceHudLine
                 + "\n" + Localization.T("meeting.outcome") + controller.LastVoteOutcome;
@@ -1032,6 +1056,39 @@ namespace GanglandUndercover.Online
                 : MutedTextColor;
 
             mapTitleText.text = Localization.T("map.title") + " | " + controller.MatchTimeText + " | 证据 " + controller.EvidenceScore + "/" + controller.EvidenceTarget;
+
+            // CJK-aware font fallback: after all text is set, apply best font per text
+            StylizeAllTexts();
+        }
+
+        private void StylizeAllTexts()
+        {
+            UIStyle.StylizeText(titleText);
+            UIStyle.StylizeText(phaseText);
+            UIStyle.StylizeText(voiceText);
+            UIStyle.StylizeText(statusText);
+            UIStyle.StylizeText(connectionStatusText);
+            UIStyle.StylizeText(lobbyStatusText);
+            UIStyle.StylizeText(actionStatusText);
+            UIStyle.StylizeText(resultStatusText);
+            UIStyle.StylizeText(centerTitleText);
+            UIStyle.StylizeText(centerBodyText);
+            UIStyle.StylizeText(notebookTitleText);
+            UIStyle.StylizeText(notebookBodyText);
+            UIStyle.StylizeText(compactTopText);
+            UIStyle.StylizeText(compactActionBarText);
+            UIStyle.StylizeText(compactPromptText);
+            UIStyle.StylizeText(compactAbilityText);
+            UIStyle.StylizeText(footerText);
+            UIStyle.StylizeText(meetingTitleText);
+            UIStyle.StylizeText(meetingBodyText);
+            UIStyle.StylizeText(resultTitleText);
+            UIStyle.StylizeText(resultBodyText);
+            UIStyle.StylizeText(taskTitleText);
+            UIStyle.StylizeText(taskBodyText);
+            UIStyle.StylizeText(taskFeedbackText);
+            UIStyle.StylizeText(mapTitleText);
+            UIStyle.StylizeText(mapLegendText);
         }
 
         private void RefreshProgressBars()
@@ -1116,7 +1173,7 @@ namespace GanglandUndercover.Online
                 case OnlineMatchPhase.Meeting:
                 case OnlineMatchPhase.Voting:
                     return "会议原因: " + controller.LastMeetingReason
-                        + "\n证据墙: " + controller.MeetingEvidenceDigest
+                        + "\n证据墙: " + controller.MeetingEvidenceDossier
                         + "\n票型: " + controller.VoteTallySummary
                         + "\n语音: " + controller.VoiceHudLine;
                 case OnlineMatchPhase.Result:
@@ -1728,14 +1785,16 @@ namespace GanglandUndercover.Online
             GameObject buttonObject = new GameObject(label + " Button", typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
             Image image = buttonObject.GetComponent<Image>();
-            image.color = new Color(0.17f, 0.19f, 0.18f, 1f);
+            image.color = new Color(0.12f, 0.14f, 0.16f, 1f);
 
             Button button = buttonObject.GetComponent<Button>();
             ColorBlock colors = button.colors;
-            colors.normalColor = new Color(0.17f, 0.19f, 0.18f, 1f);
-            colors.highlightedColor = new Color(0.24f, 0.29f, 0.28f, 1f);
-            colors.pressedColor = new Color(0.09f, 0.12f, 0.13f, 1f);
-            colors.disabledColor = new Color(0.09f, 0.1f, 0.1f, 0.58f);
+            colors.normalColor      = new Color(0.12f, 0.14f, 0.16f, 1f);
+            colors.highlightedColor = new Color(0.18f, 0.55f, 0.72f, 0.82f);  // neon blue glow on hover
+            colors.pressedColor     = new Color(0.06f, 0.08f, 0.10f, 1f);
+            colors.disabledColor    = new Color(0.08f, 0.09f, 0.10f, 0.45f);
+            colors.colorMultiplier  = 1f;
+            colors.fadeDuration     = 0.1f;
             button.colors = colors;
             button.onClick.AddListener(onClick);
 
@@ -1937,7 +1996,7 @@ namespace GanglandUndercover.Online
 
         private static void ConfigureText(Text text, int fontSize, TextAnchor alignment, Color color)
         {
-            text.font = LoadBuiltinFont();
+            text.font = UIStyle.PixelFont;
             text.fontSize = fontSize;
             text.alignment = alignment;
             text.color = color;

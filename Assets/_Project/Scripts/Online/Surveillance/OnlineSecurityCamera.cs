@@ -79,8 +79,8 @@ namespace GanglandUndercover.Online.Surveillance
         /// <summary>
         /// 客户端请求开始观看。
         /// </summary>
-        [ServerRpc(RequireOwnership = false)]
-        public void StartWatchingServerRpc(ServerRpcParams rpcParams = default)
+        [Rpc(SendTo.Server)]
+        public void StartWatchingServerRpc(RpcParams rpcParams = default)
         {
             ulong watcherId = rpcParams.Receive.SenderClientId;
             _watchingPlayers.Add(watcherId);
@@ -89,8 +89,8 @@ namespace GanglandUndercover.Online.Surveillance
         /// <summary>
         /// 客户端请求停止观看。
         /// </summary>
-        [ServerRpc(RequireOwnership = false)]
-        public void StopWatchingServerRpc(ServerRpcParams rpcParams = default)
+        [Rpc(SendTo.Server)]
+        public void StopWatchingServerRpc(RpcParams rpcParams = default)
         {
             ulong watcherId = rpcParams.Receive.SenderClientId;
             _watchingPlayers.Remove(watcherId);

@@ -29,7 +29,7 @@ namespace GanglandUndercover.Online
 
         public bool IsUndercover(ulong clientId)
         {
-            return players.TryGetValue(clientId, out var s) && s.Role == OnlineRole.Undercover;
+            return GetPrivateRole(clientId) == OnlineRole.Undercover;
         }
 
         public bool HasBetrayed(ulong clientId) => _undercoverBetrayed.Contains(clientId);
@@ -101,7 +101,7 @@ namespace GanglandUndercover.Online
 
         public bool IsMole(ulong clientId)
         {
-            return players.TryGetValue(clientId, out var s) && s.Role == OnlineRole.Mole;
+            return GetPrivateRole(clientId) == OnlineRole.Mole;
         }
 
         public bool IsMoleExposed(ulong clientId) => _moleExposed.Contains(clientId);
@@ -134,7 +134,7 @@ namespace GanglandUndercover.Online
             // 选择一个活着的警察作为目标
             foreach (var kv in players)
             {
-                if (kv.Value.Role == OnlineRole.Police && kv.Value.Alive && kv.Key != moleId)
+                if (GetPrivateRole(kv.Key) == OnlineRole.Police && kv.Value.Alive && kv.Key != moleId)
                 {
                     _moleHitList[moleId] = kv.Key;
                     return kv.Key;

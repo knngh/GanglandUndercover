@@ -50,7 +50,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             StopAllCoroutines();
             if (canvas != null)
             {
-                Destroy(canvas.gameObject);
+                DestroyRuntimeObject(canvas.gameObject);
                 canvas = null;
             }
             gameObject.SetActive(false);

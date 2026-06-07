@@ -49,6 +49,15 @@ namespace GanglandUndercover.Online
         // --- M2 refactoring: underworld passage count passed by controller ---
         private int _underworldPassageCount;
 
+        // --- Constants migrated from controller ---
+        private const string AssetStoreResourceRoot = "AssetStore/";
+
+        // --- Task list (set from controller after Initialize) ---
+        private IReadOnlyList<OnlineTaskState> _tasks;
+
+        // --- Backward compat: migrated code uses worldRoot (no underscore) ---
+        private GameObject worldRoot => _worldRoot;
+
         // --- Public accessors ---
         public GameObject WorldRoot => _worldRoot;
         public OnlineMapService MapService => _mapService;
@@ -64,6 +73,25 @@ namespace GanglandUndercover.Online
         public int ModelPrefabCacheCount => _modelPrefabCache.Count;
         public int RuntimeMeshMaterialCount => _runtimeMeshMaterials.Count;
 
+        // Tiled floor/wall CC0 sprites (loaded on demand)
+        private Sprite _floorTileSprite;
+        private Sprite _wallTileSprite;
+        private Sprite FloorTileSprite => _floorTileSprite ?? (_floorTileSprite = LoadFloorTile());
+        private Sprite WallTileSprite  => _wallTileSprite  ?? (_wallTileSprite  = LoadWallTile());
+
+        private Sprite LoadFloorTile()
+        {
+            var tex = Resources.Load<Texture2D>("Sprites/Tilesets/Harbour/floors/cargo-bay");
+            if (tex != null) { tex.filterMode = FilterMode.Point; return Sprite.Create(tex, new Rect(0,0,tex.width,tex.height), new Vector2(0.5f,0.5f), 32f); }
+            return _roundedRectSprite;
+        }
+        private Sprite LoadWallTile()
+        {
+            var tex = Resources.Load<Texture2D>("Sprites/Tilesets/Harbour/walls/indtech_000_000");
+            if (tex != null) { tex.filterMode = FilterMode.Point; return Sprite.Create(tex, new Rect(0,0,tex.width,tex.height), new Vector2(0.5f,0.5f), 32f); }
+            return _roundedRectSprite;
+        }
+
         public void Initialize(GameObject worldRoot, OnlineMapService mapService,
             List<Rect> solidObstacleRects, List<Rect> walkableRects, List<TextMesh> worldLabels,
             int underworldPassageCount = 8)
@@ -74,6 +102,353 @@ namespace GanglandUndercover.Online
             _walkableRects = walkableRects;
             _worldLabels = worldLabels;
             _underworldPassageCount = underworldPassageCount;
+        }
+
+        public void SetTasks(IReadOnlyList<OnlineTaskState> taskList)
+        {
+            _tasks = taskList;
+        }
+
+        private static int TaskTemplateMode(int taskId)
+        {
+            switch (taskId)
+            {
+                case 0: case 6: case 13: case 21: return 0;
+                case 1: case 10: case 20: case 23: return 1;
+                case 2: case 7: case 12: case 14: case 24: return 2;
+                case 3: case 9: case 15: case 19: return 3;
+                case 4: case 11: case 16: case 22: return 4;
+                default: return 5;
+            }
+        }
+
+        private void CreateVerticalSliceProductionLayer()
+        {
+            CreateVerticalSliceGroundPlan();
+            CreateVerticalSliceRoomIdentityLayer();
+            CreateVerticalSliceTaskMiniGameLayer();
+            CreateVerticalSliceStageOneFirstScreenLayer();
+            CreateVerticalSliceStageOneEntranceLayer();
+            CreateVerticalSliceStageOneSightlineLayer();
+            CreateVerticalSliceStageOneMeetingAndBlackoutLayer();
+            CreateVerticalSliceStageOneGameplayAnchorLayer();
+            CreateVerticalSliceStageOneCameraShotLayer();
+            CreateVerticalSliceStageOneEditableAnchorLayer();
+        }
+
+        private void CreateVerticalSliceGroundPlan()
+        {
+            Color asphalt = new Color(0.085f, 0.1f, 0.102f, 1f);
+            Color sidewalk = new Color(0.18f, 0.19f, 0.18f, 1f);
+            Color wetReflection = new Color(0.08f, 0.18f, 0.2f, 0.72f);
+            Color guide = new Color(0.82f, 0.68f, 0.2f, 1f);
+
+            CreateShapeProp("VerticalSlice Ground central wet plaza", RoundedRectSprite, new Vector3(-1.25f, -0.56f, -0.31f), new Vector3(5.4f, 2.58f, 0.08f), asphalt);
+            CreateShapeProp("VerticalSlice Ground meeting ring stone apron", CircleSprite, new Vector3(-1.18f, -0.72f, -0.285f), new Vector3(1.62f, 1.18f, 0.08f), new Color(0.28f, 0.3f, 0.28f, 1f));
+            CreateShapeProp("VerticalSlice Ground meeting ring wet core", CircleSprite, new Vector3(-1.18f, -0.72f, -0.27f), new Vector3(1.05f, 0.78f, 0.08f), wetReflection);
+            CreateShapeProp("VerticalSlice Ground cctv corridor", RoundedRectSprite, new Vector3(-6.6f, 0.68f, -0.3f), new Vector3(3.5f, 1.02f, 0.08f), sidewalk);
+            CreateShapeProp("VerticalSlice Ground cha chaan teng threshold", RoundedRectSprite, new Vector3(-4.42f, 1.34f, -0.29f), new Vector3(2.55f, 1.24f, 0.08f), new Color(0.26f, 0.16f, 0.08f, 1f));
+            CreateShapeProp("VerticalSlice Ground night market bend", RoundedRectSprite, new Vector3(-0.4f, 2.56f, -0.3f), new Vector3(4.4f, 1.08f, 0.08f), new Color(0.19f, 0.12f, 0.1f, 1f));
+            CreateRotatedProp("VerticalSlice Ground non-square diagonal market cut", new Vector3(1.72f, 2.05f, -0.295f), new Vector3(2.6f, 0.78f, 0.08f), new Color(0.16f, 0.12f, 0.1f, 1f), -18f);
+            CreateShapeProp("VerticalSlice Ground alley approach", RoundedRectSprite, new Vector3(3.88f, -1.25f, -0.305f), new Vector3(3.7f, 0.96f, 0.08f), new Color(0.13f, 0.11f, 0.1f, 1f));
+            CreateRotatedProp("VerticalSlice Ground service lane diagonal", new Vector3(5.45f, 0.42f, -0.302f), new Vector3(2.95f, 0.7f, 0.08f), new Color(0.11f, 0.13f, 0.13f, 1f), 22f);
+
+            RegisterWalkableArea(new Vector3(-1.25f, -0.56f, 0f), new Vector3(5.7f, 2.78f, 0.08f));
+            RegisterWalkableArea(new Vector3(-6.6f, 0.68f, 0f), new Vector3(3.8f, 1.18f, 0.08f));
+            RegisterWalkableArea(new Vector3(-4.42f, 1.34f, 0f), new Vector3(2.85f, 1.44f, 0.08f));
+            RegisterWalkableArea(new Vector3(-0.4f, 2.56f, 0f), new Vector3(4.65f, 1.24f, 0.08f));
+            RegisterWalkableArea(new Vector3(3.88f, -1.25f, 0f), new Vector3(3.9f, 1.12f, 0.08f));
+            RegisterWalkableArea(new Vector3(5.45f, 0.42f, 0f), new Vector3(3.2f, 0.86f, 0.08f));
+
+            for (int i = 0; i < 13; i++)
+            {
+                float x = -3.8f + i * 0.43f;
+                CreateProp("VerticalSlice Ground plaza paving joint " + i, new Vector3(x, -0.02f + Mathf.Sin(i * 0.8f) * 0.08f, -0.18f), new Vector3(0.22f, 0.025f, 0.04f), new Color(0.36f, 0.38f, 0.34f, 0.82f));
+            }
+
+            for (int i = 0; i < 10; i++)
+            {
+                CreateRotatedProp("VerticalSlice Ground yellow route paint " + i, new Vector3(-5.35f + i * 0.86f, 0.42f + Mathf.Sin(i * 0.65f) * 0.12f, -0.16f), new Vector3(0.42f, 0.035f, 0.04f), guide, i % 2 == 0 ? -6f : 8f);
+            }
+        }
+
+        private void CreateVerticalSliceRoomIdentityLayer()
+        {
+            (string id, string label, Vector3 center, Vector3 size, Color color)[] rooms =
+            {
+                ("CCTV", "监控室", new Vector3(-8.88f, 1.72f, 0.06f), new Vector3(2.35f, 1.48f, 0.62f), new Color(0.08f, 0.15f, 0.2f, 1f)),
+                ("Cafe", "茶餐厅", new Vector3(-4.64f, 1.58f, 0.06f), new Vector3(2.52f, 1.46f, 0.54f), new Color(0.32f, 0.18f, 0.08f, 1f)),
+                ("Market", "夜市", new Vector3(-0.72f, 2.88f, 0.06f), new Vector3(3.64f, 1.3f, 0.46f), new Color(0.28f, 0.12f, 0.08f, 1f)),
+                ("Alley", "后巷", new Vector3(4.92f, -1.48f, 0.06f), new Vector3(2.72f, 1.34f, 0.5f), new Color(0.17f, 0.12f, 0.09f, 1f)),
+                ("Power", "电房", new Vector3(7.88f, 4.82f, 0.06f), new Vector3(2.28f, 1.52f, 0.66f), new Color(0.1f, 0.17f, 0.22f, 1f)),
+                ("Meeting", "集合", new Vector3(-1.18f, -0.72f, 0.05f), new Vector3(2.15f, 1.42f, 0.38f), new Color(0.12f, 0.19f, 0.2f, 1f))
+            };
+
+            for (int i = 0; i < rooms.Length; i++)
+            {
+                CreateVerticalSliceRoomShell(rooms[i].id, rooms[i].label, rooms[i].center, rooms[i].size, rooms[i].color);
+            }
+
+            CreateAssetStoreProp("VerticalSlice Room 茶餐厅 free building front", AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Coffee Shop", new Vector3(-4.72f, 2.4f, 0.12f), new Vector3(1.1f, 0.58f, 0.72f), -3f, false);
+            CreateAssetStoreProp("VerticalSlice Room 夜市 restaurant front", AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Restaurant", new Vector3(-1.02f, 3.82f, 0.12f), new Vector3(1.38f, 0.58f, 0.76f), 4f, false);
+            CreateSolidAssetStoreProp("VerticalSlice Room 后巷 garage front", AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Auto Service", new Vector3(6.02f, -2.26f, 0.12f), new Vector3(1.18f, 0.62f, 0.78f), -8f, false);
+            CreateSolidAssetStoreProp("VerticalSlice Room 电房 lowpoly utility front", AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Buildings/Building_Factory", new Vector3(8.5f, 5.85f, 0.14f), new Vector3(1.22f, 0.66f, 0.86f), 5f, false);
+        }
+
+        private void CreateVerticalSliceRoomShell(string id, string label, Vector3 center, Vector3 size, Color color)
+        {
+            Color wall = new Color(0.045f, 0.052f, 0.055f, 1f);
+            Color trim = new Color(0.64f, 0.58f, 0.42f, 1f);
+            float halfWidth = size.x * 0.5f;
+            float halfHeight = size.y * 0.5f;
+
+            CreateShapeProp("VerticalSlice Room " + id + " playable shell floor", RoundedRectSprite, center + new Vector3(0f, 0f, -0.11f), size, Darken(color, 0.82f));
+            CreateMeshBoxProp("VerticalSlice Room " + id + " back wall volume", center + new Vector3(0f, halfHeight, 0.28f), new Vector3(size.x, 0.1f, size.z), wall);
+            CreateMeshBoxProp("VerticalSlice Room " + id + " left return wall", center + new Vector3(-halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y, size.z * 0.86f), wall);
+            CreateMeshBoxProp("VerticalSlice Room " + id + " right return wall", center + new Vector3(halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y * 0.72f, size.z * 0.8f), wall);
+            CreateMeshBoxProp("VerticalSlice Room " + id + " gold trim back", center + new Vector3(0f, halfHeight - 0.08f, 0.56f), new Vector3(size.x * 0.78f, 0.04f, 0.06f), trim);
+            CreateMeshBoxProp("VerticalSlice Room " + id + " sign board " + label, center + new Vector3(0f, halfHeight - 0.15f, 0.72f), new Vector3(Mathf.Min(size.x * 0.55f, 1.2f), 0.045f, 0.18f), new Color(0.08f, 0.64f, 0.82f, 1f));
+            RegisterWalkableArea(center, new Vector3(size.x * 0.82f, size.y * 0.78f, 0.08f));
+            CreateWorldLabelAt(label, MapService.ScaleMapPosition(center + new Vector3(0f, halfHeight + 0.12f, -0.08f)), 0.065f);
+        }
+
+        private void CreateVerticalSliceTaskMiniGameLayer()
+        {
+            (string id, Vector3 position, Color accent)[] tasks =
+            {
+                ("CCTV", new Vector3(-9.45f, 2.12f, 0.18f), new Color(0.08f, 0.62f, 0.86f, 1f)),
+                ("Recorder", new Vector3(-4.8f, 1.32f, 0.18f), new Color(0.92f, 0.48f, 0.12f, 1f)),
+                ("Breaker", new Vector3(8.72f, 5.18f, 0.18f), new Color(0.96f, 0.76f, 0.12f, 1f)),
+                ("Plate", new Vector3(1.74f, -3.62f, 0.18f), new Color(0.36f, 0.72f, 0.95f, 1f))
+            };
+
+            string[] propPaths =
+            {
+                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Screen_01",
+                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Keypad_01",
+                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Papers_03",
+                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Table_01",
+                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Switch_01",
+                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Police Car"
+            };
+
+            for (int taskIndex = 0; taskIndex < tasks.Length; taskIndex++)
+            {
+                GameObject root = CreateVerticalSliceTaskRoot("VerticalSlice Task " + tasks[taskIndex].id + " minigame set", tasks[taskIndex].position, tasks[taskIndex].accent);
+
+                for (int i = 0; i < 6; i++)
+                {
+                    Vector3 offset = new Vector3(-0.52f + i * 0.21f, i % 2 == 0 ? 0.24f : -0.24f, 0.1f);
+                    CreateAssetStoreProp("VerticalSlice Task " + tasks[taskIndex].id + " physical prop " + i, propPaths[(taskIndex + i) % propPaths.Length], tasks[taskIndex].position + offset, new Vector3(0.22f, 0.18f, 0.24f), i * 14f, false);
+                }
+
+                for (int i = 0; i < 5; i++)
+                {
+                    CreateMeshBoxChild(root.transform, "VerticalSlice Task " + tasks[taskIndex].id + " minigame feedback segment " + i, new Vector3(-0.38f + i * 0.19f, 0.38f, 0.48f), new Vector3(0.12f, 0.028f, 0.08f + i % 2 * 0.05f), i % 2 == 0 ? tasks[taskIndex].accent : Darken(tasks[taskIndex].accent, 0.55f));
+                }
+            }
+        }
+
+        private GameObject CreateVerticalSliceTaskRoot(string name, Vector3 position, Color accent)
+        {
+            GameObject root = new GameObject(name);
+            root.transform.SetParent(_worldRoot.transform, false);
+            root.transform.position = MapService.ScaleMapPosition(position);
+            CreateMeshBoxChild(root.transform, "VerticalSlice Task physical base", new Vector3(0f, 0f, 0.12f), new Vector3(0.96f, 0.62f, 0.18f), new Color(0.055f, 0.065f, 0.07f, 1f));
+            CreateMeshBoxChild(root.transform, "VerticalSlice Task lit face", new Vector3(0f, 0.29f, 0.3f), new Vector3(0.72f, 0.035f, 0.2f), accent);
+            CreateMeshBoxChild(root.transform, "VerticalSlice Task interaction halo", new Vector3(0f, 0f, -0.02f), new Vector3(1.08f, 0.72f, 0.035f), new Color(accent.r, accent.g, accent.b, 0.22f));
+            SetSortingFromZ(root);
+            return root;
+        }
+
+        private void CreateVerticalSliceStageOneFirstScreenLayer()
+        {
+            Color shadow = new Color(0.018f, 0.022f, 0.024f, 0.82f);
+            Color wetBlue = new Color(0.05f, 0.2f, 0.24f, 0.68f);
+            Color tileA = new Color(0.14f, 0.148f, 0.138f, 1f);
+            Color tileB = new Color(0.1f, 0.115f, 0.11f, 1f);
+            Color brass = new Color(0.82f, 0.58f, 0.14f, 1f);
+
+            for (int i = 0; i < 18; i++)
+            {
+                float x = -6.2f + i * 0.72f;
+                float y = -1.38f + Mathf.Sin(i * 0.74f) * 0.42f;
+                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen wet route reflection " + i, new Vector3(x, y, -0.17f), new Vector3(0.46f, 0.03f, 0.035f), i % 2 == 0 ? wetBlue : Darken(wetBlue, 0.78f), i % 2 == 0 ? -11f : 17f);
+            }
+
+            for (int i = 0; i < 18; i++)
+            {
+                float x = -5.5f + i * 0.62f;
+                float y = i % 2 == 0 ? 0.28f : -0.52f;
+                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen brass curb marker " + i, new Vector3(x, y, -0.08f), new Vector3(0.38f, 0.026f, 0.032f), brass, i % 2 == 0 ? -9f : 12f);
+            }
+
+            for (int i = 0; i < 12; i++)
+            {
+                Vector3 position = new Vector3(-6.35f + i * 1.12f, 2.22f + Mathf.Sin(i * 0.48f) * 0.42f, 0.66f);
+                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen authored awning shadow " + i, position, new Vector3(1.42f, 0.12f, 0.28f), shadow, i % 2 == 0 ? -6f : 9f);
+            }
+
+            for (int i = 0; i < 12; i++)
+            {
+                Vector3 position = new Vector3(-4.7f + i * 0.82f, 1.92f + Mathf.Sin(i * 0.55f) * 0.28f, 0.58f);
+                Color color = i % 3 == 0 ? new Color(0.04f, 0.7f, 0.94f, 1f) : i % 3 == 1 ? new Color(0.92f, 0.18f, 0.42f, 1f) : brass;
+                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen hanging neon strip " + i, position, new Vector3(0.42f, 0.034f, 0.12f), color, i % 2 == 0 ? -5f : 7f);
+            }
+
+            for (int i = 0; i < 8; i++)
+            {
+                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen non-square paving slab " + i, new Vector3(-3.85f + i * 1.15f, -1.02f + Mathf.Sin(i) * 0.56f, -0.245f), new Vector3(1.05f, 0.32f, 0.045f), i % 2 == 0 ? tileA : tileB, i % 2 == 0 ? -12f : 8f);
+            }
+        }
+
+        private void CreateVerticalSliceStageOneEntranceLayer()
+        {
+            foreach (VerticalSliceStageOneAnchorSpec spec in VerticalSliceStageOneAnchorCatalog.Specs)
+            {
+                if (spec.Category != "Room") continue;
+                CreateVerticalSliceStageOneEntrance(spec);
+            }
+        }
+
+        private void CreateVerticalSliceStageOneEntrance(VerticalSliceStageOneAnchorSpec spec)
+        {
+            Color frame = new Color(0.032f, 0.04f, 0.042f, 1f);
+            Color glass = new Color(0.08f, 0.18f, 0.22f, 0.72f);
+            Vector3 center = spec.DesignPosition;
+            Vector3 size = new Vector3(spec.Footprint.x, 0.34f, 0.56f);
+            float sideOffset = Mathf.Max(0.22f, size.x * 0.48f);
+
+            CreateMeshBoxProp("VerticalSlice Stage1 Entrance " + spec.Id + " threshold floor", center + new Vector3(0f, 0f, -0.14f), new Vector3(size.x * 1.05f, size.y * 0.72f, 0.05f), Darken(spec.DebugColor, 0.38f));
+            CreateSolidMeshBoxProp("VerticalSlice Stage1 Entrance " + spec.Id + " left jamb", center + new Vector3(-sideOffset, 0f, 0.18f), new Vector3(0.12f, size.y * 0.86f, size.z), frame);
+            CreateSolidMeshBoxProp("VerticalSlice Stage1 Entrance " + spec.Id + " right jamb", center + new Vector3(sideOffset, 0f, 0.18f), new Vector3(0.12f, size.y * 0.86f, size.z), frame);
+            CreateMeshBoxProp("VerticalSlice Stage1 Entrance " + spec.Id + " header", center + new Vector3(0f, size.y * 0.42f, 0.48f), new Vector3(size.x, 0.065f, 0.14f), frame);
+            CreateMeshBoxProp("VerticalSlice Stage1 Entrance " + spec.Id + " glass glow", center + new Vector3(0f, size.y * 0.12f, 0.36f), new Vector3(size.x * 0.72f, 0.035f, size.z * 0.34f), glass);
+            CreateMeshBoxProp("VerticalSlice Stage1 Entrance " + spec.Id + " role color strip", center + new Vector3(0f, size.y * 0.49f, 0.66f), new Vector3(size.x * 0.64f, 0.034f, 0.055f), spec.DebugColor);
+        }
+
+        private void CreateVerticalSliceStageOneSightlineLayer()
+        {
+            Color steel = new Color(0.035f, 0.044f, 0.048f, 1f);
+            Color blue = new Color(0.06f, 0.42f, 0.88f, 1f);
+            Color red = new Color(0.82f, 0.08f, 0.06f, 1f);
+            Color amber = new Color(0.9f, 0.62f, 0.12f, 1f);
+
+            for (int i = 0; i < 14; i++)
+            {
+                float x = -7.6f + i * 1.18f;
+                float y = i % 2 == 0 ? -0.1f + Mathf.Sin(i) * 0.7f : 2.6f + Mathf.Sin(i * 0.6f) * 0.4f;
+                Vector3 center = new Vector3(x, y, 0.32f);
+                Vector3 scale = i % 2 == 0 ? new Vector3(1.0f, 0.14f, 0.48f) : new Vector3(0.16f, 1.0f, 0.48f);
+                float rotation = i % 2 == 0 ? -12f : 10f;
+                CreateSolidMeshBoxProp("VerticalSlice Stage1 Sightline authored blocker " + i, center, scale, steel, rotation);
+                CreateMeshBoxProp("VerticalSlice Stage1 Sightline blocker status light " + i, center + new Vector3(0f, 0.1f, 0.32f), new Vector3(Mathf.Max(0.18f, scale.x * 0.52f), 0.03f, 0.05f), i % 3 == 0 ? blue : i % 3 == 1 ? red : amber, rotation);
+            }
+
+            for (int i = 0; i < 12; i++)
+            {
+                float x = -9.2f + i * 1.68f;
+                CreateMeshBoxProp("VerticalSlice Stage1 Sightline parallax roof occluder " + i, new Vector3(x, 4.28f + Mathf.Sin(i * 0.6f) * 0.12f, 0.58f), new Vector3(0.88f, 0.08f, 0.18f), new Color(0.004f, 0.006f, 0.008f, 0.74f), i % 2 == 0 ? -4f : 6f);
+            }
+        }
+
+        private void CreateVerticalSliceStageOneMeetingAndBlackoutLayer()
+        {
+            Color police = new Color(0.08f, 0.32f, 0.9f, 1f);
+            Color gang = new Color(0.84f, 0.08f, 0.06f, 1f);
+            Color cyan = new Color(0.08f, 0.74f, 0.86f, 1f);
+            Color amber = new Color(0.94f, 0.72f, 0.12f, 1f);
+            Color table = new Color(0.14f, 0.17f, 0.18f, 1f);
+
+            Vector3 meetingCenter = new Vector3(-1.18f, -0.72f, 0.16f);
+            CreateMeshPrimitiveProp("VerticalSlice Stage1 Meeting evidence round table", PrimitiveType.Cylinder, meetingCenter + new Vector3(0f, 0f, 0.1f), new Vector3(0.86f, 0.055f, 0.86f), table, Quaternion.Euler(90f, 0f, 0f));
+            CreateMeshBoxProp("VerticalSlice Stage1 Meeting voice channel blue strip", meetingCenter + new Vector3(-0.28f, 0.2f, 0.34f), new Vector3(0.78f, 0.035f, 0.06f), police, -8f);
+            CreateMeshBoxProp("VerticalSlice Stage1 Meeting suspicion red strip", meetingCenter + new Vector3(0.26f, -0.22f, 0.34f), new Vector3(0.72f, 0.035f, 0.06f), gang, 10f);
+            CreateMeshBoxProp("VerticalSlice Stage1 Meeting evidence wall panel", meetingCenter + new Vector3(-1.24f, 0.48f, 0.62f), new Vector3(0.92f, 0.065f, 0.52f), new Color(0.78f, 0.8f, 0.72f, 1f), -6f);
+            CreateMeshBoxProp("VerticalSlice Stage1 Meeting evidence wall red thread", meetingCenter + new Vector3(-1.34f, 0.52f, 0.86f), new Vector3(0.58f, 0.025f, 0.04f), gang, 13f);
+            CreateMeshBoxProp("VerticalSlice Stage1 Meeting evidence wall blue thread", meetingCenter + new Vector3(-1.08f, 0.52f, 0.74f), new Vector3(0.46f, 0.025f, 0.04f), police, -16f);
+            CreateMeshBoxProp("VerticalSlice Stage1 Meeting overhead shadow frame", meetingCenter + new Vector3(0.2f, 0.96f, 0.88f), new Vector3(2.45f, 0.16f, 0.32f), new Color(0f, 0f, 0f, 0.56f));
+
+            for (int i = 0; i < 10; i++)
+            {
+                float angle = i / 10f * Mathf.PI * 2f;
+                Vector3 seat = meetingCenter + new Vector3(Mathf.Cos(angle) * 1.36f, Mathf.Sin(angle) * 0.86f, 0.04f);
+                CreateMeshPrimitiveProp("VerticalSlice Stage1 Meeting player voice seat " + i, PrimitiveType.Cylinder, seat, new Vector3(0.16f, 0.035f, 0.16f), i % 3 == 0 ? police : i % 3 == 1 ? gang : cyan, Quaternion.Euler(90f, 0f, 0f));
+                CreateMeshBoxProp("VerticalSlice Stage1 Meeting vote card " + i, seat + new Vector3(0f, 0.12f, 0.2f), new Vector3(0.22f, 0.03f, 0.06f), amber, i * 13f);
+            }
+
+            Vector3 blackoutCore = new Vector3(8.72f, 5.18f, 0.22f);
+            CreateMeshBoxProp("VerticalSlice Stage1 Blackout breaker silhouette wall", blackoutCore + new Vector3(0f, 0.38f, 0.56f), new Vector3(1.42f, 0.1f, 0.78f), new Color(0.018f, 0.022f, 0.026f, 1f));
+            CreateMeshBoxProp("VerticalSlice Stage1 Blackout red emergency strip", blackoutCore + new Vector3(0f, 0.48f, 0.98f), new Vector3(1.12f, 0.035f, 0.06f), gang);
+            CreateMeshBoxProp("VerticalSlice Stage1 Blackout repair target amber pad", blackoutCore + new Vector3(0f, -0.58f, 0.06f), new Vector3(0.92f, 0.045f, 0.06f), amber);
+            CreateMeshBoxProp("VerticalSlice Stage1 Blackout visible cable A", blackoutCore + new Vector3(-0.42f, 0.05f, 0.54f), new Vector3(0.56f, 0.028f, 0.05f), cyan, -14f);
+            CreateMeshBoxProp("VerticalSlice Stage1 Blackout visible cable B", blackoutCore + new Vector3(0.34f, -0.06f, 0.5f), new Vector3(0.5f, 0.028f, 0.05f), gang, 16f);
+
+            for (int i = 0; i < 8; i++)
+            {
+                float x = -0.9f + i * 0.26f;
+                CreateMeshBoxProp("VerticalSlice Stage1 Blackout fuse slot " + i, blackoutCore + new Vector3(x, 0.52f, 0.78f), new Vector3(0.12f, 0.028f, 0.08f), i % 2 == 0 ? amber : gang);
+            }
+
+            for (int i = 0; i < 9; i++)
+            {
+                Vector3 route = new Vector3(7.42f - i * 1.06f, 4.72f - Mathf.Sin(i * 0.55f) * 0.3f, 0.08f);
+                CreateMeshBoxProp("VerticalSlice Stage1 Blackout emergency floor arrow " + i, route, new Vector3(0.42f, 0.035f, 0.05f), i % 2 == 0 ? amber : cyan, i % 2 == 0 ? -13f : 12f);
+            }
+        }
+
+        private void CreateVerticalSliceStageOneGameplayAnchorLayer()
+        {
+            foreach (VerticalSliceStageOneAnchorSpec spec in VerticalSliceStageOneAnchorCatalog.Specs)
+            {
+                if (spec.Category != "Gameplay") continue;
+
+                CreateShapeProp("VerticalSlice Stage1 GameplayAnchor " + spec.Id + " footprint", SoftCircleSprite, spec.DesignPosition + new Vector3(0f, 0f, -0.02f), new Vector3(spec.Footprint.x, spec.Footprint.y, 0.04f), new Color(spec.DebugColor.r, spec.DebugColor.g, spec.DebugColor.b, 0.18f));
+                CreateMeshBoxProp("VerticalSlice Stage1 GameplayAnchor " + spec.Id + " readable strip", spec.DesignPosition + new Vector3(0f, 0.12f, 0.18f), new Vector3(Mathf.Max(0.42f, spec.Footprint.x * 0.48f), 0.04f, 0.07f), spec.DebugColor, -8f);
+                CreateMeshBoxProp("VerticalSlice Stage1 GameplayAnchor " + spec.Id + " action marker", spec.DesignPosition + new Vector3(0f, -0.12f, 0.22f), new Vector3(Mathf.Max(0.34f, spec.Footprint.x * 0.36f), 0.035f, 0.06f), Darken(spec.DebugColor, 0.62f), 10f);
+            }
+
+            Vector3[] voiceCenters =
+            {
+                new Vector3(-1.18f, -0.72f, 0.02f),
+                new Vector3(-4.8f, 1.32f, 0.02f),
+                new Vector3(4.92f, -0.82f, 0.02f)
+            };
+
+            for (int i = 0; i < voiceCenters.Length; i++)
+            {
+                CreateShapeProp("VerticalSlice Stage1 GameplayAnchor action voice radius " + i, SoftCircleSprite, voiceCenters[i], new Vector3(2.0f, 1.25f, 0.04f), new Color(0.12f, 0.78f, 0.66f, 0.52f));
+            }
+        }
+
+        private void CreateVerticalSliceStageOneCameraShotLayer()
+        {
+            foreach (VerticalSliceStageOneAnchorSpec spec in VerticalSliceStageOneAnchorCatalog.Specs)
+            {
+                if (spec.Category != "Camera") continue;
+
+                Vector3 center = spec.DesignPosition + new Vector3(0f, 0f, 0.04f);
+                Color color = spec.DebugColor;
+                CreateShapeProp("VerticalSlice Stage1 CameraShot " + spec.Id + " footprint", SoftCircleSprite, center, new Vector3(spec.Footprint.x, spec.Footprint.y, 0.04f), new Color(color.r, color.g, color.b, 0.12f));
+                CreateMeshBoxProp("VerticalSlice Stage1 CameraShot " + spec.Id + " frame top", center + new Vector3(0f, spec.Footprint.y * 0.5f, 0.16f), new Vector3(spec.Footprint.x, 0.035f, 0.05f), color);
+                CreateMeshBoxProp("VerticalSlice Stage1 CameraShot " + spec.Id + " frame bottom", center + new Vector3(0f, -spec.Footprint.y * 0.5f, 0.16f), new Vector3(spec.Footprint.x, 0.035f, 0.05f), color);
+                CreateMeshBoxProp("VerticalSlice Stage1 CameraShot " + spec.Id + " frame left", center + new Vector3(-spec.Footprint.x * 0.5f, 0f, 0.16f), new Vector3(0.035f, spec.Footprint.y, 0.05f), color);
+                CreateMeshBoxProp("VerticalSlice Stage1 CameraShot " + spec.Id + " frame right", center + new Vector3(spec.Footprint.x * 0.5f, 0f, 0.16f), new Vector3(0.035f, spec.Footprint.y, 0.05f), color);
+            }
+        }
+
+        private void CreateVerticalSliceStageOneEditableAnchorLayer()
+        {
+            foreach (VerticalSliceStageOneAnchorSpec spec in VerticalSliceStageOneAnchorCatalog.Specs)
+            {
+                GameObject anchor = new GameObject("VerticalSlice Stage1 EditableAnchor " + spec.Id);
+                anchor.transform.SetParent(_worldRoot.transform, false);
+                anchor.transform.position = MapService.ScaleMapPosition(spec.DesignPosition);
+                VerticalSliceStageOneAnchor component = anchor.AddComponent<VerticalSliceStageOneAnchor>();
+                component.Configure(spec);
+
+                CreateShapeProp("VerticalSlice Stage1 GameplayAnchor editable footprint " + spec.Id, SoftCircleSprite, spec.DesignPosition + new Vector3(0f, 0f, -0.02f), new Vector3(spec.Footprint.x, spec.Footprint.y, 0.04f), new Color(spec.DebugColor.r, spec.DebugColor.g, spec.DebugColor.b, 0.08f));
+            }
         }
 
         // ====================================================================
@@ -200,6 +575,32 @@ namespace GanglandUndercover.Online
             AttachPhysicsCollider(prop, scale,
                 primitiveType == PrimitiveType.Cylinder || primitiveType == PrimitiveType.Sphere);
             return prop;
+        }
+
+        /// <summary>
+        /// Create a tiled floor by repeating a sprite in a grid pattern.
+        /// Avoids the 32px→24m stretch blur. Each tile is ~1m×1m.
+        /// </summary>
+        public void CreateTiledFloor(string name, Vector3 position, Vector2 size, Color tint)
+        {
+            Sprite tile = FloorTileSprite;
+            float tileWorldSize = 1.0f;
+            int cols = Mathf.Max(1, Mathf.CeilToInt(size.x / tileWorldSize));
+            int rows = Mathf.Max(1, Mathf.CeilToInt(size.y / tileWorldSize));
+            float stepX = size.x / cols;
+            float stepY = size.y / rows;
+            Vector3 start = position - new Vector3(size.x * 0.5f, size.y * 0.5f, 0f) + new Vector3(stepX * 0.5f, stepY * 0.5f, 0f);
+
+            for (int row = 0; row < rows; row++)
+            {
+                for (int col = 0; col < cols; col++)
+                {
+                    Vector3 pos = start + new Vector3(col * stepX, row * stepY, position.z);
+                    Vector3 scale = new Vector3(stepX, stepY, 0.06f);
+                    var t = CreateShapeProp($"{name}_tile_{col}_{row}", tile, pos, scale, tint);
+                    t.transform.SetSiblingIndex(0);
+                }
+            }
         }
 
         public GameObject CreateProp(string propName, Vector3 position, Vector3 scale, Color color)
@@ -969,6 +1370,10 @@ namespace GanglandUndercover.Online
             root.transform.position = _mapService.ScaleMapPosition(state.Position);
             root.transform.localScale = Vector3.one * (state.Alive ? 1.12f : 1.04f);
 
+            // B1: 角色脚下阴影 — anchors character to ground
+            CreateSpriteChild(root.transform, "阴影", _softCircleSprite, new Vector3(0f, -0.12f, -0.06f),
+                new Vector3(0.32f, 0.14f, 0.02f), new Color(0f, 0f, 0f, 0.35f));
+
             // Base body
             CreateSpriteChild(root.transform, "角色基座", _roundedRectSprite, Vector3.zero,
                 new Vector3(0.28f, 0.24f, 0.12f), PlayerColor(state, isLocal));
@@ -1586,7 +1991,6 @@ namespace GanglandUndercover.Online
 
             return marker;
         }
-    }
 
         // ====================================================================
         //  M2: WORLD BUILDING (moved from OnlineMatchController)
@@ -1613,7 +2017,6 @@ namespace GanglandUndercover.Online
             CreateArchitecturalVolumeLayer();
             CreateShipRooms();
             CreateShipRoomFrames();
-            // Note: CreateShipTaskDressing() stays in controller (uses tasks)
             CreateLargeMapProps();
             CreateShipAmbientDressing();
             CreateDenseMapMicroDressing();
@@ -1624,6 +2027,9 @@ namespace GanglandUndercover.Online
             CreateOfficialFreeAssetStoreLayer();
             CreateCommercialArtAdapterLayer();
             CreateVerticalSliceProductionLayer();
+
+            // A5: 霓虹光斑装饰
+            CreateNeonDecor();
         }
 
         /// <summary>
@@ -1637,7 +2043,6 @@ namespace GanglandUndercover.Online
             CreateCorridorVolumeLayer();
             CreateShipRooms();
             CreateShipRoomFrames();
-            // Note: CreateShipTaskDressing() stays in controller (uses tasks)
             CreateUnderworldPassageNodes();
             CreateShipAmbientDressing();
             CreateDenseMapMicroDressing();
@@ -1649,12 +2054,35 @@ namespace GanglandUndercover.Online
             CreateVerticalSliceProductionLayer();
         }
 
+        // ── A5: 霓虹光斑装饰 ──
+        private void CreateNeonDecor()
+        {
+            Color[] neons = { new Color(0.92f, 0.28f, 0.52f, 1f), new Color(0.18f, 0.72f, 0.92f, 1f), new Color(0.92f, 0.70f, 0.15f, 1f) };
+            Vector3[] spots =
+            {
+                new Vector3(-4.5f, 2.1f, 0.7f), new Vector3(3.8f, 3.5f, 0.7f), new Vector3(6.5f, -1.8f, 0.7f),
+                new Vector3(-6.0f, -3.2f, 0.7f), new Vector3(-0.5f, -4.2f, 0.7f), new Vector3(4.0f, 0.5f, 0.7f),
+                new Vector3(-2.8f, -1.5f, 0.7f), new Vector3(7.0f, 2.2f, 0.7f),
+            };
+            for (int i = 0; i < spots.Length; i++)
+            {
+                Color c = neons[i % neons.Length];
+                c.a = UnityEngine.Random.Range(0.25f, 0.55f);
+                CreateShapeProp("霓虹" + i, _roundedRectSprite, spots[i],
+                    new Vector3(0.25f + i * 0.02f, 0.05f, 0.04f), c);
+            }
+        }
+
         // ── Private implementation ──
 
         private void CreateFloor()
         {
+            // Deep background fill
             CreateProp("港区街区外暗区", new Vector3(0f, 0f, -0.34f), new Vector3(26.2f, 16.8f, 0.08f), new Color(0.025f, 0.032f, 0.034f, 1f));
-            CreateShapeProp("港区不规则边界底板", SoftCircleSprite, new Vector3(0f, 0f, -0.31f), new Vector3(23.8f, 14.5f, 0.08f), new Color(0.082f, 0.098f, 0.102f, 1f));
+
+            // Tiled floor — repeat tile sprite instead of single stretched sprite
+            CreateTiledFloor("港区地板纹理", new Vector3(0f, 0f, -0.31f), new Vector2(23.6f, 14.3f), new Color(0.10f, 0.12f, 0.13f, 1f));
+
             CreateProp("港区主干道暗面", new Vector3(0f, -0.1f, -0.3f), new Vector3(24.0f, 8.6f, 0.08f), new Color(0.094f, 0.112f, 0.116f, 1f));
             CreateProp("港区北侧仓储街块", new Vector3(0f, 4.7f, -0.305f), new Vector3(22.5f, 4.7f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
             CreateProp("港区南侧封控街块", new Vector3(0f, -5.2f, -0.305f), new Vector3(22.2f, 3.9f, 0.08f), new Color(0.086f, 0.104f, 0.11f, 1f));
@@ -1713,10 +2141,18 @@ namespace GanglandUndercover.Online
 
         private void CreateCorridorSegment(string corridorName, Vector3 center, Vector3 size, Color color, bool roundNode)
         {
-            GameObject segment = roundNode
-                ? CreateShapeProp(corridorName, CircleSprite, center, size, color)
-                : CreateProp(corridorName, center, size, color);
-            segment.transform.SetAsFirstSibling();
+            // Tiled floor texture (multiple small tiles, not one stretched blob)
+            CreateTiledFloor(corridorName + "_floor", center, new Vector2(size.x - 0.15f, size.y - 0.15f), color);
+
+            // Wall borders — thin dark strips giving the corridor thickness/definition
+            Color wallBorder = new Color(color.r * 0.35f, color.g * 0.38f, color.b * 0.42f, 1f);
+            CreateProp(corridorName + "_wallT", center + new Vector3(0f, size.y * 0.5f, 0f), new Vector3(size.x, 0.1f, 0.09f), wallBorder);
+            CreateProp(corridorName + "_wallB", center - new Vector3(0f, size.y * 0.5f, 0f), new Vector3(size.x, 0.1f, 0.09f), wallBorder);
+            if (size.x > size.y * 0.6f) // only add left/right on horizontal corridors
+            {
+                CreateProp(corridorName + "_wallL", center - new Vector3(size.x * 0.5f, 0f, 0f), new Vector3(0.1f, size.y, 0.09f), wallBorder);
+                CreateProp(corridorName + "_wallR", center + new Vector3(size.x * 0.5f, 0f, 0f), new Vector3(0.1f, size.y, 0.09f), wallBorder);
+            }
             RegisterWalkableArea(center, size);
         }
 
@@ -3370,9 +3806,11 @@ namespace GanglandUndercover.Online
 
         private void CreatePremiumTaskSetPieces()
         {
-            for (int i = 0; i < tasks.Count; i++)
+            if (_tasks == null) return;
+
+            for (int i = 0; i < _tasks.Count; i++)
             {
-                OnlineTaskState task = tasks[i];
+                OnlineTaskState task = _tasks[i];
                 Vector3 position = new Vector3(task.Position.x / MapService.DesignScaleX, task.Position.y / MapService.DesignScaleY, 0f);
                 CreatePremiumTaskSetPiece(task.Id, task.Name, position);
             }
@@ -3642,9 +4080,11 @@ namespace GanglandUndercover.Online
 
         private void CreateTaskInteractionHalos()
         {
-            for (int i = 0; i < tasks.Count; i++)
+            if (_tasks == null) return;
+
+            for (int i = 0; i < _tasks.Count; i++)
             {
-                OnlineTaskState task = tasks[i];
+                OnlineTaskState task = _tasks[i];
                 Vector3 designPosition = new Vector3(task.Position.x / MapService.DesignScaleX, task.Position.y / MapService.DesignScaleY, 0f);
                 Color accent = TaskPanelAccent(task.Id);
                 CreateShapeProp("任务交互范围环 " + task.Name, CircleSprite, designPosition + new Vector3(0f, 0f, -0.03f), new Vector3(0.72f, 0.46f, 0.04f), new Color(accent.r, accent.g, accent.b, 0.2f));
@@ -4037,9 +4477,11 @@ namespace GanglandUndercover.Online
                 AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Bus Stop"
             };
 
-            for (int i = 0; i < tasks.Count; i += 3)
+            if (_tasks == null) return;
+
+            for (int i = 0; i < _tasks.Count; i += 3)
             {
-                OnlineTaskState task = tasks[i];
+                OnlineTaskState task = _tasks[i];
                 Vector3 designPosition = new Vector3(task.Position.x / MapService.DesignScaleX, task.Position.y / MapService.DesignScaleY, 0.18f);
                 CreateAssetStoreProp("官方免费素材层 任务旁实物 " + task.Id, taskProps[i % taskProps.Length], designPosition + new Vector3(0.42f, -0.28f, 0f), new Vector3(0.34f, 0.26f, 0.32f), i * 11f, false);
             }
@@ -4240,9 +4682,11 @@ namespace GanglandUndercover.Online
                 AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_medium"
             };
 
-            for (int i = 0; i < tasks.Count; i++)
+            if (_tasks == null) return;
+
+            for (int i = 0; i < _tasks.Count; i++)
             {
-                OnlineTaskState task = tasks[i];
+                OnlineTaskState task = _tasks[i];
                 Vector3 designPosition = new Vector3(task.Position.x / MapService.DesignScaleX, task.Position.y / MapService.DesignScaleY, 0.22f);
                 Vector3 offset = new Vector3(i % 2 == 0 ? -0.38f : 0.38f, i % 3 == 0 ? 0.3f : -0.26f, 0f);
                 CreateAssetStoreProp("官方免费街区密度层 任务实体锚点 " + task.Id, anchors[i % anchors.Length], designPosition + offset, new Vector3(0.34f, 0.26f, 0.34f), i * 19f, false);
@@ -4736,1002 +5180,5 @@ namespace GanglandUndercover.Online
         }
 
 
+    }
 }
-
-        // --- EnsureWorld (moved from controller) ---
-        private void EnsureWorld()
-        {
-            EnsureRuntimeSprites();
-
-            if (worldRoot != null)
-            {
-                return;
-            }
-
-            DestroyStaleWorldRoots();
-            solidObstacleRects.Clear();
-            walkableRects.Clear();
-            worldLabels.Clear();
-            worldRoot = new GameObject(WorldRootName);
-            worldRoot.transform.SetParent(transform, false);
-            WorldBuilder = new OnlineWorldBuilder();
-            WorldBuilder.Initialize(worldRoot, mapService, solidObstacleRects, walkableRects, worldLabels, ruleSet.UnderworldPassageCount);
-            WorldBuilder.EnsureRuntimeSprites();
-            ConfigureSceneLighting();
-            CreateSocialDeductionShipMap();
-
-            // ── M6.1 监控摄像头在地图中的实际生成 ──
-            SpawnSurveillanceCameras();
-
-            // ── M6.1 灰盒模式：叠加灰盒建造器（可选） ──
-            if (useGreyboxMode && mapLayoutData != null)
-            {
-                BuildGreyboxMap();
-            }
-
-            // ── M6 Kenney 美术：在灰盒之上叠加 Sprite 视觉层 ──
-            if (kenneyMode && kenneyCatalog != null)
-            {
-                DecorateWithKenneySprites();
-            }
-
-            CreateNeonLight("会议舱顶灯", new Vector3(0f, 0f, 1.1f), new Color(0.35f, 0.75f, 1f, 1f), 1.8f, 6.4f);
-            CreateNeonLight("证物库紫外灯", new Vector3(-8.6f, -5.05f, 1.05f), new Color(0.54f, 0.32f, 1f, 1f), 1.1f, 4.2f);
-            CreateNeonLight("电力舱冷光", new Vector3(8.85f, 5.25f, 1.15f), new Color(0.3f, 0.8f, 1f, 1f), 1.35f, 4.6f);
-            CreateEmergencyBell();
-        }
-
-        // --- DestroyRuntimeWorld (moved from controller) ---
-        private void DestroyRuntimeWorld()
-        {
-            if (worldRoot != null)
-            {
-                if (Application.isPlaying)
-                {
-                    Destroy(worldRoot);
-                }
-                else
-                {
-                    DestroyImmediate(worldRoot);
-                }
-            }
-
-            worldRoot = null;
-            solidObstacleRects.Clear();
-            walkableRects.Clear();
-            worldLabels.Clear();
-            taskVisuals.Clear();
-            playerVisuals.Clear();
-            playerVisualBaseScales.Clear();
-            killSystem.bodyVisuals.Clear();
-            surveillanceCameras.Clear();
-            modelPrefabCache.Clear();
-            runtimeMeshMaterials.Clear();
-            DestroyStaleWorldRoots();
-        }
-
-        // --- DestroyStaleWorldRoots (moved from controller) ---
-        private void DestroyStaleWorldRoots()
-        {
-            List<GameObject> staleRoots = new List<GameObject>();
-
-            foreach (Transform child in transform)
-            {
-                if (child == null)
-                {
-                    continue;
-                }
-
-                if (child.name == WorldRootName || child.name.StartsWith("Online Hong Kong Port Map", StringComparison.Ordinal) || child.name.StartsWith("Online Gangland Runtime Map", StringComparison.Ordinal))
-                {
-                    staleRoots.Add(child.gameObject);
-                }
-            }
-
-            foreach (Transform candidate in FindObjectsByType<Transform>(FindObjectsInactive.Include))
-            {
-                if (candidate == null || candidate == transform || candidate.IsChildOf(transform))
-                {
-                    continue;
-                }
-
-                if (candidate.name == WorldRootName
-                    || candidate.name.StartsWith("Online Hong Kong Port Map", StringComparison.Ordinal)
-                    || candidate.name.StartsWith("Online Gangland Runtime Map", StringComparison.Ordinal))
-                {
-                    staleRoots.Add(candidate.gameObject);
-                }
-            }
-
-            for (int i = 0; i < staleRoots.Count; i++)
-            {
-                if (staleRoots[i] == null)
-                {
-                    continue;
-                }
-
-                if (Application.isPlaying)
-                {
-                    Destroy(staleRoots[i]);
-                }
-                else
-                {
-                    DestroyImmediate(staleRoots[i]);
-                }
-            }
-        }
-
-        // --- BuildGreyboxMap (moved from controller) ---
-        private void BuildGreyboxMap()
-        {
-            // 根据地图类型选择布局数据
-            Map.MapLayoutData activeLayout = mapLayoutData; // 默认港区
-            if (mapService.ActiveMapType == OnlineMapService.OnlineMapType.PoliceStation)
-            {
-                if (policeStationMapLayoutData != null)
-                    activeLayout = policeStationMapLayoutData;
-                else
-                {
-                    activeLayout = Map.PoliceStationMapLayout.CreateMapLayoutAsset();
-                    Debug.Log("[M8.1] Using runtime-generated PoliceStation MapLayoutData (no asset assigned).");
-                }
-            }
-            else if (mapService.ActiveMapType == OnlineMapService.OnlineMapType.KowloonWalledCity)
-            {
-                if (kowloonWalledCityMapLayoutData != null)
-                    activeLayout = kowloonWalledCityMapLayoutData;
-                else
-                {
-                    activeLayout = Map.KowloonWalledCityMapLayout.CreateMapLayoutAsset();
-                    Debug.Log("[D4] Using runtime-generated KowloonWalledCity MapLayoutData (no asset assigned).");
-                }
-            }
-
-            if (activeLayout == null)
-            {
-                Debug.LogError("[GreyboxMapBuilder] No MapLayoutData available for selected map type.");
-                return;
-            }
-
-            var builder = new GreyboxMapBuilder(mapService, worldBuilder, activeLayout, worldRoot);
-            builder.BuildAll();
-
-            // 将灰盒生成的 walkable rects（设计坐标 → 世界坐标）合并到控制器集合中
-            foreach (var rect in builder.WalkableRects)
-            {
-                // 设计坐标 Rect → 世界坐标 Rect
-                Vector3 worldMin = mapService.ScaleMapPosition(new Vector3(rect.xMin, rect.yMin, 0f));
-                Vector3 worldMax = mapService.ScaleMapPosition(new Vector3(rect.xMax, rect.yMax, 0f));
-                walkableRects.Add(new Rect(worldMin.x, worldMin.y,
-                    worldMax.x - worldMin.x, worldMax.y - worldMin.y));
-            }
-
-            Debug.Log($"[M6/M8.1] Greybox map built for {mapService.ActiveMapType}: " +
-                      $"{builder.WalkableRects.Count} walkable zones.");
-        }
-
-        // --- DecorateWithKenneySprites (moved from controller) ---
-        private void DecorateWithKenneySprites()
-        {
-            if (kenneyCatalog == null)
-            {
-                Debug.LogWarning("[Kenney] Catalog is null, skipping decoration.");
-                return;
-            }
-
-            // M8.1: 根据地图类型使用对应的房间数据
-            var rooms = mapService.ShipRooms(); // ShipRooms() 已根据 ActiveMapType 切换
-            var decorator = new Map.KenneySpriteDecorator(
-                kenneyCatalog, mapService, worldBuilder, worldRoot);
-            decorator.DecorateAllRooms(rooms);
-
-            Debug.Log($"[Kenney] Decorated {decorator.DecoratedObjects.Count} rooms with Kenney sprites " +
-                      $"for {mapService.ActiveMapType}.");
-        }
-
-        // --- CreateSocialDeductionShipMap (moved from controller) ---
-        private void CreateSocialDeductionShipMap()
-        {
-            // M8.1/D4: 警署和九龙城寨模式下不建造港区遗留地图（灰盒模式会覆盖整个地图）
-            if (mapService.ActiveMapType == OnlineMapService.OnlineMapType.PoliceStation
-             || mapService.ActiveMapType == OnlineMapService.OnlineMapType.KowloonWalledCity)
-            {
-                worldBuilder.CreateFloorBackground();
-                CreateEmergencyBell();
-                return;
-            }
-
-            CreateHongKongPortDistrictMap();
-        }
-
-        // --- CreateHongKongPortDistrictMap (moved from controller) ---
-        private void CreateHongKongPortDistrictMap()
-        {
-            CreateEmergencyBell();
-            worldBuilder.BuildDistrictMap();
-            CreateShipTaskDressing();
-        }
-
-        // --- CreateLegacyShipMap (moved from controller) ---
-        private void CreateLegacyShipMap()
-        {
-            CreateEmergencyBell();
-            worldBuilder.BuildLegacyShipMap();
-            CreateShipTaskDressing();
-        }
-
-        // --- CreateShipTaskDressing (moved from controller) ---
-        private void CreateShipTaskDressing()
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                CreateTaskConsole("任务控制台 " + task.Name, new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.05f), i);
-            }
-        }
-
-        // --- CreateTaskConsole (moved from controller) ---
-        private void CreateTaskConsole(string name, Vector3 position, int index)
-        {
-            Color baseColor = index % 3 == 0 ? new Color(0.08f, 0.16f, 0.18f, 1f) : index % 3 == 1 ? new Color(0.16f, 0.13f, 0.18f, 1f) : new Color(0.16f, 0.12f, 0.08f, 1f);
-            string modelPath = index % 4 == 0 ? "Props/Prop_AccessPoint.fbx" : "Props/Prop_Computer.fbx";
-            CreateSolidModelProp(name + " CC0 控制台", modelPath, position + new Vector3(0f, 0f, 0.04f), new Vector3(0.55f, 0.38f, 0.3f), index % 2 == 0 ? 0f : 180f);
-            CreateSolidProp(name + " 底座碰撞体", position, new Vector3(0.44f, 0.28f, 0.14f), new Color(baseColor.r, baseColor.g, baseColor.b, 0.35f));
-            CreateMeshBoxProp(name + " 立体台座", position + new Vector3(0f, 0f, 0.14f), new Vector3(0.5f, 0.34f, 0.22f), baseColor);
-            CreateMeshBoxProp(name + " 立体斜屏", position + new Vector3(0f, 0.18f, 0.34f), new Vector3(0.38f, 0.05f, 0.18f), new Color(0.05f, 0.72f, 0.86f, 1f));
-            CreateMeshPrimitiveProp(name + " 实体状态灯", PrimitiveType.Cylinder, position + new Vector3(0.22f, -0.12f, 0.36f), new Vector3(0.06f, 0.06f, 0.08f), new Color(0.95f, 0.72f, 0.1f, 1f), Quaternion.Euler(90f, 0f, 0f));
-            CreateProp(name + " 屏幕发光层", position + new Vector3(0f, 0.16f, 0.12f), new Vector3(0.32f, 0.06f, 0.08f), new Color(0.05f, 0.72f, 0.86f, 1f));
-            CreateShapeProp(name + " 状态灯", circleSprite, position + new Vector3(0.2f, -0.1f, 0.16f), new Vector3(0.08f, 0.08f, 0.05f), new Color(0.95f, 0.72f, 0.1f, 1f));
-        }
-
-        // --- CreateActionViewTaskShowcase (moved from controller) ---
-        private void CreateActionViewTaskShowcase(int taskId, Vector3 position, string label)
-        {
-            Color accent = TaskPanelAccent(taskId);
-            Color dark = new Color(0.035f, 0.045f, 0.05f, 1f);
-            Color amber = new Color(0.94f, 0.72f, 0.12f, 1f);
-
-            CreateShapeProp("行动视角样板层 " + label + " 任务地面光圈", softCircleSprite, position + new Vector3(0f, 0f, 0.035f), new Vector3(1.16f, 0.72f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.26f));
-            CreateMeshBoxProp("行动视角样板层 " + label + " 大型任务台", position + new Vector3(0f, 0f, 0.28f), new Vector3(0.72f, 0.38f, 0.38f), dark);
-            CreateMeshBoxProp("行动视角样板层 " + label + " 高亮交互屏", position + new Vector3(0f, 0.24f, 0.62f), new Vector3(0.52f, 0.04f, 0.22f), accent);
-            CreateMeshBoxProp("行动视角样板层 " + label + " E键提示牌", position + new Vector3(-0.48f, 0.18f, 0.72f), new Vector3(0.22f, 0.035f, 0.14f), amber);
-            CreateMeshPrimitiveProp("行动视角样板层 " + label + " 顶部信标", PrimitiveType.Cylinder, position + new Vector3(0.46f, -0.16f, 0.68f), new Vector3(0.06f, 0.06f, 0.46f), accent, Quaternion.identity);
-            CreateMeshBoxProp("行动视角样板层 " + label + " 信标灯帽", position + new Vector3(0.46f, -0.16f, 0.96f), new Vector3(0.18f, 0.035f, 0.08f), amber);
-            CreateWorldLabelAt(label, mapService.ScaleMapPosition(position + new Vector3(0f, 0.6f, 0.1f)), 0.06f);
-        }
-
-        // --- CreateActionViewScaleCharacter (moved from controller) ---
-        private void CreateActionViewScaleCharacter(string name, Vector3 position, Color primary, Color accent, string label)
-        {
-            GameObject root = new GameObject(name);
-            root.transform.SetParent(worldRoot.transform, false);
-            root.transform.position = mapService.ScaleMapPosition(position);
-            root.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
-            CreateMeshPrimitiveChild(root.transform, "Shadow", PrimitiveType.Cylinder, new Vector3(0f, -0.32f, -0.12f), new Vector3(0.52f, 0.08f, 0.28f), new Color(0f, 0f, 0f, 0.32f), Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshPrimitiveChild(root.transform, "Body", PrimitiveType.Capsule, new Vector3(0f, -0.04f, 0.2f), new Vector3(0.26f, 0.26f, 0.56f), primary, Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshPrimitiveChild(root.transform, "Head", PrimitiveType.Sphere, new Vector3(0.04f, 0.25f, 0.52f), new Vector3(0.3f, 0.26f, 0.26f), primary, Quaternion.identity);
-            CreateMeshBoxChild(root.transform, "Visor", new Vector3(0.13f, 0.42f, 0.56f), new Vector3(0.22f, 0.035f, 0.1f), new Color(0.58f, 0.9f, 1f, 1f));
-            CreateMeshPrimitiveChild(root.transform, "Arm L", PrimitiveType.Capsule, new Vector3(-0.22f, -0.04f, 0.28f), new Vector3(0.07f, 0.07f, 0.28f), accent, Quaternion.Euler(90f, 0f, 12f));
-            CreateMeshPrimitiveChild(root.transform, "Arm R", PrimitiveType.Capsule, new Vector3(0.22f, -0.04f, 0.28f), new Vector3(0.07f, 0.07f, 0.28f), accent, Quaternion.Euler(90f, 0f, -12f));
-            CreateMeshBoxChild(root.transform, "Role Strip " + label, new Vector3(0f, 0.05f, 0.5f), new Vector3(0.2f, 0.035f, 0.06f), accent);
-            SetSortingFromZ(root);
-        }
-
-        // --- CreateMainCorridorSetPieces (moved from controller) ---
-        private void CreateMainCorridorSetPieces()
-        {
-            Color dark = new Color(0.035f, 0.045f, 0.048f, 1f);
-            Color metal = new Color(0.12f, 0.145f, 0.15f, 1f);
-            Color screen = new Color(0.04f, 0.7f, 0.84f, 1f);
-            Color warning = new Color(0.92f, 0.72f, 0.08f, 1f);
-
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7.1f + i * 2.05f;
-                CreateModelProp("CC0 主廊强化舱板 " + i, i % 2 == 0 ? "Walls/TopCables_Straight.fbx" : "Walls/TopAstra_Straight.fbx", new Vector3(x, -0.78f, 0.18f), new Vector3(0.92f, 0.18f, 0.34f), 0f, true);
-                CreateModelProp("CC0 主廊上墙窗 " + i, "Walls/WallAstra_Straight_Window.fbx", new Vector3(x + 0.16f, 0.92f, 0.2f), new Vector3(0.96f, 0.22f, 0.36f), 180f, true);
-                CreateMeshBoxProp("主廊检修盖发光边 " + i, new Vector3(x, -0.18f, 0.06f), new Vector3(0.54f, 0.035f, 0.04f), i % 2 == 0 ? screen : warning);
-            }
-
-            for (int i = 0; i < 6; i++)
-            {
-                float x = -5.8f + i * 2.3f;
-                CreateModelProp("CC0 上层连廊窗墙 " + i, "Walls/TopWindow_Straight.fbx", new Vector3(x, 4.33f, 0.2f), new Vector3(1.05f, 0.2f, 0.36f), 0f, true);
-                CreateModelProp("CC0 下层连廊电缆墙 " + i, "Walls/TopCables_Straight_Hanging.fbx", new Vector3(x + 0.26f, -4.58f, 0.2f), new Vector3(1.05f, 0.2f, 0.36f), 180f, true);
-            }
-
-            Vector3[] kioskPositions =
-            {
-                new Vector3(-3.8f, -0.84f, 0.1f),
-                new Vector3(3.65f, 0.66f, 0.1f),
-                new Vector3(-6.1f, -3.42f, 0.1f),
-                new Vector3(6.36f, 3.18f, 0.1f)
-            };
-
-            for (int i = 0; i < kioskPositions.Length; i++)
-            {
-                Vector3 position = kioskPositions[i];
-                CreateSolidModelProp("CC0 巡逻服务柜 " + i, "Props/Prop_AccessPoint.fbx", position + new Vector3(0f, 0f, 0.03f), new Vector3(0.42f, 0.32f, 0.32f), i % 2 == 0 ? 0f : 180f);
-                CreateMeshBoxProp("巡逻服务柜屏 " + i, position + new Vector3(0f, 0.18f, 0.32f), new Vector3(0.28f, 0.04f, 0.1f), screen);
-                CreateMeshBoxProp("巡逻服务柜黄黑边 " + i, position + new Vector3(0f, -0.18f, 0.2f), new Vector3(0.38f, 0.04f, 0.06f), warning);
-            }
-
-            CreateSolidProp("主廊移动拒马 A", new Vector3(-2.3f, 0.45f, 0.07f), new Vector3(0.68f, 0.14f, 0.2f), dark);
-            CreateSolidProp("主廊移动拒马 B", new Vector3(2.48f, -0.78f, 0.07f), new Vector3(0.68f, 0.14f, 0.2f), dark);
-            CreateMeshBoxProp("拒马反光条 A", new Vector3(-2.3f, 0.5f, 0.22f), new Vector3(0.52f, 0.035f, 0.05f), warning);
-            CreateMeshBoxProp("拒马反光条 B", new Vector3(2.48f, -0.73f, 0.22f), new Vector3(0.52f, 0.035f, 0.05f), warning);
-            CreateMeshBoxProp("主廊地面油污暗斑", new Vector3(4.9f, -0.12f, -0.02f), new Vector3(0.64f, 0.18f, 0.04f), new Color(0.015f, 0.018f, 0.018f, 1f));
-            CreateMeshBoxProp("下廊刹车痕 A", new Vector3(-2.2f, -3.68f, -0.02f), new Vector3(0.72f, 0.045f, 0.04f), dark, -8f);
-            CreateMeshBoxProp("下廊刹车痕 B", new Vector3(-1.48f, -3.8f, -0.02f), new Vector3(0.62f, 0.045f, 0.04f), dark, -8f);
-            CreateMeshBoxProp("中心交叉口巡逻箭头 A", new Vector3(-0.62f, -1.15f, 0.02f), new Vector3(0.28f, 0.18f, 0.04f), warning, -22f);
-            CreateMeshBoxProp("中心交叉口巡逻箭头 B", new Vector3(0.72f, 0.52f, 0.02f), new Vector3(0.28f, 0.18f, 0.04f), screen, 22f);
-            CreateModelProp("CC0 中心环形护栏 L", "Props/Prop_Rail_Round_Big.fbx", new Vector3(-0.72f, -0.35f, 0.18f), new Vector3(0.62f, 0.42f, 0.24f), 90f, true);
-            CreateModelProp("CC0 中心环形护栏 R", "Props/Prop_Rail_Round_Big.fbx", new Vector3(0.72f, -0.35f, 0.18f), new Vector3(0.62f, 0.42f, 0.24f), -90f, true);
-            CreateMeshBoxProp("主廊管线桥", new Vector3(0f, 0.96f, 0.32f), new Vector3(2.4f, 0.07f, 0.12f), metal);
-            CreateModelProp("CC0 管线桥夹具 A", "Props/Prop_PipeHolder.fbx", new Vector3(-1.12f, 0.98f, 0.38f), new Vector3(0.2f, 0.16f, 0.18f), 0f);
-            CreateModelProp("CC0 管线桥夹具 B", "Props/Prop_PipeHolder.fbx", new Vector3(1.12f, 0.98f, 0.38f), new Vector3(0.2f, 0.16f, 0.18f), 180f);
-        }
-
-        // --- CreateOrganicRouteLanguage (moved from controller) ---
-        private void CreateOrganicRouteLanguage()
-        {
-            Color routeShadow = new Color(0.045f, 0.052f, 0.052f, 1f);
-            Color routeEdge = new Color(0.32f, 0.39f, 0.39f, 1f);
-            Color yellow = new Color(0.9f, 0.68f, 0.1f, 1f);
-            Color blue = new Color(0.08f, 0.58f, 0.8f, 1f);
-
-            Vector3[] nodes =
-            {
-                new Vector3(-7.18f, 3.92f, -0.06f),
-                new Vector3(-4.22f, 2.42f, -0.06f),
-                new Vector3(-0.72f, 0.78f, -0.06f),
-                new Vector3(3.22f, 1.2f, -0.06f),
-                new Vector3(6.98f, 3.78f, -0.06f),
-                new Vector3(-6.92f, -3.78f, -0.06f),
-                new Vector3(-2.48f, -2.18f, -0.06f),
-                new Vector3(2.28f, -2.42f, -0.06f),
-                new Vector3(6.88f, -3.58f, -0.06f)
-            };
-
-            for (int i = 0; i < nodes.Length; i++)
-            {
-                Vector3 node = nodes[i];
-                CreateShapeProp("非直角动线 弯角缓冲区 " + i, softCircleSprite, node, new Vector3(i % 2 == 0 ? 1.18f : 0.92f, i % 2 == 0 ? 0.68f : 0.56f, 0.06f), routeShadow);
-                CreateMeshBoxProp("非直角动线 弯角导向灯 " + i, node + new Vector3(0f, 0.28f, 0.08f), new Vector3(0.54f, 0.035f, 0.05f), i % 2 == 0 ? yellow : blue, i % 3 == 0 ? -12f : 10f);
-            }
-
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7.2f + i * 2.05f;
-                CreateRotatedProp("非直角动线 主廊错位地砖 " + i, new Vector3(x, i % 2 == 0 ? -0.52f : 0.18f, -0.05f), new Vector3(0.62f, 0.18f, 0.05f), routeEdge, i % 2 == 0 ? -9f : 8f);
-            }
-
-            CreateMeshBoxProp("非直角动线 夜市蛇形标线 A", new Vector3(-2.1f, 2.28f, 0.04f), new Vector3(1.18f, 0.04f, 0.05f), yellow, -18f);
-            CreateMeshBoxProp("非直角动线 夜市蛇形标线 B", new Vector3(-0.72f, 2.9f, 0.04f), new Vector3(1.08f, 0.04f, 0.05f), blue, 16f);
-            CreateMeshBoxProp("非直角动线 后巷急弯灯带", new Vector3(5.7f, -2.72f, 0.04f), new Vector3(1.32f, 0.04f, 0.05f), yellow, -14f);
-            CreateMeshBoxProp("非直角动线 证物库转角冷光", new Vector3(-7.25f, -4.28f, 0.04f), new Vector3(1.02f, 0.04f, 0.05f), blue, 18f);
-        }
-
-        // --- CreatePremiumTaskSetPieces (moved from controller) ---
-        private void CreatePremiumTaskSetPieces()
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                Vector3 position = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0f);
-                CreatePremiumTaskSetPiece(task.Id, task.Name, position);
-            }
-        }
-
-        // --- CreatePremiumTaskSetPiece (moved from controller) ---
-        private void CreatePremiumTaskSetPiece(int taskId, string taskName, Vector3 position)
-        {
-            Color accent = TaskPanelAccent(taskId);
-            Color dark = new Color(0.035f, 0.045f, 0.05f, 1f);
-            Color metal = new Color(0.14f, 0.16f, 0.16f, 1f);
-            Color warning = new Color(0.92f, 0.7f, 0.08f, 1f);
-            int mode = TaskTemplateMode(taskId);
-
-            CreateShapeProp("成熟任务站 " + taskName + " 地面工作区", roundedRectSprite, position + new Vector3(0f, 0f, -0.045f), new Vector3(0.98f, 0.58f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.16f));
-            CreateMeshBoxProp("成熟任务站 " + taskName + " 立体背板", position + new Vector3(0f, 0.34f, 0.44f), new Vector3(0.82f, 0.08f, 0.48f), Darken(accent, 0.36f));
-            CreateMeshBoxProp("成熟任务站 " + taskName + " 主操作台", position + new Vector3(0f, -0.02f, 0.26f), new Vector3(0.72f, 0.36f, 0.28f), dark);
-            CreateMeshBoxProp("成熟任务站 " + taskName + " 状态屏", position + new Vector3(0f, 0.24f, 0.62f), new Vector3(0.46f, 0.04f, 0.18f), accent);
-            CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 警示灯", PrimitiveType.Cylinder, position + new Vector3(0.42f, -0.18f, 0.54f), new Vector3(0.08f, 0.08f, 0.1f), warning, Quaternion.Euler(90f, 0f, 0f));
-
-            if (mode == 0)
-            {
-                for (int i = 0; i < 3; i++)
-                {
-                    CreateMeshBoxProp("成熟任务站 " + taskName + " 多屏矩阵 " + i, position + new Vector3(-0.28f + i * 0.28f, 0.36f, 0.76f), new Vector3(0.2f, 0.035f, 0.12f), new Color(0.04f, 0.74f, 0.86f, 1f));
-                }
-            }
-            else if (mode == 1)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 封条闸门左", position + new Vector3(-0.36f, 0.02f, 0.46f), new Vector3(0.08f, 0.52f, 0.34f), metal);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 封条闸门右", position + new Vector3(0.36f, 0.02f, 0.46f), new Vector3(0.08f, 0.52f, 0.34f), metal);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 黄色封条", position + new Vector3(0f, -0.26f, 0.58f), new Vector3(0.76f, 0.04f, 0.06f), warning);
-            }
-            else if (mode == 2)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 高压闸刀", position + new Vector3(0.2f, 0.04f, 0.7f), new Vector3(0.08f, 0.5f, 0.08f), new Color(0.86f, 0.12f, 0.08f, 1f), -18f);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 电缆线束 A", position + new Vector3(-0.22f, -0.18f, 0.48f), new Vector3(0.42f, 0.04f, 0.05f), metal, 12f);
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 电缆线束 B", position + new Vector3(-0.18f, 0.1f, 0.5f), new Vector3(0.36f, 0.04f, 0.05f), metal, -10f);
-            }
-            else if (mode == 3)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 证物托盘", position + new Vector3(0f, -0.1f, 0.48f), new Vector3(0.52f, 0.24f, 0.08f), new Color(0.82f, 0.84f, 0.76f, 1f));
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 扫描光带", position + new Vector3(0f, 0.08f, 0.68f), new Vector3(0.52f, 0.035f, 0.08f), new Color(0.4f, 0.24f, 0.86f, 1f));
-                CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 样本管", PrimitiveType.Cylinder, position + new Vector3(0.26f, -0.18f, 0.62f), new Vector3(0.05f, 0.05f, 0.16f), accent, Quaternion.identity);
-            }
-            else if (mode == 4)
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 账本抽屉", position + new Vector3(-0.22f, -0.18f, 0.5f), new Vector3(0.28f, 0.16f, 0.08f), new Color(0.46f, 0.34f, 0.16f, 1f));
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 现金捆", position + new Vector3(0.2f, -0.18f, 0.5f), new Vector3(0.22f, 0.14f, 0.08f), new Color(0.16f, 0.5f, 0.22f, 1f));
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 冻结蓝屏", position + new Vector3(0f, 0.36f, 0.82f), new Vector3(0.58f, 0.035f, 0.08f), new Color(0.08f, 0.46f, 0.88f, 1f));
-            }
-            else
-            {
-                CreateMeshBoxProp("成熟任务站 " + taskName + " 路线板", position + new Vector3(0f, 0.28f, 0.74f), new Vector3(0.56f, 0.04f, 0.24f), new Color(0.78f, 0.72f, 0.54f, 1f));
-                CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 路线红点", PrimitiveType.Cylinder, position + new Vector3(-0.16f, 0.32f, 0.86f), new Vector3(0.05f, 0.05f, 0.04f), new Color(0.88f, 0.1f, 0.06f, 1f), Quaternion.Euler(90f, 0f, 0f));
-                CreateMeshPrimitiveProp("成熟任务站 " + taskName + " 路线蓝点", PrimitiveType.Cylinder, position + new Vector3(0.18f, 0.22f, 0.86f), new Vector3(0.05f, 0.05f, 0.04f), new Color(0.08f, 0.32f, 0.9f, 1f), Quaternion.Euler(90f, 0f, 0f));
-            }
-        }
-
-        // --- CreateMatureDockyardSetPieces (moved from controller) ---
-        private void CreateMatureDockyardSetPieces()
-        {
-            CreateMatureAssetCluster("北货柜泊位", new Vector3(-9.42f, 5.16f, 0f), 0f, 0);
-            CreateMatureAssetCluster("西侧水警泊位", new Vector3(-9.78f, 1.6f, 0f), -90f, 1);
-            CreateMatureAssetCluster("夜市后勤口", new Vector3(-3.68f, 2.94f, 0f), 8f, 2);
-            CreateMatureAssetCluster("金融楼卸货口", new Vector3(4.98f, 3.12f, 0f), -6f, 3);
-            CreateMatureAssetCluster("电房维修坪", new Vector3(8.42f, 5.58f, 0f), 2f, 4);
-            CreateMatureAssetCluster("后巷诊所口", new Vector3(6.08f, -3.82f, 0f), -12f, 5);
-            CreateMatureAssetCluster("证物库外场", new Vector3(-8.34f, -4.86f, 0f), 5f, 6);
-            CreateMatureAssetCluster("指挥车警戒线", new Vector3(0.36f, -5.16f, 0f), 0f, 7);
-
-            string[] railModels =
-            {
-                "Props/Prop_Rail_2.fbx",
-                "Props/Prop_Rail_3.fbx",
-                "Props/Prop_Rail_4.fbx",
-                "Props/Prop_Rail_Round_Small.fbx"
-            };
-
-            Vector3[] railLine =
-            {
-                new Vector3(-7.4f, 4.22f, 0f),
-                new Vector3(-5.54f, 3.18f, 0f),
-                new Vector3(-2.22f, 1.86f, 0f),
-                new Vector3(1.08f, 1.38f, 0f),
-                new Vector3(4.78f, 2.32f, 0f),
-                new Vector3(7.4f, 3.96f, 0f),
-                new Vector3(6.38f, -2.92f, 0f),
-                new Vector3(2.42f, -3.12f, 0f),
-                new Vector3(-2.26f, -3.0f, 0f),
-                new Vector3(-6.72f, -3.72f, 0f)
-            };
-
-            for (int i = 0; i < railLine.Length; i++)
-            {
-                float rotation = i % 2 == 0 ? 18f : -14f;
-                CreateModelProp("成熟港区设施 免费护栏动线 " + i, railModels[i % railModels.Length], railLine[i], new Vector3(0.58f, 0.22f, 0.2f), rotation, true);
-                CreateModelProp("成熟港区设施 免费地面箭头标识 " + i, i % 3 == 0 ? "Decals/Decal_Line_Bend1_R.fbx" : "Decals/Decal_Line_Straight.fbx", railLine[i] + new Vector3(0.0f, -0.28f, -0.02f), new Vector3(0.48f, 0.22f, 0.04f), rotation, true);
-            }
-
-            OnlineMapService.ShipRoomSpec[] rooms = mapService.ShipRooms();
-
-            for (int i = 0; i < rooms.Length; i++)
-            {
-                OnlineMapService.ShipRoomSpec room = rooms[i];
-                float halfWidth = room.Size.x * 0.5f;
-                Vector3 left = room.Center + new Vector3(-halfWidth + 0.48f, 0.12f, 0.16f);
-                Vector3 right = room.Center + new Vector3(halfWidth - 0.48f, -0.18f, 0.16f);
-                CreateModelProp("成熟港区设施 房间免费通风机 " + room.Name, "Props/Prop_Vent_Wide.fbx", left, new Vector3(0.52f, 0.18f, 0.18f), i % 2 == 0 ? 0f : 180f, true);
-                CreateModelProp("成熟港区设施 房间免费照明灯 " + room.Name, i % 2 == 0 ? "Props/Prop_Light_Wide.fbx" : "Props/Prop_Light_Small.fbx", right, new Vector3(0.46f, 0.18f, 0.16f), i % 2 == 0 ? 180f : 0f, true);
-            }
-
-            CreateMatureDockyardVehicleAndStreetLayer();
-            CreateMatureDockyardCrowdScaleProps();
-        }
-
-        // --- CreateMatureDockyardVehicleAndStreetLayer (moved from controller) ---
-        private void CreateMatureDockyardVehicleAndStreetLayer()
-        {
-            Color policeBlue = new Color(0.08f, 0.24f, 0.78f, 1f);
-            Color policeRed = new Color(0.86f, 0.08f, 0.06f, 1f);
-            Color taxiRed = new Color(0.7f, 0.08f, 0.06f, 1f);
-            Color taxiWhite = new Color(0.86f, 0.86f, 0.78f, 1f);
-            Color van = new Color(0.1f, 0.16f, 0.18f, 1f);
-
-            CreateVehicleSetPiece("成熟港区设施 警用冲锋车", new Vector3(-0.15f, -5.38f, 0.1f), new Vector3(1.55f, 0.72f, 0.42f), van, policeBlue, 0f);
-            CreateVehicleSetPiece("成熟港区设施 茶餐厅红的士", new Vector3(-4.15f, 0.78f, 0.1f), new Vector3(1.25f, 0.54f, 0.34f), taxiRed, taxiWhite, 8f);
-            CreateVehicleSetPiece("成熟港区设施 后巷黑色面包车", new Vector3(6.62f, -2.32f, 0.1f), new Vector3(1.38f, 0.58f, 0.38f), new Color(0.035f, 0.04f, 0.045f, 1f), new Color(0.38f, 0.46f, 0.48f, 1f), -10f);
-
-            CreateMeshBoxProp("成熟港区设施 警车顶灯红", new Vector3(-0.55f, -4.86f, 0.52f), new Vector3(0.24f, 0.05f, 0.07f), policeRed);
-            CreateMeshBoxProp("成熟港区设施 警车顶灯蓝", new Vector3(0.45f, -4.86f, 0.52f), new Vector3(0.24f, 0.05f, 0.07f), policeBlue);
-
-            Vector3[] roadblockPositions =
-            {
-                new Vector3(-3.25f, -3.64f, 0.1f),
-                new Vector3(-2.62f, -3.78f, 0.1f),
-                new Vector3(1.82f, -4.18f, 0.1f),
-                new Vector3(2.48f, -4.02f, 0.1f),
-                new Vector3(4.18f, 1.34f, 0.1f),
-                new Vector3(4.8f, 1.12f, 0.1f),
-                new Vector3(-7.38f, 4.28f, 0.1f),
-                new Vector3(-6.78f, 4.08f, 0.1f)
-            };
-
-            for (int i = 0; i < roadblockPositions.Length; i++)
-            {
-                Vector3 position = roadblockPositions[i];
-                CreateSolidMeshBoxProp("成熟港区设施 可碰撞水马路障 " + i, position, new Vector3(0.46f, 0.12f, 0.22f), i % 2 == 0 ? policeBlue : policeRed, i % 2 == 0 ? -12f : 14f);
-                CreateMeshBoxProp("成熟港区设施 水马反光白条 " + i, position + new Vector3(0f, 0.02f, 0.18f), new Vector3(0.34f, 0.035f, 0.04f), new Color(0.86f, 0.86f, 0.78f, 1f), i % 2 == 0 ? -12f : 14f);
-            }
-        }
-
-        // --- CreateVehicleSetPiece (moved from controller) ---
-        private void CreateVehicleSetPiece(string name, Vector3 position, Vector3 size, Color body, Color stripe, float rotationDegrees)
-        {
-            CreateSolidMeshBoxProp(name + " 车身", position + new Vector3(0f, 0f, 0.18f), size, body, rotationDegrees);
-            CreateMeshBoxProp(name + " 前挡风玻璃", position + new Vector3(size.x * 0.18f, size.y * 0.28f, 0.48f), new Vector3(size.x * 0.24f, 0.04f, 0.1f), new Color(0.12f, 0.42f, 0.52f, 1f), rotationDegrees);
-            CreateMeshBoxProp(name + " 侧面识别条", position + new Vector3(0f, -size.y * 0.28f, 0.42f), new Vector3(size.x * 0.72f, 0.035f, 0.06f), stripe, rotationDegrees);
-
-            for (int i = 0; i < 4; i++)
-            {
-                float x = i < 2 ? -size.x * 0.32f : size.x * 0.32f;
-                float y = i % 2 == 0 ? -size.y * 0.36f : size.y * 0.36f;
-                CreateMeshPrimitiveProp(name + " 轮胎 " + i, PrimitiveType.Cylinder, position + new Vector3(x, y, 0.14f), new Vector3(0.12f, 0.04f, 0.12f), new Color(0.015f, 0.015f, 0.018f, 1f), Quaternion.Euler(90f, 0f, rotationDegrees));
-            }
-        }
-
-        // --- CreateMatureDockyardCrowdScaleProps (moved from controller) ---
-        private void CreateMatureDockyardCrowdScaleProps()
-        {
-            Color cone = new Color(0.9f, 0.34f, 0.08f, 1f);
-            Color white = new Color(0.86f, 0.86f, 0.78f, 1f);
-            Color sign = new Color(0.92f, 0.72f, 0.08f, 1f);
-
-            for (int i = 0; i < 24; i++)
-            {
-                float band = i % 6;
-                float row = i / 6;
-                Vector3 position = new Vector3(-5.9f + band * 2.25f + (row % 2) * 0.38f, -6.25f + row * 0.62f, 0.08f);
-                CreateMeshPrimitiveProp("成熟港区设施 路锥阵列 " + i, PrimitiveType.Cylinder, position, new Vector3(0.1f, 0.08f, 0.12f), cone, Quaternion.Euler(90f, 0f, 0f));
-                CreateMeshBoxProp("成熟港区设施 路锥白条 " + i, position + new Vector3(0f, 0f, 0.11f), new Vector3(0.11f, 0.035f, 0.025f), white);
-            }
-
-            Vector3[] signPositions =
-            {
-                new Vector3(-8.88f, 3.86f, 0.32f),
-                new Vector3(-3.28f, 2.26f, 0.32f),
-                new Vector3(2.68f, -3.36f, 0.32f),
-                new Vector3(7.72f, 3.78f, 0.32f),
-                new Vector3(6.34f, -4.12f, 0.32f)
-            };
-
-            for (int i = 0; i < signPositions.Length; i++)
-            {
-                CreateMeshBoxProp("成熟港区设施 港区警示立牌 " + i, signPositions[i], new Vector3(0.46f, 0.055f, 0.34f), sign, i % 2 == 0 ? 8f : -8f);
-                CreateMeshBoxProp("成熟港区设施 警示立牌黑条 " + i, signPositions[i] + new Vector3(0f, 0.04f, 0.1f), new Vector3(0.32f, 0.025f, 0.04f), new Color(0.04f, 0.04f, 0.04f, 1f), i % 2 == 0 ? 8f : -8f);
-            }
-        }
-
-        // --- CreateMatureAssetCluster (moved from controller) ---
-        private void CreateMatureAssetCluster(string clusterName, Vector3 center, float rotation, int variant)
-        {
-            string[] bulkyProps =
-            {
-                "Props/Prop_Crate3.fbx",
-                "Props/Prop_Crate4.fbx",
-                "Props/Prop_Chest.fbx",
-                "Props/Prop_Barrel_Large.fbx"
-            };
-
-            string[] utilityProps =
-            {
-                "Props/Prop_AccessPoint.fbx",
-                "Props/Prop_Computer.fbx",
-                "Props/Prop_ItemHolder.fbx",
-                "Props/Prop_Cable_1.fbx",
-                "Props/Prop_Cable_3.fbx",
-                "Props/Prop_Vent_Big.fbx",
-                "Props/Prop_Light_Floor.fbx",
-                "Props/Prop_PipeHolder.fbx"
-            };
-
-            string[] platformProps =
-            {
-                "Platforms/Platform_Metal2.fbx",
-                "Platforms/Platform_DarkPlates.fbx",
-                "Platforms/Platform_3Plates.fbx",
-                "Platforms/Platform_Rails_4Wide.fbx",
-                "Platforms/Platform_Stairs_2.fbx",
-                "Platforms/Door_Frame_A.fbx"
-            };
-
-            Vector3[] offsets =
-            {
-                new Vector3(-0.72f, 0.22f, 0.08f),
-                new Vector3(-0.28f, -0.22f, 0.08f),
-                new Vector3(0.34f, 0.22f, 0.08f),
-                new Vector3(0.76f, -0.16f, 0.08f)
-            };
-
-            for (int i = 0; i < offsets.Length; i++)
-            {
-                Vector3 offset = RotateOffset(offsets[i], rotation);
-                CreateModelProp("成熟港区设施 " + clusterName + " 免费货物组 " + i, bulkyProps[(variant + i) % bulkyProps.Length], center + offset, new Vector3(0.48f, 0.34f, 0.32f), rotation + i * 11f, false);
-            }
-
-            for (int i = 0; i < utilityProps.Length; i++)
-            {
-                float angle = rotation + i * 31f;
-                Vector3 ring = RotateOffset(new Vector3(Mathf.Cos(i * 0.72f) * 1.02f, Mathf.Sin(i * 0.72f) * 0.58f, 0.1f), rotation);
-                Vector3 footprint = i % 3 == 0 ? new Vector3(0.38f, 0.24f, 0.28f) : new Vector3(0.32f, 0.2f, 0.24f);
-                CreateModelProp("成熟港区设施 " + clusterName + " 免费设备件 " + i, utilityProps[i], center + ring, footprint, angle, false);
-            }
-
-            for (int i = 0; i < platformProps.Length; i++)
-            {
-                Vector3 strip = RotateOffset(new Vector3(-1.12f + i * 0.45f, 0.78f, -0.02f), rotation);
-                CreateModelProp("成熟港区设施 " + clusterName + " 免费平台件 " + i, platformProps[i], center + strip, new Vector3(0.52f, 0.26f, 0.14f), rotation + (i % 2 == 0 ? 0f : 180f), true);
-            }
-
-            CreateMeshBoxProp("成熟港区设施 " + clusterName + " 警戒反光地线 A", center + RotateOffset(new Vector3(0f, -0.72f, 0.04f), rotation), new Vector3(1.68f, 0.035f, 0.05f), new Color(0.92f, 0.7f, 0.08f, 1f), rotation);
-            CreateMeshBoxProp("成熟港区设施 " + clusterName + " 冷光编号条 B", center + RotateOffset(new Vector3(0.42f, 0.62f, 0.06f), rotation), new Vector3(0.92f, 0.035f, 0.05f), new Color(0.08f, 0.72f, 0.86f, 1f), rotation + 8f);
-            CreateShapeProp("成熟港区设施 " + clusterName + " 作业区底影", roundedRectSprite, center + new Vector3(0f, 0f, -0.055f), new Vector3(2.38f, 1.28f, 0.04f), new Color(0.02f, 0.026f, 0.028f, 0.68f));
-        }
-
-        // --- CreateTaskInteractionHalos (moved from controller) ---
-        private void CreateTaskInteractionHalos()
-        {
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0f);
-                Color accent = TaskPanelAccent(task.Id);
-                CreateShapeProp("任务交互范围环 " + task.Name, circleSprite, designPosition + new Vector3(0f, 0f, -0.03f), new Vector3(0.72f, 0.46f, 0.04f), new Color(accent.r, accent.g, accent.b, 0.2f));
-                CreateShapeProp("任务可读性 外发光底环 " + task.Name, softCircleSprite, designPosition + new Vector3(0f, 0f, 0.03f), new Vector3(0.96f, 0.62f, 0.05f), new Color(accent.r, accent.g, accent.b, 0.24f));
-                CreateMeshBoxProp("任务可读性 交互键 E " + task.Name, designPosition + new Vector3(-0.36f, 0.34f, 0.52f), new Vector3(0.18f, 0.035f, 0.12f), new Color(0.94f, 0.76f, 0.12f, 1f));
-                CreateMeshBoxProp("任务可读性 状态灯条 " + task.Name, designPosition + new Vector3(0.02f, 0.38f, 0.58f), new Vector3(0.52f, 0.04f, 0.08f), accent);
-                CreateMeshPrimitiveProp("任务可读性 竖向信标 " + task.Name, PrimitiveType.Cylinder, designPosition + new Vector3(0.42f, 0.18f, 0.42f), new Vector3(0.04f, 0.04f, 0.58f), accent, Quaternion.identity);
-                CreateMeshBoxProp("任务可读性 信标顶灯 " + task.Name, designPosition + new Vector3(0.42f, 0.18f, 0.74f), new Vector3(0.16f, 0.035f, 0.08f), new Color(0.96f, 0.92f, 0.42f, 1f));
-
-                if (task.Id % 3 == 0)
-                {
-                    CreateModelProp("CC0 任务备用小终端 " + task.Name, "Props/Prop_Computer.fbx", designPosition + new Vector3(0.36f, -0.22f, 0.08f), new Vector3(0.32f, 0.24f, 0.24f), 180f);
-                }
-                else if (task.Id % 3 == 1)
-                {
-                    CreateModelProp("CC0 任务工具架 " + task.Name, "Props/Prop_ItemHolder.fbx", designPosition + new Vector3(-0.36f, 0.2f, 0.08f), new Vector3(0.28f, 0.22f, 0.24f), 0f);
-                }
-                else
-                {
-                    CreateModelProp("CC0 任务线缆夹 " + task.Name, "Props/Prop_Clamp.fbx", designPosition + new Vector3(0.32f, 0.18f, 0.08f), new Vector3(0.24f, 0.2f, 0.22f), 90f);
-                }
-            }
-        }
-
-        // --- CreateEmergencyMeetingTableSet (moved from controller) ---
-        private void CreateEmergencyMeetingTableSet()
-        {
-            Color table = new Color(0.24f, 0.28f, 0.28f, 1f);
-            Color seat = new Color(0.08f, 0.12f, 0.14f, 1f);
-            CreateMeshPrimitiveProp("会议桌低矮圆台", PrimitiveType.Cylinder, new Vector3(0f, -0.35f, 0.08f), new Vector3(0.74f, 0.035f, 0.74f), table, Quaternion.Euler(90f, 0f, 0f));
-            CreateMeshBoxProp("会议桌证据投影线 A", new Vector3(0f, -0.12f, 0.28f), new Vector3(0.82f, 0.035f, 0.04f), new Color(0.05f, 0.72f, 0.86f, 1f));
-            CreateMeshBoxProp("会议桌证据投影线 B", new Vector3(0.18f, -0.56f, 0.28f), new Vector3(0.46f, 0.035f, 0.04f), new Color(0.95f, 0.22f, 0.18f, 1f));
-
-            for (int i = 0; i < 10; i++)
-            {
-                float angle = i / 10f * Mathf.PI * 2f;
-                Vector3 position = new Vector3(Mathf.Cos(angle) * 1.18f, -0.35f + Mathf.Sin(angle) * 0.78f, 0.09f);
-                CreateMeshPrimitiveProp("会议玩家座位 " + i, PrimitiveType.Cylinder, position, new Vector3(0.16f, 0.025f, 0.16f), seat, Quaternion.Euler(90f, 0f, 0f));
-            }
-        }
-
-        // --- CreatePhysicsCollisionMarkers (moved from controller) ---
-        private void CreatePhysicsCollisionMarkers()
-        {
-            Color bumper = new Color(0.04f, 0.05f, 0.052f, 1f);
-            Color stripe = new Color(0.92f, 0.72f, 0.08f, 1f);
-
-            Vector3[] positions =
-            {
-                new Vector3(-7.65f, 0.92f, 0.08f),
-                new Vector3(7.86f, -0.72f, 0.08f),
-                new Vector3(-4.1f, -4.46f, 0.08f),
-                new Vector3(4.35f, 4.14f, 0.08f)
-            };
-
-            for (int i = 0; i < positions.Length; i++)
-            {
-                Vector3 position = positions[i];
-                CreateSolidProp("实体碰撞防撞墩 " + i, position, new Vector3(0.22f, 0.42f, 0.2f), bumper);
-                CreateMeshBoxProp("防撞墩反光贴 " + i, position + new Vector3(0f, 0.18f, 0.2f), new Vector3(0.18f, 0.035f, 0.05f), stripe);
-            }
-        }
-
-        // --- CreateDenseOfficialFreeRoadFurniture (moved from controller) ---
-        private void CreateDenseOfficialFreeRoadFurniture()
-        {
-            string[] furniture =
-            {
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Traffic_cone",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Traffic_light",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Pole_traffic_light",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Sewer_hatch",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Bench_1",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Trash_can_1",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Hydrant",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Pole1",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic cone",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic Sign_stop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic Signal_small",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Street Light",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_small",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Switch_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Keypad_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Papers_05",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Traffic Control Barrier Fence",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_large",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof Solar Panel",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof Antenna"
-            };
-
-            Vector3[] positions =
-            {
-                new Vector3(-8.78f, 4.28f, 0.14f),
-                new Vector3(-7.42f, 4.12f, 0.14f),
-                new Vector3(-5.85f, 3.54f, 0.14f),
-                new Vector3(-4.62f, 2.42f, 0.14f),
-                new Vector3(-3.16f, 0.72f, 0.14f),
-                new Vector3(-1.62f, 1.46f, 0.14f),
-                new Vector3(0.68f, 0.86f, 0.14f),
-                new Vector3(2.2f, 1.28f, 0.14f),
-                new Vector3(3.92f, 0.72f, 0.14f),
-                new Vector3(5.18f, 1.55f, 0.14f),
-                new Vector3(6.82f, 3.42f, 0.14f),
-                new Vector3(8.18f, 4.55f, 0.14f),
-                new Vector3(8.42f, 2.52f, 0.14f),
-                new Vector3(7.62f, 0.12f, 0.14f),
-                new Vector3(6.4f, -1.62f, 0.14f),
-                new Vector3(4.52f, -2.62f, 0.14f),
-                new Vector3(2.6f, -3.72f, 0.14f),
-                new Vector3(0.42f, -4.62f, 0.14f),
-                new Vector3(-1.62f, -4.48f, 0.14f),
-                new Vector3(-3.85f, -3.68f, 0.14f),
-                new Vector3(-5.92f, -3.85f, 0.14f),
-                new Vector3(-7.52f, -4.55f, 0.14f),
-                new Vector3(-8.72f, -2.18f, 0.14f),
-                new Vector3(-7.82f, -0.42f, 0.14f),
-                new Vector3(-6.92f, 1.28f, 0.14f),
-                new Vector3(-4.02f, 4.12f, 0.14f),
-                new Vector3(-0.85f, 3.84f, 0.14f),
-                new Vector3(2.88f, 3.32f, 0.14f),
-                new Vector3(5.65f, 4.32f, 0.14f),
-                new Vector3(9.35f, -3.95f, 0.14f)
-            };
-
-            for (int i = 0; i < positions.Length; i++)
-            {
-                bool solid = i % 5 == 0 || i % 7 == 0;
-                Vector3 footprint = i % 4 == 0
-                    ? new Vector3(0.34f, 0.24f, 0.48f)
-                    : i % 4 == 1
-                        ? new Vector3(0.24f, 0.2f, 0.36f)
-                        : new Vector3(0.2f, 0.18f, 0.3f);
-
-                if (solid)
-                {
-                    CreateSolidAssetStoreProp("官方免费街区密度层 路边物件 " + i, furniture[i % furniture.Length], positions[i], footprint, i * 13f, false);
-                }
-                else
-                {
-                    CreateAssetStoreProp("官方免费街区密度层 路边物件 " + i, furniture[i % furniture.Length], positions[i], footprint, i * 13f, false);
-                }
-            }
-        }
-
-        // --- CreateDenseOfficialFreeTransitAndVehicleProps (moved from controller) ---
-        private void CreateDenseOfficialFreeTransitAndVehicleProps()
-        {
-            (string path, Vector3 position, Vector3 footprint, float rotation, bool solid)[] vehicles =
-            {
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Police Car", new Vector3(-1.1f, -5.92f, 0.14f), new Vector3(0.9f, 0.42f, 0.36f), 4f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Police Car", new Vector3(1.42f, -5.78f, 0.14f), new Vector3(0.9f, 0.42f, 0.36f), -6f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Taxi", new Vector3(-3.05f, 3.98f, 0.14f), new Vector3(0.84f, 0.38f, 0.32f), -11f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Taxi", new Vector3(3.25f, -3.38f, 0.14f), new Vector3(0.84f, 0.38f, 0.32f), 14f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Bus_color02", new Vector3(-3.8f, 6.68f, 0.14f), new Vector3(1.2f, 0.48f, 0.4f), 0f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Truck_color01", new Vector3(-10.3f, 6.02f, 0.14f), new Vector3(1.12f, 0.46f, 0.4f), 3f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Container_color03", new Vector3(-9.45f, 4.82f, 0.14f), new Vector3(1.12f, 0.46f, 0.42f), -2f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Ambulance", new Vector3(7.78f, -5.15f, 0.14f), new Vector3(0.92f, 0.42f, 0.34f), -8f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_SUV_color02", new Vector3(8.45f, -1.88f, 0.14f), new Vector3(0.86f, 0.4f, 0.34f), 8f, true),
-                (AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Pick up Truck_color02", new Vector3(5.52f, -0.62f, 0.14f), new Vector3(0.88f, 0.4f, 0.34f), -12f, true)
-            };
-
-            for (int i = 0; i < vehicles.Length; i++)
-            {
-                if (vehicles[i].solid)
-                {
-                    CreateSolidAssetStoreProp("官方免费街区密度层 交通车辆 " + i, vehicles[i].path, vehicles[i].position, vehicles[i].footprint, vehicles[i].rotation, false);
-                }
-                else
-                {
-                    CreateAssetStoreProp("官方免费街区密度层 交通车辆 " + i, vehicles[i].path, vehicles[i].position, vehicles[i].footprint, vehicles[i].rotation, false);
-                }
-            }
-
-            string[] pavement =
-            {
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Roads/Pavement",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Complex/Road_1_line_5m",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Roads/Road_1_line",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Roads/Crossroads_1_lines_walk"
-            };
-
-            for (int i = 0; i < 14; i++)
-            {
-                float x = -10.2f + i * 1.58f;
-                float y = i % 2 == 0 ? 6.36f : -6.12f;
-                CreateAssetStoreProp("官方免费街区密度层 人行道铺面 " + i, pavement[i % pavement.Length], new Vector3(x, y, -0.2f), new Vector3(0.78f, 0.32f, 0.04f), i % 2 == 0 ? 0f : 180f, true);
-            }
-        }
-
-        // --- CreateDenseOfficialFreeTaskAnchors (moved from controller) ---
-        private void CreateDenseOfficialFreeTaskAnchors()
-        {
-            string[] anchors =
-            {
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof prop air",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Roof_prop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Bus Stop",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_Dustbin",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Switch_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Manhole_01",
-                AssetStoreResourceRoot + "ModularLowpolyStreetsFree/Prefabs/Other/Sewer_hatch",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Props/Props_BillBoard_medium"
-            };
-
-            for (int i = 0; i < tasks.Count; i++)
-            {
-                OnlineTaskState task = tasks[i];
-                Vector3 designPosition = new Vector3(task.Position.x / mapService.DesignScaleX, task.Position.y / mapService.DesignScaleY, 0.22f);
-                Vector3 offset = new Vector3(i % 2 == 0 ? -0.38f : 0.38f, i % 3 == 0 ? 0.3f : -0.26f, 0f);
-                CreateAssetStoreProp("官方免费街区密度层 任务实体锚点 " + task.Id, anchors[i % anchors.Length], designPosition + offset, new Vector3(0.34f, 0.26f, 0.34f), i * 19f, false);
-            }
-        }
-
-        // --- CreateLargeHongKongPortBackdrop (moved from controller) ---
-        private void CreateLargeHongKongPortBackdrop()
-        {
-            Color skylineDark = new Color(0.024f, 0.032f, 0.04f, 1f);
-            Color skylineMid = new Color(0.038f, 0.052f, 0.064f, 1f);
-            Color windowBlue = new Color(0.08f, 0.44f, 0.58f, 1f);
-            Color windowAmber = new Color(0.86f, 0.62f, 0.18f, 1f);
-
-            for (int i = 0; i < 14; i++)
-            {
-                float x = -11.4f + i * 1.75f;
-                float height = 0.46f + i % 5 * 0.16f;
-                CreateMeshBoxProp("大场景港区层 远景香港楼宇体 " + i, new Vector3(x, 7.36f, height * 0.5f), new Vector3(1.0f + i % 3 * 0.22f, 0.16f, height), i % 2 == 0 ? skylineDark : skylineMid);
-
-                for (int w = 0; w < 3; w++)
-                {
-                    CreateMeshBoxProp("大场景港区层 远景楼宇窗格 " + i + "-" + w, new Vector3(x - 0.28f + w * 0.28f, 7.47f, 0.22f + w * 0.12f), new Vector3(0.12f, 0.026f, 0.045f), (i + w) % 2 == 0 ? windowBlue : windowAmber);
-                }
-            }
-
-            for (int i = 0; i < 10; i++)
-            {
-                float y = -5.8f + i * 1.18f;
-                CreateMeshBoxProp("大场景港区层 西侧海面码头反光 " + i, new Vector3(-12.25f, y, -0.2f), new Vector3(0.74f, 0.035f, 0.04f), new Color(0.16f, 0.36f, 0.44f, 1f));
-                CreateMeshBoxProp("大场景港区层 东侧海面码头反光 " + i, new Vector3(12.25f, y + 0.5f, -0.2f), new Vector3(0.66f, 0.035f, 0.04f), new Color(0.12f, 0.32f, 0.42f, 1f));
-            }
-
-            CreateMeshBoxProp("大场景港区层 远景青马桥剪影", new Vector3(0f, 7.05f, 0.42f), new Vector3(8.6f, 0.06f, 0.08f), new Color(0.08f, 0.1f, 0.1f, 1f));
-            CreateMeshBoxProp("大场景港区层 远景桥塔左", new Vector3(-3.2f, 7.12f, 0.72f), new Vector3(0.08f, 0.08f, 0.78f), new Color(0.08f, 0.1f, 0.1f, 1f));
-            CreateMeshBoxProp("大场景港区层 远景桥塔右", new Vector3(3.25f, 7.12f, 0.74f), new Vector3(0.08f, 0.08f, 0.82f), new Color(0.08f, 0.1f, 0.1f, 1f));
-        }
-
-        // --- CreateLargeDistrictDepthSilhouettes (moved from controller) ---
-        private void CreateLargeDistrictDepthSilhouettes()
-        {
-            Color nearShadow = new Color(0.006f, 0.008f, 0.01f, 0.82f);
-            Color metalDark = new Color(0.035f, 0.044f, 0.048f, 1f);
-            Color trim = new Color(0.42f, 0.48f, 0.48f, 1f);
-
-            Vector3[] gantries =
-            {
-                new Vector3(-9.5f, 6.42f, 0.86f),
-                new Vector3(-5.18f, 6.24f, 0.74f),
-                new Vector3(8.7f, 6.12f, 0.8f),
-                new Vector3(5.85f, -4.12f, 0.72f),
-                new Vector3(-8.55f, -4.12f, 0.76f)
-            };
-
-            for (int i = 0; i < gantries.Length; i++)
-            {
-                Vector3 center = gantries[i];
-                CreateMeshBoxProp("大场景港区层 区域门架横梁 " + i, center, new Vector3(2.25f, 0.12f, 0.14f), metalDark);
-                CreateMeshBoxProp("大场景港区层 区域门架左柱 " + i, center + new Vector3(-1.05f, -0.18f, -0.32f), new Vector3(0.1f, 0.1f, 0.7f), metalDark);
-                CreateMeshBoxProp("大场景港区层 区域门架右柱 " + i, center + new Vector3(1.05f, -0.18f, -0.32f), new Vector3(0.1f, 0.1f, 0.7f), metalDark);
-                CreateMeshBoxProp("大场景港区层 区域门架冷光 " + i, center + new Vector3(0f, -0.08f, 0.08f), new Vector3(1.7f, 0.035f, 0.05f), trim);
-            }
-
-            Vector3[] foregroundShadows =
-            {
-                new Vector3(-9.4f, 3.58f, 0.82f),
-                new Vector3(-4.8f, 0.72f, 0.78f),
-                new Vector3(4.75f, 1.22f, 0.8f),
-                new Vector3(8.85f, 3.72f, 0.82f),
-                new Vector3(0.0f, -4.1f, 0.78f),
-                new Vector3(6.15f, -3.68f, 0.8f)
-            };
-
-            for (int i = 0; i < foregroundShadows.Length; i++)
-            {
-                CreateMeshBoxProp("大场景港区层 近景房檐投影 " + i, foregroundShadows[i], new Vector3(2.4f, 0.18f, 0.42f), nearShadow, i % 2 == 0 ? 0f : 4f);
-            }
-        }
-
-        // --- CreateLargePlayableSightlineSetPieces (moved from controller) ---
-        private void CreateLargePlayableSightlineSetPieces()
-        {
-            Color wall = new Color(0.025f, 0.034f, 0.038f, 1f);
-            Color accent = new Color(0.08f, 0.68f, 0.84f, 1f);
-            Color warning = new Color(0.9f, 0.68f, 0.08f, 1f);
-
-            Vector3[] blockers =
-            {
-                new Vector3(-5.68f, 4.18f, 0.22f),
-                new Vector3(-3.22f, 3.18f, 0.22f),
-                new Vector3(2.85f, 3.12f, 0.22f),
-                new Vector3(5.88f, 1.08f, 0.22f),
-                new Vector3(3.48f, -2.78f, 0.22f),
-                new Vector3(-4.72f, -2.82f, 0.22f),
-                new Vector3(-8.18f, -1.12f, 0.22f),
-                new Vector3(7.88f, -1.12f, 0.22f)
-            };
-
-            for (int i = 0; i < blockers.Length; i++)
-            {
-                bool horizontal = i % 2 == 0;
-                Vector3 scale = horizontal ? new Vector3(1.35f, 0.16f, 0.42f) : new Vector3(0.18f, 1.08f, 0.42f);
-                CreateSolidMeshBoxProp("大场景港区层 真实视线阻挡设备 " + i, blockers[i], scale, wall, i % 3 == 0 ? -8f : 8f);
-                CreateMeshBoxProp("大场景港区层 阻挡设备编号灯 " + i, blockers[i] + new Vector3(0f, 0.08f, 0.28f), horizontal ? new Vector3(0.78f, 0.035f, 0.05f) : new Vector3(0.035f, 0.62f, 0.05f), i % 2 == 0 ? accent : warning, i % 3 == 0 ? -8f : 8f);
-            }
-
-            for (int i = 0; i < 8; i++)
-            {
-                float x = -7.4f + i * 2.1f;
-                CreateMeshBoxProp("大场景港区层 可读性道路弧线 " + i, new Vector3(x, i % 2 == 0 ? -0.92f : 0.68f, 0.04f), new Vector3(0.92f, 0.035f, 0.04f), i % 2 == 0 ? warning : accent, i % 2 == 0 ? -14f : 14f);
-            }
-        }
-
-        // --- CreateExteriorDockVista (moved from controller) ---
-        private void CreateExteriorDockVista()
-        {
-            Color water = new Color(0.03f, 0.08f, 0.1f, 1f);
-            Color dock = new Color(0.12f, 0.14f, 0.13f, 1f);
-            Color crane = new Color(0.84f, 0.58f, 0.08f, 1f);
-            CreateShapeProp("维港远景水面西", roundedRectSprite, new Vector3(-12.2f, 3.0f, -0.32f), new Vector3(1.6f, 8.6f, 0.06f), water);
-            CreateShapeProp("维港远景水面东", roundedRectSprite, new Vector3(12.2f, -2.8f, -0.32f), new Vector3(1.6f, 8.4f, 0.06f), water);
-            CreateMeshBoxProp("码头外缘泊位线西", new Vector3(-10.72f, 4.32f, 0.08f), new Vector3(0.08f, 2.65f, 0.12f), dock);
-            CreateMeshBoxProp("码头外缘泊位线东", new Vector3(10.72f, -2.72f, 0.08f), new Vector3(0.08f, 2.5f, 0.12f), dock);
-            CreateSolidProp("外景集装箱堆 A", new Vector3(-10.92f, 5.88f, 0.05f), new Vector3(0.74f, 0.34f, 0.18f), new Color(0.08f, 0.24f, 0.52f, 1f));
-            CreateSolidProp("外景集装箱堆 B", new Vector3(-10.98f, 5.42f, 0.05f), new Vector3(0.72f, 0.34f, 0.18f), new Color(0.58f, 0.12f, 0.08f, 1f));
-            CreateSolidProp("外景集装箱堆 C", new Vector3(10.86f, -4.72f, 0.05f), new Vector3(0.74f, 0.34f, 0.18f), new Color(0.12f, 0.38f, 0.2f, 1f));
-            CreateMeshBoxProp("外景龙门吊立柱 A", new Vector3(-10.72f, 5.2f, 0.44f), new Vector3(0.08f, 1.42f, 0.64f), crane);
-            CreateMeshBoxProp("外景龙门吊横梁 A", new Vector3(-10.72f, 5.86f, 0.84f), new Vector3(0.92f, 0.06f, 0.08f), crane);
-            CreateMeshBoxProp("外景龙门吊吊钩 A", new Vector3(-10.34f, 5.62f, 0.48f), new Vector3(0.08f, 0.42f, 0.08f), new Color(0.05f, 0.05f, 0.05f, 1f));
-            CreateMeshBoxProp("东侧巡逻船体", new Vector3(10.88f, -1.42f, 0.06f), new Vector3(0.92f, 0.36f, 0.16f), new Color(0.08f, 0.16f, 0.22f, 1f));
-            CreateMeshBoxProp("东侧巡逻船警灯", new Vector3(10.88f, -1.12f, 0.22f), new Vector3(0.52f, 0.05f, 0.06f), new Color(0.08f, 0.36f, 0.92f, 1f));
-
-            for (int i = 0; i < 8; i++)
-            {
-                float y = -5.8f + i * 1.42f;
-                CreateProp("水面反光西 " + i, new Vector3(-12.18f, y, -0.26f), new Vector3(0.68f, 0.035f, 0.04f), new Color(0.18f, 0.38f, 0.42f, 1f));
-                CreateProp("水面反光东 " + i, new Vector3(12.18f, y + 0.62f, -0.26f), new Vector3(0.62f, 0.035f, 0.04f), new Color(0.16f, 0.34f, 0.42f, 1f));
-            }
-        }

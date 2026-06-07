@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using GanglandUndercover;
 using GanglandUndercover.Core;
@@ -27,7 +28,6 @@ namespace GanglandUndercover.Online
         public string CaseLogText => BuildCaseLog();
         public string PlayerListText => BuildPlayerList();
         public string ReleaseReadinessText => BuildReleaseReadiness();
-        public string MeetingEvidenceDigest => BuildMeetingEvidenceDigest();
         public string VoteTallySummary => BuildVoteTallySummary();
         public string ResultRosterLine => BuildResultRosterLine();
         public string ActiveTaskNameText => activeTaskId >= 0 ? GetTask(activeTaskId).Name : string.Empty;
@@ -53,7 +53,7 @@ namespace GanglandUndercover.Online
         public string LastEvidenceEvent => lastEvidenceEvent;
         public string LastSabotageEvent => lastSabotageEvent;
         public int EvidenceMilestoneIndex => evidenceMilestoneIndex;
-        public int TacticalMapLabelCount => tasks.Count + mapService.ShipRooms().Length + players.Count + (killSystem != null ? killSystem.killSystem.bodies.Count : 0) + ruleSet.UnderworldPassageCount;
+        public int TacticalMapLabelCount => tasks.Count + mapService.ShipRooms().Length + players.Count + (killSystem != null ? killSystem.bodies.Count : 0) + ruleSet.UnderworldPassageCount;
         public float LocalAbilityCooldown => TryGetLocalPlayer(out OnlinePlayerState localState) ? localState.AbilityCooldown : 0f;
         public float LocalKillCooldown => TryGetLocalPlayer(out OnlinePlayerState localState2) ? localState2.KillCooldown : 0f;
         public bool LocalAlive => IsLocalAlive();
@@ -77,6 +77,7 @@ namespace GanglandUndercover.Online
             EnsureMinimumBots();
             StartOnlineMatchCore(false);
         }
+#endif
 
         // --- OnGUI (moved from main controller) ---
         private void OnGUI()

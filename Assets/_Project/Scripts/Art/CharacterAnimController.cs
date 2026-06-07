@@ -22,15 +22,21 @@ namespace GanglandUndercover.Art
         private float _animTimer;
         private int _walkFrame;
 
-        private Sprite _bodyF, _bodyB, _bodyL, _bodyR;
+        private Sprite[] _frontFrames;
+        private Sprite[] _backFrames;
+        private Sprite[] _leftFrames;
+        private Sprite[] _rightFrames;
         private Sprite _corpseSprite;
 
-        public void Initialize(OnlinePlayerState state, Sprite bodyF, Sprite bodyB, Sprite bodyL, Sprite bodyR,
+        public void Initialize(OnlinePlayerState state, Sprite2DAssetCache.ProfSpriteSet spriteSet,
             Sprite corpseSprite, Sprite dirArrow)
         {
             State = state;
-            _bodyF = bodyF; _bodyB = bodyB; _bodyL = bodyL; _bodyR = bodyR;
-            _corpseSprite = corpseSprite;
+            _frontFrames = BuildFrames(spriteSet?.Front_Frame0, spriteSet?.Front_Frame1, spriteSet?.Front_Frame2, Sprite2DAssetCache.CharBody_Front);
+            _backFrames = BuildFrames(spriteSet?.Back_Frame0, spriteSet?.Back_Frame1, spriteSet?.Back_Frame2, Sprite2DAssetCache.CharBody_Back);
+            _leftFrames = BuildFrames(spriteSet?.Left_Frame0, spriteSet?.Left_Frame1, spriteSet?.Left_Frame2, Sprite2DAssetCache.CharBody_Left);
+            _rightFrames = BuildFrames(spriteSet?.Right_Frame0, spriteSet?.Right_Frame1, spriteSet?.Right_Frame2, Sprite2DAssetCache.CharBody_Right);
+            _corpseSprite = corpseSprite ?? spriteSet?.Dead ?? Sprite2DAssetCache.CorpseMarker;
 
             BodyRenderer = GetComponent<SpriteRenderer>();
             if (BodyRenderer == null && transform.childCount > 0)
@@ -62,7 +68,7 @@ namespace GanglandUndercover.Art
             {
                 if (BodyRenderer != null)
                 {
-                    BodyRenderer.sprite = _bodyF;
+                    BodyRenderer.sprite = FrameAt(_frontFrames, 0);
                     BodyRenderer.color = ProfessionPalette.GhostColor;
                 }
                 if (DirRenderer != null) DirRenderer.enabled = false;
@@ -75,13 +81,13 @@ namespace GanglandUndercover.Art
             float speed = move.magnitude / Mathf.Max(0.016f, Time.deltaTime);
 
             // 面向方向
-            Sprite bodySprite = _bodyF;
+            Sprite[] bodyFrames = _frontFrames;
             if (speed > 0.05f)
             {
                 if (Mathf.Abs(move.x) > Mathf.Abs(move.y))
-                    bodySprite = move.x > 0 ? _bodyR : _bodyL;
+                    bodyFrames = move.x > 0 ? _rightFrames : _leftFrames;
                 else
-                    bodySprite = move.y > 0 ? _bodyB : _bodyF;
+                    bodyFrames = move.y > 0 ? _backFrames : _frontFrames;
 
                 // 行走动画帧切换
                 _animTimer += Time.deltaTime;
@@ -92,12 +98,11 @@ namespace GanglandUndercover.Art
                 _walkFrame = 0;
             }
 
+            Sprite bodySprite = FrameAt(bodyFrames, _walkFrame);
             if (BodyRenderer != null && bodySprite != null)
             {
                 BodyRenderer.sprite = bodySprite;
-                // 微调缩放模拟行走动画
-                float scale = 1f + (_walkFrame == 1 ? 0.04f : _walkFrame == 2 ? -0.02f : 0f);
-                BodyRenderer.transform.localScale = new Vector3(0.8f * scale, 0.8f / scale, 1f);
+                BodyRenderer.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
             }
 
             // 方向箭头跟随移动方向
@@ -110,6 +115,27 @@ namespace GanglandUndercover.Art
                     DirRenderer.transform.localRotation = Quaternion.Euler(0, 0, angle);
                 }
             }
+        }
+
+        private static Sprite[] BuildFrames(Sprite idle, Sprite walk0, Sprite walk1, Sprite fallback)
+        {
+            Sprite baseFrame = idle != null ? idle : fallback;
+            return new[]
+            {
+                baseFrame,
+                walk0 != null ? walk0 : baseFrame,
+                walk1 != null ? walk1 : baseFrame
+            };
+        }
+
+        private static Sprite FrameAt(Sprite[] frames, int index)
+        {
+            if (frames == null || frames.Length == 0)
+            {
+                return null;
+            }
+
+            return frames[Mathf.Clamp(index, 0, frames.Length - 1)];
         }
     }
 }

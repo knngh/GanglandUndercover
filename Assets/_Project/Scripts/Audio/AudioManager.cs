@@ -161,6 +161,9 @@ namespace GanglandUndercover.Audio
             ambientSource.spatialBlend = 0f;
             ambientSource.loop = true;
 
+            // E1: Auto-load clips from Resources if not assigned in Inspector
+            AutoLoadMissingClips();
+
             ApplyVolumes();
 
             // Auto-start ambient loop if clip is assigned or loadable.
@@ -177,6 +180,69 @@ namespace GanglandUndercover.Audio
                 ambientSource.clip = ambientClip;
                 ambientSource.Play();
             }
+        }
+
+        /// <summary>
+        /// E1: Auto-load SFX and BGM clips from Resources if not assigned via Inspector.
+        /// Maps SoundEffect/MusicTrack enums to Resources/Audio/ paths.
+        /// </summary>
+        private void AutoLoadMissingClips()
+        {
+            void TryLoad(ref AudioClip field, string path)
+            {
+                if (field == null) field = Resources.Load<AudioClip>(path);
+            }
+            TryLoad(ref uiClickClip,          "Audio/SFX/SFX_UIClick");
+            TryLoad(ref footstepClip,         "Audio/SFX/SFX_Footstep");
+            TryLoad(ref killClip,             "Audio/SFX/SFX_Kill");
+            TryLoad(ref bodyReportClip,       "Audio/SFX/SFX_BodyReport");
+            TryLoad(ref reportClip,           "Audio/SFX/SFX_Report");
+            TryLoad(ref meetingStartClip,     "Audio/SFX/SFX_MeetingStart");
+            TryLoad(ref voteCastClip,         "Audio/SFX/SFX_VoteCast");
+            TryLoad(ref playerEliminatedClip, "Audio/SFX/SFX_PlayerEliminated");
+            TryLoad(ref taskCompleteClip,     "Audio/SFX/SFX_TaskComplete");
+            TryLoad(ref sabotageClip,         "Audio/SFX/SFX_Sabotage");
+            TryLoad(ref victoryClip,          "Audio/SFX/SFX_Victory");
+            TryLoad(ref defeatClip,           "Audio/SFX/SFX_Defeat");
+            TryLoad(ref emergencyClip,        "Audio/SFX/SFX_Emergency");
+            TryLoad(ref ventOpenClip,         "Audio/SFX/SFX_VentOpen");
+            TryLoad(ref ventCloseClip,        "Audio/SFX/SFX_VentClose");
+            TryLoad(ref buttonHoverClip,      "Audio/SFX/SFX_ButtonHover");
+            TryLoad(ref mainMenuBGM,          "Audio/BGM/BGM_MainMenu");
+            TryLoad(ref inGameBGM,            "Audio/BGM/BGM_InGame");
+            TryLoad(ref meetingBGM,           "Audio/BGM/BGM_Meeting");
+        }
+
+        // ── E2: BGM cross-fade ──
+        private Coroutine _fadeRoutine;
+        public void PlayMusicWithFade(AudioClip nextClip, float fadeDuration = 0.8f)
+        {
+            if (_fadeRoutine != null) StopCoroutine(_fadeRoutine);
+            _fadeRoutine = StartCoroutine(FadeMusicRoutine(nextClip, fadeDuration));
+        }
+        private System.Collections.IEnumerator FadeMusicRoutine(AudioClip nextClip, float duration)
+        {
+            float startVol = musicSource.volume;
+            float t = 0f;
+            // Fade out current
+            while (t < duration * 0.5f)
+            {
+                t += Time.deltaTime;
+                musicSource.volume = Mathf.Lerp(startVol, 0f, t / (duration * 0.5f));
+                yield return null;
+            }
+            // Switch clip
+            musicSource.clip = nextClip;
+            if (nextClip != null) musicSource.Play();
+            // Fade in new
+            t = 0f;
+            while (t < duration * 0.5f)
+            {
+                t += Time.deltaTime;
+                musicSource.volume = Mathf.Lerp(0f, musicVolume * masterVolume, t / (duration * 0.5f));
+                yield return null;
+            }
+            _fadeRoutine = null;
         }
 
         private void ApplyVolumes()
@@ -199,6 +265,8 @@ namespace GanglandUndercover.Audio
             AudioClip clip = ResolveClip(effect);
             if (clip != null && sfxSource != null)
             {
+                // E3: 微小随机音调变化，重复声音不机械
+                sfxSource.pitch = UnityEngine.Random.Range(0.94f, 1.06f);
                 sfxSource.PlayOneShot(clip);
             }
         }

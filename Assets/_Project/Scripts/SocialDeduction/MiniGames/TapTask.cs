@@ -60,13 +60,13 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             isComplete = true;
             foreach (TapTarget target in activeTargets)
             {
-                if (target.obj != null) Destroy(target.obj);
+                if (target.obj != null) DestroyRuntimeObject(target.obj);
             }
             activeTargets.Clear();
 
             if (canvas != null)
             {
-                Destroy(canvas.gameObject);
+                DestroyRuntimeObject(canvas.gameObject);
                 canvas = null;
             }
             gameObject.SetActive(false);
@@ -247,7 +247,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             }
 
             activeTargets.RemoveAll(t => t.obj == obj);
-            Destroy(obj);
+            DestroyRuntimeObject(obj);
         }
 
         private void RemoveTarget(TapTarget target, int index)
@@ -270,7 +270,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
                 yield return null;
             }
 
-            Destroy(obj);
+            DestroyRuntimeObject(obj);
         }
 
         private IEnumerator SuccessRoutine()

@@ -37,7 +37,7 @@ namespace GanglandUndercover.Online
         /// </summary>
         private void TickCriticalTaskTriggers()
         {
-            if (!IsServer) return;
+            if (networkManager == null || !networkManager.IsServer) return;
             if (!matchStarted) return;
             if (_criticalTaskSystem == null) return;
             if (_criticalTaskSystem.State != CriticalTaskState.Inactive) return;
@@ -110,10 +110,11 @@ namespace GanglandUndercover.Online
                     // 黑帮位置暴露 30 秒
                     foreach (var kv in players)
                     {
-                        if (kv.Value.Role == OnlineRole.Gang || kv.Value.Role == OnlineRole.Mole)
+                        if (GetPrivateRole(kv.Key) == OnlineRole.Gang || GetPrivateRole(kv.Key) == OnlineRole.Mole)
                         {
-                            kv.Value.Suspicion = Mathf.Max(kv.Value.Suspicion, 30);
-                            players[kv.Key] = kv.Value;
+                            OnlinePlayerState state = kv.Value;
+                            state.Suspicion = Mathf.Max(state.Suspicion, 30);
+                            players[kv.Key] = state;
                         }
                     }
                     status = "✗ 警方增援失败 — 黑帮位置暴露 30s";

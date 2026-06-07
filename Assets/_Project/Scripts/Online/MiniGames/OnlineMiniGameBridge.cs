@@ -52,8 +52,8 @@ namespace GanglandUndercover.Online.MiniGames
         /// <summary>
         /// 客户端调用：提交任务完成结果。
         /// </summary>
-        [ServerRpc(RequireOwnership = false)]
-        public void SubmitTaskResultServerRpc(int taskId, bool success, ServerRpcParams rpcParams = default)
+        [Rpc(SendTo.Server)]
+        public void SubmitTaskResultServerRpc(int taskId, bool success, RpcParams rpcParams = default)
         {
             ulong senderId = rpcParams.Receive.SenderClientId;
 
@@ -131,8 +131,8 @@ namespace GanglandUndercover.Online.MiniGames
         /// <summary>
         /// M5.3 客户端调用：提交修复结果。
         /// </summary>
-        [ServerRpc(RequireOwnership = false)]
-        public void SubmitRepairResultServerRpc(int taskId, bool success, ServerRpcParams rpcParams = default)
+        [Rpc(SendTo.Server)]
+        public void SubmitRepairResultServerRpc(int taskId, bool success, RpcParams rpcParams = default)
         {
             ulong senderId = rpcParams.Receive.SenderClientId;
             if (_controller == null) return;
@@ -172,6 +172,24 @@ namespace GanglandUndercover.Online.MiniGames
 
         private Dictionary<ulong, int> _pendingRepair = new Dictionary<ulong, int>();
         private bool _currentIsRepair;
+
+        /// <summary>
+        /// 清理指定客户端的修复挂起状态（断线/离开时调用）。
+        /// </summary>
+        public void CleanupPendingRepair(ulong clientId)
+        {
+            if (_pendingRepair.Remove(clientId))
+            {
+                Debug.Log($"[MiniGameBridge] 清理客户端 {clientId} 的挂起修复");
+            }
+        }
+
+        public override void OnDestroy()
+        {
+            CloseMinigame();
+            _pendingRepair.Clear();
+            base.OnDestroy();
+        }
 
         private void OpenMinigame(int taskId)
         {
@@ -221,8 +239,9 @@ namespace GanglandUndercover.Online.MiniGames
         private void OnMinigameCancel(MiniGameBase _)
         {
             int taskId = _currentTaskId;
+            bool wasRepair = _currentIsRepair;
             CloseMinigame();
-            if (_currentIsRepair)
+            if (wasRepair)
             {
                 SubmitRepairResultServerRpc(taskId, false);
             }
@@ -262,6 +281,10 @@ namespace GanglandUndercover.Online.MiniGames
 
         private static ClientRpcParams SingleTarget(ulong clientId)
         {
+            if (clientId == 0)
+            {
+                Debug.LogWarning("[MiniGameBridge] SingleTarget called with clientId=0, this sends RPC to host — verify intent.");
+            }
             return new ClientRpcParams
             {
                 Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }

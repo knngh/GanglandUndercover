@@ -75,6 +75,12 @@ namespace GanglandUndercover.UI
         /// <summary>分辨率索引，0=使用当前原生分辨率，后续按键入分辨率数组</summary>
         [SerializeField]
         private int _resolutionIndex;
+        public int ResolutionIndex
+        {
+            get => _resolutionIndex;
+            set => _resolutionIndex = Mathf.Max(0, value);
+        }
+
         public int ResolutionPreset
         {
             get => _resolutionPreset;

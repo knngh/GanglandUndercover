@@ -38,19 +38,29 @@ namespace GanglandUndercover.Gameplay
             EnsureLight();
 
 #if UNITY_EDITOR
-            Type mirrorType = null;
-
-            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            try
             {
-                mirrorType = assembly.GetType("GanglandUndercover.Editor.QuaterniusRuntimeResourceMirror");
+                Type mirrorType = null;
 
-                if (mirrorType != null)
+                foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    break;
-                }
-            }
+                    mirrorType = assembly.GetType("GanglandUndercover.Editor.QuaterniusRuntimeResourceMirror");
 
-            mirrorType?.GetMethod("SyncRuntimeResources", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null);
+                    if (mirrorType != null)
+                    {
+                        break;
+                    }
+                }
+
+                mirrorType?.GetMethod("SyncRuntimeResources", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null);
+            }
+            catch (Exception exception)
+            {
+                Exception rootException = exception is TargetInvocationException && exception.InnerException != null
+                    ? exception.InnerException
+                    : exception;
+                Debug.LogWarning("Gangland prototype bootstrap: resource mirror skipped so runtime can start. " + rootException.Message);
+            }
 #endif
 
             // 第 8 阶段改造：不再从 _mode 直接启动游戏，改为创建主菜单

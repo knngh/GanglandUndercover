@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Netcode;
 using GanglandUndercover;
 using GanglandUndercover.Core;
 using GanglandUndercover.Online;
@@ -58,9 +59,9 @@ namespace GanglandUndercover.Online
         public bool RelayOperationInProgress => relayOperationInProgress;
         public int EmergencyMeetingsLeft => emergencyMeetingsLeft;
         public float EmergencyCooldownTimer => emergencyCooldownTimer;
-        public float ReportCooldownTimer => killSystem != null ? killSystem.killSystem.reportCooldownTimer : 0f;
-        internal int NextBodyId => killSystem != null ? killSystem.killSystem.nextBodyId : 0;
-        internal void IncrementNextBodyId() { if (killSystem != null) killSystem.killSystem.nextBodyId++; }
+        public float ReportCooldownTimer => killSystem != null ? killSystem.reportCooldownTimer : 0f;
+        internal int NextBodyId => killSystem != null ? killSystem.nextBodyId : 0;
+        internal void IncrementNextBodyId() { if (killSystem != null) killSystem.nextBodyId++; }
 
         // --- TickCharacterAnimators ---
         private void TickCharacterAnimators()
@@ -86,15 +87,12 @@ namespace GanglandUndercover.Online
                         SpriteRenderer dirRenderer = state.Character2DDirectionIndicator.GetComponent<SpriteRenderer>();
                         if (bodyRenderer != null)
                         {
-                            Color ghostColor = bodyRenderer.color;
-                            ghostColor.a = 0.35f;
-                            bodyRenderer.color = ghostColor;
+                            // B2: 淘汰 = 半透明灰紫
+                            bodyRenderer.color = new Color(0.28f, 0.28f, 0.35f, 0.4f);
                         }
                         if (dirRenderer != null)
                         {
-                            Color ghostDir = dirRenderer.color;
-                            ghostDir.a = 0.35f;
-                            dirRenderer.color = ghostDir;
+                            dirRenderer.color = new Color(0.28f, 0.28f, 0.35f, 0.4f);
                         }
                     }
                     if (state.HasPendingAction)
@@ -755,7 +753,7 @@ namespace GanglandUndercover.Online
 
             foreach (Transform child in worldRoot.GetComponentsInChildren<Transform>(true))
             {
-                if (child.gameObject.activeInHierarchy && child.name.StartsWith(prefix, StringComparison.Ordinal))
+                if (child.gameObject.activeSelf && child.name.StartsWith(prefix, StringComparison.Ordinal))
                 {
                     count++;
                 }

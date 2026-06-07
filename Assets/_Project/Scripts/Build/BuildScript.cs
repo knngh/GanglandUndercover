@@ -17,13 +17,8 @@ public static class BuildScript
 
     private static readonly string[] ScenePaths = new[]
     {
-        "Assets/_Project/Scenes/MainMenu.unity",
-        "Assets/_Project/Scenes/Lobby.unity",
-        "Assets/_Project/Scenes/HarbourDistrict.unity",
-        "Assets/_Project/Scenes/PoliceStation.unity",
-        "Assets/_Project/Scenes/KowloonWalledCity.unity",
-        "Assets/_Project/Scenes/GameOver.unity",
-        "Assets/_Project/Scenes/Tutorial.unity",
+        "Assets/_Project/Scenes/Stage1VerticalSlice.unity",
+        "Assets/_Project/Scenes/Prototype.unity",
     };
 
     // ── macOS ──

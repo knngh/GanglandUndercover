@@ -116,6 +116,7 @@ namespace GanglandUndercover.Online
             }
         }
         private GameObject worldRoot;
+        private bool proximityVoiceEnabled;
         private OnlineMatchHud onlineHud;
         private OnlineSyncManager syncManager;
         private HostMigrationManager migrationManager;
@@ -195,7 +196,7 @@ namespace GanglandUndercover.Online
 
         public Dictionary<ulong, OnlinePlayerState> Players => players;
         public IReadOnlyList<OnlineTaskState> Tasks => tasks;
-        public List<OnlineBodyState> Bodies => killSystem != null ? killSystem.killSystem.bodies : null;
+        public List<OnlineBodyState> Bodies => killSystem != null ? killSystem.bodies : null;
         public IReadOnlyList<string> CaseLog => caseLog;
         public OnlineRole LocalRole => localRole;
         public ulong LocalClientIdValue => LocalClientId();
@@ -224,7 +225,7 @@ namespace GanglandUndercover.Online
         public float PhaseTimer => phaseTimer;
         public string Status { get => status; internal set => status = value; }
         public int TaskCount => tasks.Count;
-        public int BodyCount => killSystem != null ? killSystem.killSystem.bodies.Count : 0;
+        public int BodyCount => killSystem != null ? killSystem.bodies.Count : 0;
 
         // ── M7.1 Relay 公开 API ───────────────────────────────
         /// <summary>Relay 状态变化事件（供 LobbyController 订阅）</summary>
@@ -283,9 +284,9 @@ namespace GanglandUndercover.Online
         {
             players[clientId] = new OnlinePlayerState(clientId, displayName, spawn, true, true, OnlineRole.Unassigned, profession, 0, true);
         }
-        internal void SetKillCooldown(ulong clientId, float value) { if (killSystem != null) killSystem.killSystem.killCooldowns[clientId] = value; }
+        internal void SetKillCooldown(ulong clientId, float value) { if (killSystem != null) killSystem.killCooldowns[clientId] = value; }
         internal void SetAbilityCooldown(ulong clientId, float value) { abilityCooldowns[clientId] = value; }
-        internal bool TryGetKillCooldown(ulong clientId, out float value) { if (killSystem != null) return killSystem.killSystem.killCooldowns.TryGetValue(clientId, out value); value = 0f; return false; }
+        internal bool TryGetKillCooldown(ulong clientId, out float value) { if (killSystem != null) return killSystem.killCooldowns.TryGetValue(clientId, out value); value = 0f; return false; }
         internal bool HasVoted(ulong clientId) => votes.ContainsKey(clientId);
         public float BlackoutTimer => taskService.BlackoutTimer;
         public float LockdownTimer => taskService.LockdownTimer;
@@ -529,9 +530,27 @@ namespace GanglandUndercover.Online
 
         public bool EditorForceDownedStateForSmokeTest()
         {
+            EnsureRuntimeDependencies();
+            EnsureWorld();
+            EnsureCanvasHud();
+
             if (!localPreviewMode)
             {
                 localPreviewMode = true;
+            }
+
+            if (!players.ContainsKey(LocalPreviewClientId))
+            {
+                players[LocalPreviewClientId] = new OnlinePlayerState(
+                    LocalPreviewClientId,
+                    "烟测玩家",
+                    FindActionPreviewStartPosition(),
+                    true,
+                    true,
+                    OnlineRole.Unassigned,
+                    OnlineProfession.Inspector,
+                    0,
+                    false);
             }
 
             if (players.Count < ruleSet.MinimumPlayablePlayers)
@@ -560,20 +579,80 @@ namespace GanglandUndercover.Online
             victim.Input = Vector2.zero;
             players[victimClientId] = victim;
 
-            if (killSystem.bodies.Count == 0)
-            {
-                killSystem.bodies.Add(new OnlineBodyState(killSystem.nextBodyId++, victimClientId, victim.Position, false));
-                if (worldBuilder != null && worldBuilder.Use2DBackend)
-                {
-                    worldBuilder.CreateCorpseMarker(victim.Position);
-                }
-            }
-
             phase = OnlineMatchPhase.Action;
             matchStarted = true;
             _cameraRig.SetSubject(LocalClientId());
+            EnsureSmokeDeathVisualState(victimClientId);
             UpdateWorldVisuals();
             return StageTwoActiveDownedStateCount > 0 && StageTwoForensicSceneCount > 0 && BodyCount > 0;
+        }
+
+        private void EnsureSmokeDeathVisualState(ulong victimClientId)
+        {
+            if (!players.TryGetValue(victimClientId, out OnlinePlayerState victim) || killSystem == null)
+            {
+                return;
+            }
+
+            int bodyIndex = -1;
+
+            for (int i = 0; i < killSystem.bodies.Count; i++)
+            {
+                OnlineBodyState body = killSystem.bodies[i];
+
+                if (!body.Reported && body.VictimClientId == victimClientId)
+                {
+                    bodyIndex = i;
+                    break;
+                }
+            }
+
+            if (bodyIndex < 0)
+            {
+                bodyIndex = killSystem.bodies.Count;
+                killSystem.bodies.Add(new OnlineBodyState(killSystem.nextBodyId++, victimClientId, victim.Position, false));
+            }
+
+            OnlineBodyState forcedBody = killSystem.bodies[bodyIndex];
+
+            if (worldBuilder != null && worldBuilder.Use2DBackend && CountNamedWorldObjects("CorpseMarker") == 0)
+            {
+                worldBuilder.CreateCorpseMarker(forcedBody.Position);
+            }
+
+            if (!playerVisuals.TryGetValue(victimClientId, out GameObject victimVisual) || victimVisual == null)
+            {
+                victimVisual = CreatePlayerVisual(victim);
+                playerVisuals[victimClientId] = victimVisual;
+                playerVisualBaseScales[victimClientId] = victimVisual != null ? victimVisual.transform.localScale : Vector3.one;
+            }
+
+            if (victimVisual != null)
+            {
+                if (victimVisual.transform.Find("Stage2 Downed chalk silhouette") == null
+                    || victimVisual.transform.Find("Stage2 Downed personal item") == null)
+                {
+                    worldBuilder.CreateStageTwoCharacterStateLayer(victimVisual);
+                }
+
+                victimVisual.transform.position = victim.Position + new Vector3(0f, 0f, 0.12f);
+                UpdatePlayerStageTwoStateLayer(victimVisual, victim, false);
+                SetChildActive(victimVisual, "Stage2 Downed chalk silhouette", true);
+                SetChildActive(victimVisual, "Stage2 Downed personal item", true);
+            }
+
+            killSystem.UpdateBodyVisuals();
+
+            if (!killSystem.bodyVisuals.TryGetValue(forcedBody.Id, out GameObject bodyVisual) || bodyVisual == null)
+            {
+                killSystem.CreateBodyVisualFor(forcedBody);
+            }
+
+            if (killSystem.bodyVisuals.TryGetValue(forcedBody.Id, out bodyVisual) && bodyVisual != null)
+            {
+                bodyVisual.SetActive(true);
+                bodyVisual.transform.position = forcedBody.Position + new Vector3(0f, 0f, 0.11f);
+            }
         }
 
         /// <summary>
@@ -665,7 +744,6 @@ namespace GanglandUndercover.Online
             DestroyRuntimeWorld();
             EnsureWorld();
         }
-#endif
 
         private Vector3 FindActionPreviewStartPosition()
         {
@@ -774,6 +852,48 @@ namespace GanglandUndercover.Online
             sabotageVFX.Bind(this);
         }
 
+        private void EnsureRuntimeDependencies()
+        {
+            EnsureBotController();
+            EnsureKillSystem();
+
+            if (_statsCollector == null)
+            {
+                _statsCollector = new MatchStatsCollector();
+            }
+
+            if (evidenceDossier == null)
+            {
+                evidenceDossier = new EvidenceDossier(this);
+            }
+        }
+
+        private void EnsureBotController()
+        {
+            if (_botController == null)
+            {
+                _botController = new OnlineBotController(this);
+            }
+        }
+
+        private void EnsureKillSystem()
+        {
+            if (killSystem == null)
+            {
+                killSystem = GetComponent<KillSystem>();
+                if (killSystem == null)
+                {
+                    killSystem = FindAnyObjectByType<KillSystem>();
+                }
+                if (killSystem == null)
+                {
+                    killSystem = gameObject.AddComponent<KillSystem>();
+                }
+            }
+
+            killSystem.Bind(this);
+        }
+
         public OnlineRuleSet ActiveRuleSet => ruleSet != null ? ruleSet : ScriptableObject.CreateInstance<OnlineRuleSet>();
 
         private void Awake()
@@ -791,13 +911,8 @@ namespace GanglandUndercover.Online
             syncManager = GetComponent<OnlineSyncManager>();
             EnsureMigrationManager();
             EnsureChatSystem();
+            EnsureRuntimeDependencies();
             localPosition = mapService.SpawnPosition(UnityEngine.Random.Range(0, ruleSet.MaximumRoomPlayers));
-
-            // M8.4: 初始化对局数据采集器
-            _statsCollector = new MatchStatsCollector();
-            _botController = new OnlineBotController(this);
-            evidenceDossier = new EvidenceDossier(this);
-            killSystem = FindAnyObjectByType<KillSystem>();
             _meetingCount = 0;
         }
 
@@ -813,6 +928,7 @@ namespace GanglandUndercover.Online
             BuildDefaultTasks();
             EnsureWorld();
             EnsureCanvasHud();
+            EnsureRuntimeDependencies();
         }
 
         private void Update()
@@ -1388,6 +1504,8 @@ namespace GanglandUndercover.Online
 
         private void StartOnlineMatchCore(bool broadcast)
         {
+            EnsureRuntimeDependencies();
+
             if (roomAutoFillAi && players.Count < roomMinPlayers)
             {
                 EnsureMinimumBots();
@@ -1528,11 +1646,13 @@ namespace GanglandUndercover.Online
 
         private void FillBotsAndStart()
         {
+            EnsureRuntimeDependencies();
             _botController.FillBotsAndStart();
         }
 
         private void EnsureMinimumBots()
         {
+            EnsureRuntimeDependencies();
             _botController.EnsureMinimumBots();
         }
 
@@ -1757,10 +1877,10 @@ namespace GanglandUndercover.Online
             // Bot 计时器通过 bot 控制器恢复
             if (snap.BotThinkTimers != null)
                 foreach (var entry in snap.BotThinkTimers)
-                    _botController.SetThinkTimer(entry.ClientId, entry.CooldownSeconds);
+                    _botController.SetThinkTimer(entry.ClientId, entry.Value);
             if (snap.BotVoteTimers != null)
                 foreach (var entry in snap.BotVoteTimers)
-                    _botController.SetVoteTimer(entry.ClientId, entry.CooldownSeconds);
+                    _botController.SetVoteTimer(entry.ClientId, entry.Value);
 
             // ── Bot 目标 ──
             _botController.ClearTargets();
@@ -2062,7 +2182,14 @@ namespace GanglandUndercover.Online
 
             if (mini != null)
             {
-                UnityEngine.Object.Destroy(mini.gameObject);
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(mini.gameObject);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(mini.gameObject);
+                }
             }
         }
 
@@ -3333,14 +3460,14 @@ namespace GanglandUndercover.Online
         private void LockRandomRooms(int count)
         {
             if (mapService == null) return;
-            var rooms = mapService.RoomSpecs;
-            if (rooms == null || rooms.Count == 0) return;
+            var rooms = mapService.ShipRooms();
+            if (rooms == null || rooms.Length == 0) return;
 
             _lockedRoomIndices.Clear();
             int attempts = 0;
             while (_lockedRoomIndices.Count < count && attempts < 20)
             {
-                int idx = UnityEngine.Random.Range(0, rooms.Count);
+                int idx = UnityEngine.Random.Range(0, rooms.Length);
                 _lockedRoomIndices.Add(idx);
                 attempts++;
             }
@@ -4524,12 +4651,6 @@ namespace GanglandUndercover.Online
 
 
 
-
-
-
-        {
-            return worldBuilder.CreatePrimitiveProp(propName, primitiveType, position, scale, color);
-        }
 
 
 

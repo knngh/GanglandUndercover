@@ -105,6 +105,19 @@ namespace GanglandUndercover.Online
             CreateScreenFlashOverlay();
         }
 
+        internal void Bind(OnlineMatchController matchController)
+        {
+            if (matchController != null)
+            {
+                controller = matchController;
+            }
+
+            if (hud == null)
+            {
+                hud = FindAnyObjectByType<OnlineMatchHud>();
+            }
+        }
+
         private void Update()
         {
             if (controller == null) return;

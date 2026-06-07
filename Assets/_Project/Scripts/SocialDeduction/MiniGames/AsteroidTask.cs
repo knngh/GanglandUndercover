@@ -53,13 +53,13 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             StopAllCoroutines();
             foreach (Asteroid a in asteroids)
             {
-                if (a.obj != null) Destroy(a.obj);
+                if (a.obj != null) DestroyRuntimeObject(a.obj);
             }
             asteroids.Clear();
 
             if (canvas != null)
             {
-                Destroy(canvas.gameObject);
+                DestroyRuntimeObject(canvas.gameObject);
                 canvas = null;
             }
             gameObject.SetActive(false);
@@ -259,7 +259,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
                 yield return null;
             }
 
-            Destroy(asteroidObj);
+            DestroyRuntimeObject(asteroidObj);
         }
 
         private IEnumerator AnimateParticle(GameObject particle, Vector2 velocity, float duration)
@@ -279,7 +279,7 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
                 yield return null;
             }
 
-            Destroy(particle);
+            DestroyRuntimeObject(particle);
         }
 
         private IEnumerator SuccessRoutine()

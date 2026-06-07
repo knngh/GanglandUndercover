@@ -28,6 +28,23 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
         /// </summary>
         public abstract void Hide();
 
+        protected void DestroyRuntimeObject(UnityEngine.Object target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(target);
+            }
+            else
+            {
+                DestroyImmediate(target);
+            }
+        }
+
         /// <summary>
         /// 通知外部：小游戏成功完成。
         /// </summary>

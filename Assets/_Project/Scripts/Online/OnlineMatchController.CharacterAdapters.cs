@@ -217,10 +217,7 @@ namespace GanglandUndercover.Online
             var profSet = GanglandUndercover.Art.Sprite2DAssetCache.CharacterSets.TryGetValue(state.Profession, out var set)
                 ? set : null;
             animCtrl.Initialize(state,
-                profSet?.Front_Frame0 ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Front,
-                profSet?.Back_Frame0  ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Back,
-                profSet?.Left_Frame0  ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Left,
-                profSet?.Right_Frame0 ?? GanglandUndercover.Art.Sprite2DAssetCache.CharBody_Right,
+                profSet,
                 profSet?.Dead         ?? GanglandUndercover.Art.Sprite2DAssetCache.CorpseMarker,
                 GanglandUndercover.Art.Sprite2DAssetCache.CharDirectionArrow);
         }

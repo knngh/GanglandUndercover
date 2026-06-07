@@ -57,14 +57,14 @@ namespace GanglandUndercover.Art
             CharGhostOverlay = DrawGhostOverlay(64);
 
             // ─── 地图 ─── (CC0优先，程序化兜底)
-            FloorWood      = LoadCCTile("Shared/floors", "FloorWood")      ?? DrawFloorWood(32);
+            FloorWood      = LoadCCTile("KowloonWalledCity/floors", "FloorWood") ?? DrawFloorWood(32);
             FloorConcrete  = LoadCCTile("PoliceStation/floors", "FloorConcrete") ?? DrawFloorConcrete(32);
             FloorMetal     = LoadCCTile("Harbour/floors", "FloorMetal")     ?? DrawFloorMetal(32);
             FloorCarpet    = LoadCCTile("KowloonWalledCity/floors", "FloorCarpet") ?? DrawFloorCarpet(32);
             FloorTile      = LoadCCTile("PoliceStation/floors", "FloorTile") ?? DrawFloorTileGrout(32);
             WallBrick      = LoadCCTile("KowloonWalledCity/walls", "WallBrick") ?? DrawWallBrick(16);
             WallConcrete   = LoadCCTile("PoliceStation/walls", "WallConcrete") ?? DrawWallConcrete(16);
-            WallStripe     = LoadCCTile("Shared/walls", "WallStripe")       ?? DrawWallStripe(16);
+            WallStripe     = LoadCCTile("Shared/walls", "WallStripe") ?? DrawWallStripe(16);
             FloorTileAlt   = FloorCarpet;
             CorridorTile   = FloorConcrete;
             WallBlock      = WallBrick;

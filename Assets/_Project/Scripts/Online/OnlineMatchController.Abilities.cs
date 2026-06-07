@@ -23,7 +23,7 @@ namespace GanglandUndercover.Online
         /// <summary>足迹数据（Inspector FootprintTrack）</summary>
         private readonly List<FootprintMark> _footprints = new List<FootprintMark>();
 
-        private struct FootprintMark
+        public struct FootprintMark
         {
             public Vector2 Position;
             public float ExpireTime;
@@ -65,16 +65,16 @@ namespace GanglandUndercover.Online
             if (!players.TryGetValue(clientId, out var player)) return false;
             if (killSystem == null) return false;
 
-            var bodies = killSystem.Bodies;
+            var bodies = killSystem.bodies;
             for (int i = 0; i < bodies.Count; i++)
             {
                 var body = bodies[i];
                 if (body.Reported) continue;
                 float dist = Vector3.Distance(player.Position,
-                    new Vector3(body.WorldPosition.x, body.WorldPosition.y, 0));
+                    new Vector3(body.Position.x, body.Position.y, 0));
                 if (dist <= 1.5f)
                 {
-                    body.WorldPosition = new Vector2(targetPosition.x, targetPosition.y);
+                    body.Position = new Vector2(targetPosition.x, targetPosition.y);
                     bodies[i] = body;
                     killSystem.UpdateBodyVisuals();
                     return true;
@@ -177,7 +177,7 @@ namespace GanglandUndercover.Online
         public void AccumulateMoleIntel(ulong moleId, int amount)
         {
             if (!HasAbility(moleId, AbilityType.SabotageCooldownReduce)) return;
-            if (!players.TryGetValue(moleId, out var state) || state.Role != OnlineRole.Mole) return;
+            if (!players.TryGetValue(moleId, out var state) || GetPrivateRole(moleId) != OnlineRole.Mole) return;
 
             if (!_moleIntel.ContainsKey(moleId))
                 _moleIntel[moleId] = 0;
