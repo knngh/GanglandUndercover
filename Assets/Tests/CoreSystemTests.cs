@@ -556,6 +556,25 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ServerSnapshot_DoesNotPartiallyApplyWhenLaterCountsAreInvalid()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetMatchStarted(false);
+                fixture.SetPhase("Lobby");
+
+                fixture.ReceiveServerSnapshotRaw(
+                    NetworkManager.ServerClientId,
+                    matchStarted: true,
+                    phaseValue: fixture.PhaseValue("Action"),
+                    taskCount: -1);
+
+                Assert.IsFalse(fixture.MatchStarted());
+                Assert.AreEqual("Lobby", fixture.PhaseName());
+            }
+        }
+
+        [Test]
         public void RoleAssign_IgnoresNonServerSenderAndUndefinedRoles()
         {
             using (ControllerFixture fixture = new ControllerFixture())

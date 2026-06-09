@@ -1138,40 +1138,10 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            matchStarted = snapshotMatchStarted;
-            phase = (OnlineMatchPhase)phaseValue;
-            taskService.EvidenceScore = snapshotEvidenceScore;
-            taskService.EvidenceTarget = snapshotEvidenceTarget;
-            emergencyMeetingsLeft = snapshotEmergencyMeetingsLeft;
-            roomMinPlayers = snapshotRoomMinPlayers;
-            roomMaxPlayers = snapshotRoomMaxPlayers;
-            roomAutoFillAi = snapshotAutoFillAi;
-            revealRoleOnEject = snapshotRevealRoleOnEject;
-            proximityVoiceEnabled = snapshotProximityVoice;
-            roomName = snapshotRoomName;
-            resultSummary = snapshotResultSummary;
-            lastMeetingReason = snapshotLastMeetingReason;
-            lastVoteOutcome = snapshotLastVoteOutcome;
-            lastEvidenceEvent = snapshotLastEvidenceEvent;
-            lastSabotageEvent = snapshotLastSabotageEvent;
-            evidenceMilestoneIndex = snapshotEvidenceMilestoneIndex;
-            phaseTimer = snapshotPhaseTimer;
-            taskService.LoadSabotageTimersFromSnapshot(
-                snapshotBlackoutTimer, snapshotLockdownTimer, snapshotCommunicationJamTimer,
-                snapshotEvidenceLeakTimer, snapshotEvidenceLeakAccumulator, snapshotPatrolAlertTimer);
-            emergencyCooldownTimer = snapshotEmergencyCooldownTimer;
-            killSystem.reportCooldownTimer = snapshotReportCooldownTimer;
-            aiActionGraceTimer = snapshotAiActionGraceTimer;
-            matchElapsedSeconds = snapshotMatchElapsedSeconds;
-
-            // Phase 2.4: 紧急任务状态
-            _criticalTaskActive = snapshotCriticalTaskActive;
-            _criticalTaskType = ToDefinedCriticalTaskType(snapshotCriticalTaskType);
-            _criticalTaskTimeRemaining = snapshotCriticalTaskTimeRemaining;
-
-            status = "同步在线局：" + PhaseName(phase) + "。";
-
             HashSet<ulong> seenPlayers = new HashSet<ulong>();
+            Dictionary<ulong, OnlinePlayerState> snapshotPlayers = new Dictionary<ulong, OnlinePlayerState>();
+            bool hasSnapshotLocalPosition = false;
+            Vector3 snapshotLocalPosition = localPosition;
 
             for (int i = 0; i < count; i++)
             {
@@ -1205,16 +1175,15 @@ namespace GanglandUndercover.Online
                 state.KillCooldown = killCooldown;
                 state.AbilityCooldown = abilityCooldown;
                 state.VentCooldown = ventCooldown;
-                players[clientId] = state;
+                snapshotPlayers[clientId] = state;
                 seenPlayers.Add(clientId);
 
                 if (clientId == LocalClientId())
                 {
-                    localPosition = position;
+                    hasSnapshotLocalPosition = true;
+                    snapshotLocalPosition = position;
                 }
             }
-
-            RemoveMissingPlayers(seenPlayers);
 
             reader.ReadValueSafe(out int taskCount);
             if (!IsSnapshotCountInRange(taskCount, MaxSnapshotTasks))
@@ -1222,7 +1191,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            tasks.Clear();
+            List<OnlineTaskState> snapshotTasks = new List<OnlineTaskState>(taskCount);
 
             for (int i = 0; i < taskCount; i++)
             {
@@ -1232,7 +1201,7 @@ namespace GanglandUndercover.Online
                 reader.ReadValueSafe(out int requiredProgress);
                 reader.ReadValueSafe(out bool completed);
                 reader.ReadValueSafe(out bool sabotaged);
-                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), position, progress, requiredProgress, completed, sabotaged));
+                snapshotTasks.Add(new OnlineTaskState(id, TaskNameFor(id), position, progress, requiredProgress, completed, sabotaged));
             }
 
             reader.ReadValueSafe(out int bodyCount);
@@ -1241,7 +1210,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            killSystem.bodies.Clear();
+            List<OnlineBodyState> snapshotBodies = new List<OnlineBodyState>(bodyCount);
 
             for (int i = 0; i < bodyCount; i++)
             {
@@ -1249,7 +1218,7 @@ namespace GanglandUndercover.Online
                 reader.ReadValueSafe(out ulong victimClientId);
                 reader.ReadValueSafe(out Vector3 position);
                 reader.ReadValueSafe(out bool reported);
-                killSystem.bodies.Add(new OnlineBodyState(id, victimClientId, position, reported));
+                snapshotBodies.Add(new OnlineBodyState(id, victimClientId, position, reported));
             }
 
             reader.ReadValueSafe(out int voteCount);
@@ -1258,13 +1227,13 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            votes.Clear();
+            Dictionary<ulong, ulong> snapshotVotes = new Dictionary<ulong, ulong>();
 
             for (int i = 0; i < voteCount; i++)
             {
                 reader.ReadValueSafe(out ulong voterClientId);
                 reader.ReadValueSafe(out ulong targetClientId);
-                votes[voterClientId] = targetClientId;
+                snapshotVotes[voterClientId] = targetClientId;
             }
 
             reader.ReadValueSafe(out int caseLogCount);
@@ -1273,13 +1242,72 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            caseLog.Clear();
+            List<string> snapshotCaseLog = new List<string>(caseLogCount);
 
             for (int i = 0; i < caseLogCount; i++)
             {
                 reader.ReadValueSafe(out string entry);
-                caseLog.Add(entry);
+                snapshotCaseLog.Add(entry);
             }
+
+            matchStarted = snapshotMatchStarted;
+            phase = (OnlineMatchPhase)phaseValue;
+            taskService.EvidenceScore = snapshotEvidenceScore;
+            taskService.EvidenceTarget = snapshotEvidenceTarget;
+            emergencyMeetingsLeft = snapshotEmergencyMeetingsLeft;
+            roomMinPlayers = snapshotRoomMinPlayers;
+            roomMaxPlayers = snapshotRoomMaxPlayers;
+            roomAutoFillAi = snapshotAutoFillAi;
+            revealRoleOnEject = snapshotRevealRoleOnEject;
+            proximityVoiceEnabled = snapshotProximityVoice;
+            roomName = snapshotRoomName;
+            resultSummary = snapshotResultSummary;
+            lastMeetingReason = snapshotLastMeetingReason;
+            lastVoteOutcome = snapshotLastVoteOutcome;
+            lastEvidenceEvent = snapshotLastEvidenceEvent;
+            lastSabotageEvent = snapshotLastSabotageEvent;
+            evidenceMilestoneIndex = snapshotEvidenceMilestoneIndex;
+            phaseTimer = snapshotPhaseTimer;
+            taskService.LoadSabotageTimersFromSnapshot(
+                snapshotBlackoutTimer, snapshotLockdownTimer, snapshotCommunicationJamTimer,
+                snapshotEvidenceLeakTimer, snapshotEvidenceLeakAccumulator, snapshotPatrolAlertTimer);
+            emergencyCooldownTimer = snapshotEmergencyCooldownTimer;
+            killSystem.reportCooldownTimer = snapshotReportCooldownTimer;
+            aiActionGraceTimer = snapshotAiActionGraceTimer;
+            matchElapsedSeconds = snapshotMatchElapsedSeconds;
+
+            // Phase 2.4: 紧急任务状态
+            _criticalTaskActive = snapshotCriticalTaskActive;
+            _criticalTaskType = ToDefinedCriticalTaskType(snapshotCriticalTaskType);
+            _criticalTaskTimeRemaining = snapshotCriticalTaskTimeRemaining;
+
+            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in snapshotPlayers)
+            {
+                players[pair.Key] = pair.Value;
+            }
+
+            RemoveMissingPlayers(seenPlayers);
+
+            if (hasSnapshotLocalPosition)
+            {
+                localPosition = snapshotLocalPosition;
+            }
+
+            tasks.Clear();
+            tasks.AddRange(snapshotTasks);
+
+            killSystem.bodies.Clear();
+            killSystem.bodies.AddRange(snapshotBodies);
+
+            votes.Clear();
+            foreach (KeyValuePair<ulong, ulong> pair in snapshotVotes)
+            {
+                votes[pair.Key] = pair.Value;
+            }
+
+            caseLog.Clear();
+            caseLog.AddRange(snapshotCaseLog);
+            status = "同步在线局：" + PhaseName(phase) + "。";
 
             // ── 客户端初始快照完整性检查 ──
             ValidateClientSnapshotIntegrity();

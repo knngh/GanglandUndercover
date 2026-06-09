@@ -11,7 +11,7 @@
 | 1 | GanglandClientState | C→S (80ms) | position(x,y,z), input(x,y), ready(bool) | ReceiveClientState | SendClientState | IsServer；position/input 必须 finite；Action 阶段只接受已知玩家；input 单位向量钳制；Ready 仅 Lobby/未开局可变 | — |
 | 2 | GanglandClientAction | C→S | actionType(int), targetId(ulong) | ReceiveClientAction | SendClientAction | IsServer；action enum 白名单；TryGetValue；Phase(Lobby/Opening/Result→reject)；!player.Alive→reject | — |
 | 3 | GanglandClientProfile | C→S | displayName(string) | ReceiveClientProfile:741 | SendClientProfile:723 | IsServer, TryGetValue | — |
-| 4 | GanglandServerSnapshot | S→All | full State(phase/players/bodies/votes/cases) | ReceiveServerSnapshot | BroadcastSnapshot | Client-only；sender == Server；phase/criticalTask enum 白名单；snapshot count 上限；role/profession 规整到已定义值 | — |
+| 4 | GanglandServerSnapshot | S→All | full State(phase/players/bodies/votes/cases) | ReceiveServerSnapshot | BroadcastSnapshot | Client-only；sender == Server；phase/criticalTask enum 白名单；snapshot count 上限；role/profession 规整到已定义值；完整 staging 后原子应用 | — |
 | 5 | GanglandRoleAssign | S→SingleClient | roleByte(byte) | ReceiveRoleAssign | SendRole | sender == Server；role enum 白名单；定向单播 | — |
 | 6 | GanglandChatSend | C→S | message(string), channel(int) | ReceiveChatSend:1289 | SendChatMessage:1280 | IsServer, TryGetValue | — |
 | 7 | GanglandChatBroadcast | S→All/Single | message, channel, senderName | ReceiveChatBroadcast:1387 | Re-broadcast from ReceiveChatSend | 频道路由: Meeting→All, Ghost→deadOnly, Proximity→nearbyAlive, Global→allAlive | — |
@@ -63,7 +63,7 @@
 | 消息组 | 测试文件 | 状态 |
 |--------|---------|------|
 | ClientState/Action/Profile | CoreSystemTests.cs / MatchLoopPlayTests.cs | ✅ ClientState/Action 边界已覆盖；Profile 仍走基础路径 |
-| ServerSnapshot/RoleAssign/MapSelect | CoreSystemTests.cs | ✅ sender、phase/count、role、mapType 边界已覆盖 |
+| ServerSnapshot/RoleAssign/MapSelect | CoreSystemTests.cs | ✅ sender、phase/count、role、mapType 边界已覆盖；ServerSnapshot 畸形后段不会局部污染状态 |
 | Task/Repair RPC | MiniGameOnlineIntegrationPlayTests.cs | ⏳ |
 | 双端消息路由 | RelayTwoProcessPlayTests.cs | ⏳ |
 | 越权操作 | AntiCheatPlayTests.cs（待新建） | ❌ |
