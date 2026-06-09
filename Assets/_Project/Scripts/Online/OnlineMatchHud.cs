@@ -1138,7 +1138,7 @@ namespace GanglandUndercover.Online
             voiceText.text = controller.VoiceHudLine;
             statusText.text = controller.Status + accessibilitySuffix;
 
-            connectionStatusText.text = controller.RelayStatus
+            connectionStatusText.text = controller.RelayLobbySummary
                 + "\n" + controller.LobbyReadinessSummary
                 + "\nUnity Services: " + controller.VoiceStatus;
 

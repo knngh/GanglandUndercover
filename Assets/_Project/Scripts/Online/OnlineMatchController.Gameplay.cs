@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using Unity.Netcode;
 using GanglandUndercover.Audio;
@@ -22,6 +23,15 @@ namespace GanglandUndercover.Online
         public string RelayJoinCode => relayJoinCode;
         public string RelayJoinInput => relayJoinInput;
         public string RelayStatus => relayStatus;
+        public string RelayLobbySummary => BuildRelayLobbySummary(
+            relayStatus,
+            relayJoinCode,
+            relayJoinInput,
+            relayOperationInProgress,
+            IsOnline,
+            IsHost,
+            IsClientConnected,
+            ConnectedClientCount);
         public string RoomName => roomName;
         public bool IsHost => localPreviewMode || networkManager != null && networkManager.IsHost;
         public bool IsLocalPreview => localPreviewMode;
@@ -2047,6 +2057,69 @@ namespace GanglandUndercover.Online
             }
 
             return safeValue;
+        }
+        private static string BuildRelayLobbySummary(
+            string relayStatusValue,
+            string relayJoinCodeValue,
+            string relayJoinInputValue,
+            bool operationInProgress,
+            bool isOnline,
+            bool isHost,
+            bool isClientConnected,
+            int connectedClientCount)
+        {
+            string safeStatus = string.IsNullOrWhiteSpace(relayStatusValue)
+                ? "Relay 房间码未创建。"
+                : relayStatusValue.Trim();
+            string safeJoinCode = CleanRelayJoinInput(relayJoinCodeValue);
+            string safeJoinInput = CleanRelayJoinInput(relayJoinInputValue);
+            StringBuilder builder = new StringBuilder();
+            builder.Append(safeStatus);
+
+            if (operationInProgress)
+            {
+                if (string.IsNullOrEmpty(safeJoinInput))
+                {
+                    builder.Append("\n房间码流程: 正在创建房间码，请稍候。");
+                }
+                else
+                {
+                    builder.Append("\n房间码流程: 正在加入 ").Append(safeJoinInput).Append("，请稍候。");
+                }
+
+                return builder.ToString();
+            }
+
+            if (isOnline && isHost && !string.IsNullOrEmpty(safeJoinCode))
+            {
+                int visibleClientCount = Mathf.Max(1, connectedClientCount);
+                builder.Append("\n房主: 分享房间码 ").Append(safeJoinCode)
+                    .Append(" | 已连接 ").Append(visibleClientCount).Append(" 人。");
+                return builder.ToString();
+            }
+
+            if (isOnline && isClientConnected && !string.IsNullOrEmpty(safeJoinCode))
+            {
+                builder.Append("\nClient: 已加入房间码 ").Append(safeJoinCode)
+                    .Append("，等待 Host 开局。");
+                return builder.ToString();
+            }
+
+            if (!string.IsNullOrEmpty(safeJoinInput))
+            {
+                builder.Append("\nClient: 已输入房间码 ").Append(safeJoinInput)
+                    .Append("，点击 Relay 加入。");
+                return builder.ToString();
+            }
+
+            if (!string.IsNullOrEmpty(safeJoinCode))
+            {
+                builder.Append("\n房间码: ").Append(safeJoinCode).Append("。");
+                return builder.ToString();
+            }
+
+            builder.Append("\n下一步: 点击 Relay 开房生成房间码，或输入房间码加入。");
+            return builder.ToString();
         }
         private static Vector3 TaskScale(int taskId)
         {

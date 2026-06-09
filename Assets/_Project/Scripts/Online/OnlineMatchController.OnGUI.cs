@@ -959,7 +959,7 @@ namespace GanglandUndercover.Online
 
             GUILayout.EndHorizontal();
             GUI.enabled = previousEnabled;
-            GUILayout.Label(relayStatus);
+            GUILayout.Label(RelayLobbySummary);
         }
 
         // --- DrawRoomHeader (moved from main controller) ---
