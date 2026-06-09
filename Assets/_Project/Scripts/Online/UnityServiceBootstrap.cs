@@ -32,7 +32,7 @@ namespace GanglandUndercover.Online
         public bool VivoxLoggedIn => false;
         public bool ActiveVoiceChannelIsPositional => false;
         public string ActiveVoiceChannel => string.Empty;
-        public string VoiceStatus => "Vivox 未安装（已移除）。";
+        public string VoiceStatus => "Vivox 已移除，使用文本聊天。";
         public int ActiveVoiceParticipantCount => 0;
         public string PlayerId => playerId;
         public string ServiceReadinessSummary => BuildReadinessSummary();

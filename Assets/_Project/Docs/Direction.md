@@ -60,7 +60,7 @@ Social deduction games are a useful reference for hidden motives, task pressure,
 
 - Promote the Host / Join / Ready / Start flow from local IP testing to Lobby / Relay sessions.
 - Add Authentication and player names.
-- Add Vivox voice/text with living, dead, meeting, and gang channels.
+- Add text chat with living, dead, meeting, and gang channels (Vivox voice removed).
 - Harden Host authority and validation for movement, task state, body reports, meetings, votes, blackouts, evidence, and role data.
 - Keep AI fill as a development and low-player fallback, but tune it separately from real 6-10 player online rules.
 - Replace primitive shapes with authored 2.5D harbor art and editable prefabs after the online loop works.

@@ -530,7 +530,7 @@ namespace GanglandUndercover.Online
             GUILayout.Label("完整局结构");
             GUILayout.Label("开局: 房间 Ready、身份私发、全图预览。");
             GUILayout.Label("行动: 大地图巡场、小任务、黑帮破坏、暗线换位、尸体报案。");
-            GUILayout.Label("会议: 全员语音讨论、投票放逐、结算身份和胜负。");
+            GUILayout.Label("会议: 全员文本讨论、投票放逐、结算身份和胜负。");
             GUILayout.EndVertical();
         }
 
@@ -1235,7 +1235,7 @@ namespace GanglandUndercover.Online
             GUILayout.Label("你的职责: " + LocalProfessionName());
             GUILayout.Label("地图: 九龙港区封控街区");
             GUILayout.Label("局长: 目标 10-20 分钟；20 分钟未闭合关键证据则按证据比例结算。");
-            GUILayout.Label("关键机制: 大地图巡线、现场小任务、尸体报案、会议语音、投票放逐、黑帮暗线通道。");
+            GUILayout.Label("关键机制: 大地图巡线、现场小任务、尸体报案、会议文本讨论、投票放逐、黑帮暗线通道。");
             GUILayout.Label("目标: 警方搜证和投出黑帮；黑帮制造不在场证明、破坏证据链并误导会议。");
             GUILayout.Space(6f);
             Rect routeRect = GUILayoutUtility.GetRect(360f, 62f, GUILayout.ExpandWidth(true));

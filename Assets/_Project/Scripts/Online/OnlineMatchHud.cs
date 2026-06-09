@@ -597,7 +597,7 @@ namespace GanglandUndercover.Online
             evidenceTargetSlider = CreateSliderRow(settings, "证据目标", 34f, 56f, value => controller.SetEvidenceTarget(Mathf.RoundToInt(value)), out evidenceTargetText);
             autoFillToggle = CreateToggle("人数不足时 AI 补位", settings, value => controller.SetAutoFillAi(value));
             revealRoleToggle = CreateToggle("出局时公开身份", settings, value => controller.SetRevealRoleOnEject(value));
-            proximityVoiceToggle = CreateToggle("行动阶段近距离语音", settings, value => controller.SetProximityVoiceEnabled(value));
+            proximityVoiceToggle = CreateToggle("行动阶段近距离聊天", settings, value => controller.SetProximityVoiceEnabled(value));
 
             Transform lobby = CreateSection("房间流程", leftDock, 166f);
             lobbyGroup = lobby.gameObject;
@@ -1140,7 +1140,7 @@ namespace GanglandUndercover.Online
 
             connectionStatusText.text = controller.RelayLobbySummary
                 + "\n" + controller.LobbyReadinessSummary
-                + "\nUnity Services: " + controller.VoiceStatus;
+                + "\n聊天: " + controller.VoiceStatus;
 
             lobbyStatusText.text = controller.LobbyReadinessSummary
                 + "\n" + controller.LobbyRoadmap
@@ -1305,7 +1305,7 @@ namespace GanglandUndercover.Online
                         + "\n" + controller.LobbyRoadmap
                         + "\n房间规则: " + (controller.AutoFillAi ? "AI 补位" : "真人优先")
                         + " | " + (controller.RevealRoleOnEject ? "出局公开身份" : "身份隐藏")
-                        + " | " + (controller.ProximityVoiceEnabled ? "近距离语音" : "会议语音")
+                        + " | " + (controller.ProximityVoiceEnabled ? "近距离聊天" : "会议聊天")
                         + "\n引导: " + controller.OnboardingActionPrompt;
                 case OnlineMatchPhase.Opening:
                     return controller.OnboardingBriefingBody
@@ -1356,7 +1356,7 @@ namespace GanglandUndercover.Online
                 case NotebookTab.Services:
                     return controller.ReleaseReadinessText
                         + "\n\nLobby 房间列表\n" + controller.LobbyBrowserPanelText
-                        + "\n\nVivox: " + controller.VoiceStatus;
+                        + "\n\n聊天: " + controller.VoiceStatus;
                 default:
                     return controller.PlayerListText;
             }

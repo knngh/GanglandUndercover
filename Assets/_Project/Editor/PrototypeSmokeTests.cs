@@ -730,7 +730,7 @@ namespace GanglandUndercover.Editor
 
             if (!controller.VoiceRoutingEnabled || string.IsNullOrWhiteSpace(controller.VoiceStatus))
             {
-                throw new InvalidOperationException("Smoke test failed: online match did not expose Vivox voice routing.");
+                throw new InvalidOperationException("Smoke test failed: online match did not expose voice status (text chat mode).");
             }
 
             if (!controller.EditorForceDownedStateForSmokeTest())
