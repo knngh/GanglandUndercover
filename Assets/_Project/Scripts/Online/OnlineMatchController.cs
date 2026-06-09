@@ -430,6 +430,8 @@ namespace GanglandUndercover.Online
 
         private void OnDestroy()
         {
+            CleanupPublishedLobbySession();
+
             if (networkManager == null)
             {
                 return;

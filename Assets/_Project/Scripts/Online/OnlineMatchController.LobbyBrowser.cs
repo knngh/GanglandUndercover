@@ -11,18 +11,24 @@ namespace GanglandUndercover.Online
     {
         private const int LobbyBrowserVisibleRoomLimit = 6;
         private const string LobbySessionTypeValue = "gangland-undercover";
+        private const string LobbyPropertyGameType = "game";
         private const string LobbyPropertyRelayCode = "relayCode";
         private const string LobbyPropertyMap = "map";
         private const string LobbyPropertyRules = "rules";
         private const string LocalRelayLobbyRoomId = "local-relay-host";
 
         private readonly List<LobbyRoomCandidate> lobbyRoomCandidates = new List<LobbyRoomCandidate>();
+        private IHostSession publishedLobbySession;
         private bool lobbyBrowserRefreshInProgress;
+        private bool lobbyPublishInProgress;
+        private int lobbyPublishGeneration;
         private int selectedLobbyRoomIndex = -1;
         private string lobbyBrowserStatus = "Lobby 房间列表待刷新。";
+        private string publishedLobbySessionCode = string.Empty;
 
         public int LobbyRoomCandidateCount => lobbyRoomCandidates.Count;
         public bool LobbyBrowserRefreshInProgress => lobbyBrowserRefreshInProgress;
+        public bool LobbyPublishInProgress => lobbyPublishInProgress;
         public string LobbyBrowserStatus => lobbyBrowserStatus;
         public string LobbyBrowserSummary => BuildLobbyBrowserSummary(
             lobbyBrowserStatus,
@@ -31,6 +37,16 @@ namespace GanglandUndercover.Online
             selectedLobbyRoomIndex);
         public string LobbyRoomListText => BuildLobbyRoomListText(lobbyRoomCandidates);
         public string LobbyBrowserPanelText => LobbyBrowserSummary + "\n" + LobbyRoomListText;
+
+        private void RequestPublishRelayLobbySession()
+        {
+            if (lobbyPublishInProgress)
+            {
+                return;
+            }
+
+            _ = PublishRelayLobbySessionAsync();
+        }
 
         public void RequestRefreshLobbyRooms()
         {
@@ -71,6 +87,86 @@ namespace GanglandUndercover.Online
             lobbyBrowserStatus = "已选择 Lobby 房间：" + room.Name + "。";
             status = "正在通过房间列表加入 Relay " + relayJoinInput + "。";
             StartRelayClient();
+        }
+
+        private async Task PublishRelayLobbySessionAsync()
+        {
+            string safeRelayCode = CleanRelayJoinInput(relayJoinCode);
+            if (string.IsNullOrWhiteSpace(safeRelayCode))
+            {
+                lobbyBrowserStatus = "Relay 房间码未就绪，Lobby 暂不发布。";
+                return;
+            }
+
+            lobbyPublishInProgress = true;
+            int publishGeneration = ++lobbyPublishGeneration;
+            lobbyBrowserStatus = BuildLobbyPublishStatus(true, false, string.Empty);
+
+            try
+            {
+                await CleanupPublishedLobbySessionAsync(false);
+                if (publishGeneration != lobbyPublishGeneration)
+                {
+                    return;
+                }
+
+                EnsureServiceBootstrap();
+                await serviceBootstrap.InitializeAsync();
+                if (publishGeneration != lobbyPublishGeneration)
+                {
+                    return;
+                }
+
+                if (!CanUseSessionBrowser(out string reason))
+                {
+                    if (publishGeneration == lobbyPublishGeneration)
+                    {
+                        lobbyBrowserStatus = reason;
+                    }
+
+                    return;
+                }
+
+                string rules = CurrentLobbyRuleSummary();
+                SessionOptions options = BuildRelayLobbySessionOptions(
+                    roomName,
+                    roomMaxPlayers,
+                    safeRelayCode,
+                    ActiveMapTypeLobbyLabel(),
+                    rules);
+
+                IHostSession createdSession = await MultiplayerService.Instance.CreateSessionAsync(options);
+                if (publishGeneration != lobbyPublishGeneration)
+                {
+                    await DeleteLobbySessionAsync(createdSession);
+                    return;
+                }
+
+                publishedLobbySession = createdSession;
+                publishedLobbySessionCode = CleanRelayJoinInput(publishedLobbySession?.Code);
+                lobbyBrowserStatus = BuildLobbyPublishStatus(false, true, publishedLobbySessionCode);
+                UpsertLocalRelayLobbyRoom();
+            }
+            catch (Exception exception)
+            {
+                if (publishGeneration == lobbyPublishGeneration)
+                {
+                    IHostSession failedSession = publishedLobbySession;
+                    publishedLobbySession = null;
+                    publishedLobbySessionCode = string.Empty;
+                    _ = DeleteLobbySessionAsync(failedSession);
+                    lobbyBrowserStatus = "Lobby 发布失败，仍可分享 Relay 房间码：" + safeRelayCode + "。";
+                }
+
+                Debug.LogWarning("Gangland lobby publish skipped: " + exception.Message);
+            }
+            finally
+            {
+                if (publishGeneration == lobbyPublishGeneration)
+                {
+                    lobbyPublishInProgress = false;
+                }
+            }
         }
 
         private async Task RefreshLobbyRoomsAsync()
@@ -157,6 +253,43 @@ namespace GanglandUndercover.Online
             return true;
         }
 
+        private async Task CleanupPublishedLobbySessionAsync(bool invalidateInFlight = true)
+        {
+            if (invalidateInFlight)
+            {
+                lobbyPublishGeneration++;
+                lobbyPublishInProgress = false;
+            }
+
+            IHostSession session = publishedLobbySession;
+            publishedLobbySession = null;
+            publishedLobbySessionCode = string.Empty;
+
+            await DeleteLobbySessionAsync(session);
+        }
+
+        private void CleanupPublishedLobbySession()
+        {
+            _ = CleanupPublishedLobbySessionAsync();
+        }
+
+        private static async Task DeleteLobbySessionAsync(IHostSession session)
+        {
+            if (session == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await session.DeleteAsync();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("Gangland lobby cleanup skipped: " + exception.GetType().Name);
+            }
+        }
+
         private static QuerySessionsOptions BuildLobbyQueryOptions()
         {
             QuerySessionsOptions options = new QuerySessionsOptions
@@ -167,6 +300,50 @@ namespace GanglandUndercover.Online
             options.FilterOptions.Add(new FilterOption(FilterField.StringIndex1, LobbySessionTypeValue, FilterOperation.Equal));
             options.SortOptions.Add(new SortOption(SortOrder.Descending, SortField.LastUpdated));
             return options;
+        }
+
+        private static SessionOptions BuildRelayLobbySessionOptions(
+            string roomNameValue,
+            int maxPlayersValue,
+            string relayCodeValue,
+            string mapNameValue,
+            string ruleSummaryValue)
+        {
+            return new SessionOptions
+            {
+                Type = LobbySessionTypeValue,
+                Name = LimitText(roomNameValue, 24, "未命名房间"),
+                MaxPlayers = Mathf.Max(1, maxPlayersValue),
+                IsPrivate = false,
+                IsLocked = false,
+                SessionProperties = BuildRelayLobbySessionProperties(relayCodeValue, mapNameValue, ruleSummaryValue)
+            };
+        }
+
+        private static Dictionary<string, SessionProperty> BuildRelayLobbySessionProperties(
+            string relayCodeValue,
+            string mapNameValue,
+            string ruleSummaryValue)
+        {
+            return new Dictionary<string, SessionProperty>
+            {
+                {
+                    LobbyPropertyGameType,
+                    new SessionProperty(LobbySessionTypeValue, VisibilityPropertyOptions.Public, PropertyIndex.String1)
+                },
+                {
+                    LobbyPropertyRelayCode,
+                    new SessionProperty(CleanRelayJoinInput(relayCodeValue), VisibilityPropertyOptions.Public, PropertyIndex.String2)
+                },
+                {
+                    LobbyPropertyMap,
+                    new SessionProperty(LimitText(mapNameValue, 18, "地图待定"), VisibilityPropertyOptions.Public, PropertyIndex.String3)
+                },
+                {
+                    LobbyPropertyRules,
+                    new SessionProperty(LimitText(ruleSummaryValue, 28, "默认规则"), VisibilityPropertyOptions.Public)
+                }
+            };
         }
 
         private static LobbyRoomCandidate FromSessionInfo(ISessionInfo session)
@@ -205,7 +382,7 @@ namespace GanglandUndercover.Online
 
             int maxPlayers = Mathf.Max(1, roomMaxPlayers);
             int playerCount = Mathf.Clamp(Mathf.Max(1, ConnectedClientCount), 1, maxPlayers);
-            string rules = roomAutoFillAi ? "AI补位" : "真人优先";
+            string rules = CurrentLobbyRuleSummary();
             lobbyRoomCandidates.Insert(0, new LobbyRoomCandidate(
                 LocalRelayLobbyRoomId,
                 roomName,
@@ -217,7 +394,15 @@ namespace GanglandUndercover.Online
                 rules,
                 safeRelayCode));
             selectedLobbyRoomIndex = 0;
-            lobbyBrowserStatus = "本机 Relay 房间已加入房间列表预览。";
+
+            if (!string.IsNullOrWhiteSpace(publishedLobbySessionCode))
+            {
+                lobbyBrowserStatus = "Lobby Session 已发布：" + publishedLobbySessionCode + "。";
+            }
+            else if (!lobbyPublishInProgress)
+            {
+                lobbyBrowserStatus = "本机 Relay 房间已加入房间列表预览。";
+            }
         }
 
         private string ActiveMapTypeLobbyLabel()
@@ -231,6 +416,29 @@ namespace GanglandUndercover.Online
                 default:
                     return "港区";
             }
+        }
+
+        private string CurrentLobbyRuleSummary()
+        {
+            return roomAutoFillAi ? "AI补位" : "真人优先";
+        }
+
+        private static string BuildLobbyPublishStatus(bool publishInProgress, bool published, string sessionCode)
+        {
+            if (publishInProgress)
+            {
+                return "Lobby 正在发布 Relay 房间。";
+            }
+
+            if (published)
+            {
+                string safeCode = CleanRelayJoinInput(sessionCode);
+                return string.IsNullOrWhiteSpace(safeCode)
+                    ? "Lobby Session 已发布。"
+                    : "Lobby Session 已发布：" + safeCode + "。";
+            }
+
+            return "Lobby 房间列表待刷新。";
         }
 
         private static string BuildLobbyBrowserSummary(

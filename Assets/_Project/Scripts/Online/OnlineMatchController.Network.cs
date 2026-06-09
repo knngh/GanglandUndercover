@@ -361,6 +361,7 @@ namespace GanglandUndercover.Online
                     EnsureMiniGameBridgeNetworkObject();
                     EnsureSurveillanceCameraNetworkObjects();
                     UpsertLocalRelayLobbyRoom();
+                    RequestPublishRelayLobbySession();
                     PlayCue("start");
                     BroadcastSnapshot();
 
@@ -516,6 +517,7 @@ namespace GanglandUndercover.Online
         // --- Shutdown ---
         private void Shutdown()
         {
+            CleanupPublishedLobbySession();
             UnregisterMessages();
 
             if (networkManager != null && networkManager.IsListening)

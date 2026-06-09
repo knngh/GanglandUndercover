@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -304,6 +305,64 @@ namespace GanglandUndercover.Tests
 
             StringAssert.Contains("2. 公开测试房", line);
             StringAssert.Contains("待发布 Relay", line);
+        }
+
+        [Test]
+        public void LobbySessionProperties_MatchBrowserQueryIndex()
+        {
+            IDictionary properties = BuildRelayLobbySessionProperties(
+                relayCode: " 6kb6dh ",
+                mapName: "警署",
+                ruleSummary: "AI补位");
+
+            object gameProperty = properties["game"];
+            object relayProperty = properties["relayCode"];
+            object mapProperty = properties["map"];
+            object queryOptions = BuildLobbyQueryOptions();
+            IEnumerable filters = (IEnumerable)queryOptions.GetType().GetProperty("FilterOptions").GetValue(queryOptions);
+            object firstFilter = First(filters);
+
+            Assert.AreEqual("gangland-undercover", PropertyString(gameProperty, "Value"));
+            Assert.AreEqual("Public", PropertyValueText(gameProperty, "Visibility"));
+            Assert.AreEqual("String1", PropertyValueText(gameProperty, "Index"));
+            Assert.AreEqual("6KB6DH", PropertyString(relayProperty, "Value"));
+            Assert.AreEqual("String2", PropertyValueText(relayProperty, "Index"));
+            Assert.AreEqual("警署", PropertyString(mapProperty, "Value"));
+            Assert.AreEqual("String3", PropertyValueText(mapProperty, "Index"));
+            Assert.AreEqual("StringIndex1", PropertyValueText(firstFilter, "Field"));
+            Assert.AreEqual("gangland-undercover", PropertyString(firstFilter, "Value"));
+        }
+
+        [Test]
+        public void RelayLobbySessionOptions_ArePublicSearchableAndClamped()
+        {
+            object options = BuildRelayLobbySessionOptions(
+                roomName: " 公开测试房 ",
+                maxPlayers: 0,
+                relayCode: " abc123 ",
+                mapName: string.Empty,
+                ruleSummary: string.Empty);
+            IDictionary properties = (IDictionary)options.GetType().GetProperty("SessionProperties").GetValue(options);
+
+            Assert.AreEqual("gangland-undercover", PropertyString(options, "Type"));
+            Assert.AreEqual("公开测试房", PropertyString(options, "Name"));
+            Assert.AreEqual(1, PropertyInt(options, "MaxPlayers"));
+            Assert.IsFalse(PropertyBool(options, "IsPrivate"));
+            Assert.IsFalse(PropertyBool(options, "IsLocked"));
+            Assert.AreEqual("ABC123", PropertyString(properties["relayCode"], "Value"));
+            Assert.AreEqual("地图待定", PropertyString(properties["map"], "Value"));
+            Assert.AreEqual("默认规则", PropertyString(properties["rules"], "Value"));
+        }
+
+        [Test]
+        public void LobbyPublishStatus_ShowsProgressAndSessionCode()
+        {
+            string publishing = BuildLobbyPublishStatus(publishInProgress: true, published: false, sessionCode: string.Empty);
+            string published = BuildLobbyPublishStatus(publishInProgress: false, published: true, sessionCode: " ab12cd ");
+
+            StringAssert.Contains("正在发布", publishing);
+            StringAssert.Contains("已发布", published);
+            StringAssert.Contains("AB12CD", published);
         }
 
         [Test]
@@ -1257,6 +1316,58 @@ namespace GanglandUndercover.Tests
             });
         }
 
+        private static IDictionary BuildRelayLobbySessionProperties(
+            string relayCode,
+            string mapName,
+            string ruleSummary)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return (IDictionary)StaticNonPublic(controllerType, "BuildRelayLobbySessionProperties").Invoke(null, new object[]
+            {
+                relayCode,
+                mapName,
+                ruleSummary
+            });
+        }
+
+        private static object BuildRelayLobbySessionOptions(
+            string roomName,
+            int maxPlayers,
+            string relayCode,
+            string mapName,
+            string ruleSummary)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return StaticNonPublic(controllerType, "BuildRelayLobbySessionOptions").Invoke(null, new object[]
+            {
+                roomName,
+                maxPlayers,
+                relayCode,
+                mapName,
+                ruleSummary
+            });
+        }
+
+        private static object BuildLobbyQueryOptions()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return StaticNonPublic(controllerType, "BuildLobbyQueryOptions").Invoke(null, Array.Empty<object>());
+        }
+
+        private static string BuildLobbyPublishStatus(
+            bool publishInProgress,
+            bool published,
+            string sessionCode)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return (string)StaticNonPublic(controllerType, "BuildLobbyPublishStatus").Invoke(null, new object[]
+            {
+                publishInProgress,
+                published,
+                sessionCode
+            });
+        }
+
         private static object EvaluateVictory(int evidenceScore, int evidenceTarget, object players, Array tasks, bool matchStarted, string phaseName)
         {
             object bridge = CreateVictoryBridge();
@@ -1382,6 +1493,22 @@ namespace GanglandUndercover.Tests
         private static string PropertyString(object target, string propertyName)
         {
             return (string)target.GetType().GetProperty(propertyName).GetValue(target);
+        }
+
+        private static string PropertyValueText(object target, string propertyName)
+        {
+            return target.GetType().GetProperty(propertyName).GetValue(target).ToString();
+        }
+
+        private static object First(IEnumerable values)
+        {
+            foreach (object value in values)
+            {
+                return value;
+            }
+
+            Assert.Fail("Expected at least one value.");
+            return null;
         }
 
         private static string StaticPropertyString(Type type, string propertyName)
