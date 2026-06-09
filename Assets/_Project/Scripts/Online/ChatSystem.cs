@@ -13,7 +13,7 @@ namespace GanglandUndercover.Online
         /// <summary>会议/投票阶段 — 所有存活玩家可见。</summary>
         Meeting,
 
-        /// <summary>行动阶段全局喊话 — 所有存活玩家可见。</summary>
+        /// <summary>行动阶段全局频道 — 所有存活玩家可见。</summary>
         Global,
 
         /// <summary>行动阶段近距离 — 附近存活玩家可见（不分阵营）。</summary>
@@ -94,7 +94,7 @@ namespace GanglandUndercover.Online
                 case ChatChannel.Meeting:
                     return "会议聊天";
                 case ChatChannel.Global:
-                    return "全局喊话";
+                    return "全局频道";
                 case ChatChannel.Proximity:
                     return "近距离聊天";
                 case ChatChannel.Ghost:

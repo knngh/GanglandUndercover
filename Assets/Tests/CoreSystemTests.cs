@@ -246,6 +246,18 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ChatSystem_ChannelDisplayNamesUseTextChatTerms()
+        {
+            Type chatType = RuntimeType("GanglandUndercover.Online.ChatSystem");
+            Type channelType = RuntimeType("GanglandUndercover.Online.ChatChannel");
+            object global = Enum.Parse(channelType, "Global");
+
+            string display = (string)InvokeStatic(chatType, "ChannelDisplayName", global);
+
+            Assert.AreEqual("全局频道", display);
+        }
+
+        [Test]
         public void MainMenuLoginStatus_NoServiceExplainsAnonymousInitialization()
         {
             string status = BuildMainMenuLoginStatus(null);
@@ -274,7 +286,7 @@ namespace GanglandUndercover.Tests
             StringAssert.Contains("无边框", status);
             StringAssert.Contains("120 FPS", status);
             StringAssert.Contains("VSync 关", status);
-            StringAssert.Contains("自由发言", status);
+            StringAssert.Contains("自由发送", status);
             StringAssert.Contains("色盲 1", status);
         }
 

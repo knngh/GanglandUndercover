@@ -595,7 +595,7 @@ namespace GanglandUndercover.UI
             BuildSettingsButton(panel.transform, "帧率", startX + (buttonW + gap) * 3f, -374f, buttonW, buttonH, OnCycleFrameRate);
 
             BuildSettingsButton(panel.transform, "垂直同步", startX, -430f, buttonW, buttonH, OnToggleVSync);
-            BuildSettingsButton(panel.transform, "自由发言", startX + (buttonW + gap), -430f, buttonW, buttonH, OnCycleVoiceMode);
+            BuildSettingsButton(panel.transform, "自由发送", startX + (buttonW + gap), -430f, buttonW, buttonH, OnCycleVoiceMode);
             BuildSettingsButton(panel.transform, "重置设置", startX + (buttonW + gap) * 2f, -430f, buttonW, buttonH, OnResetSettings);
             BuildSettingsButton(panel.transform, "关闭", startX + (buttonW + gap) * 3f, -430f, buttonW, buttonH, OnCloseSettingsPanel);
 

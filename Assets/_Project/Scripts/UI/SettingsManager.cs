@@ -419,7 +419,7 @@ namespace GanglandUndercover.UI
         /// <summary>获取画质预设名称列表</summary>
         public static readonly string[] QualityPresetNames = { "低", "中", "高", "极致" };
 
-        /// <summary>获取语音模式名称列表</summary>
-        public static readonly string[] VoiceModeNames = { "按键说话", "自由发言", "禁用" };
+        /// <summary>获取聊天发送模式名称列表。字段名沿用 VoiceMode 以兼容既有存档。</summary>
+        public static readonly string[] VoiceModeNames = { "按键发送", "自由发送", "禁用" };
     }
 }

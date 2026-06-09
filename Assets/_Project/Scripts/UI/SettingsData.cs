@@ -141,7 +141,7 @@ namespace GanglandUndercover.UI
             set => _language = !string.IsNullOrEmpty(value) ? value : _language;
         }
 
-        /// <summary>语音模式：0=按键说话，1=自由发言，2=禁用</summary>
+        /// <summary>聊天发送模式：0=按键发送，1=自由发送，2=禁用。字段名沿用 VoiceMode 以兼容既有存档。</summary>
         [SerializeField, Range(0, 2)]
         private int _voiceMode;
         public int VoiceMode
