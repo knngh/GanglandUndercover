@@ -366,6 +366,39 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void LobbyRoomSessionJoin_CanUseSessionWhenIdAndRelayCodeExist()
+        {
+            object result = BuildLobbyRoomSessionJoin(
+                sessionId: "session-123",
+                relayCode: " 6kb6dh ",
+                allowLocalPreview: false);
+
+            Assert.IsTrue(FieldBool(result, "CanJoinSession"));
+            Assert.AreEqual("session-123", FieldString(result, "SessionId"));
+            Assert.AreEqual("6KB6DH", FieldString(result, "RelayCode"));
+            StringAssert.Contains("Session", FieldString(result, "StatusText"));
+        }
+
+        [Test]
+        public void LobbyRoomSessionJoin_FallsBackForLocalPreviewOrMissingSessionId()
+        {
+            object localPreview = BuildLobbyRoomSessionJoin(
+                sessionId: "local-relay-host",
+                relayCode: "6kb6dh",
+                allowLocalPreview: true);
+            object missingSession = BuildLobbyRoomSessionJoin(
+                sessionId: string.Empty,
+                relayCode: "6kb6dh",
+                allowLocalPreview: false);
+
+            Assert.IsFalse(FieldBool(localPreview, "CanJoinSession"));
+            Assert.IsFalse(FieldBool(missingSession, "CanJoinSession"));
+            Assert.AreEqual("6KB6DH", FieldString(localPreview, "RelayCode"));
+            StringAssert.Contains("Relay", FieldString(localPreview, "StatusText"));
+            StringAssert.Contains("Relay", FieldString(missingSession, "StatusText"));
+        }
+
+        [Test]
         public void ChatSendPayload_RoundTripsContentWithPipes()
         {
             Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
@@ -1368,6 +1401,20 @@ namespace GanglandUndercover.Tests
             });
         }
 
+        private static object BuildLobbyRoomSessionJoin(
+            string sessionId,
+            string relayCode,
+            bool allowLocalPreview)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return StaticNonPublic(controllerType, "BuildLobbyRoomSessionJoin").Invoke(null, new object[]
+            {
+                sessionId,
+                relayCode,
+                allowLocalPreview
+            });
+        }
+
         private static object EvaluateVictory(int evidenceScore, int evidenceTarget, object players, Array tasks, bool matchStarted, string phaseName)
         {
             object bridge = CreateVictoryBridge();
@@ -1478,6 +1525,16 @@ namespace GanglandUndercover.Tests
         private static int FieldInt(object target, string fieldName)
         {
             return Convert.ToInt32(target.GetType().GetField(fieldName).GetValue(target));
+        }
+
+        private static bool FieldBool(object target, string fieldName)
+        {
+            return (bool)target.GetType().GetField(fieldName).GetValue(target);
+        }
+
+        private static string FieldString(object target, string fieldName)
+        {
+            return (string)target.GetType().GetField(fieldName).GetValue(target);
         }
 
         private static int PropertyInt(object target, string propertyName)

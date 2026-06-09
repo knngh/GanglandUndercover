@@ -335,6 +335,7 @@ namespace GanglandUndercover.Online
 
                 if (!CanUseRelay(out string reason))
                 {
+                    await CleanupJoinedLobbySessionAsync();
                     relayStatus = reason;
                     status = reason;
                     AddCaseLog(reason);
@@ -444,6 +445,7 @@ namespace GanglandUndercover.Online
                 }
                 else
                 {
+                    await CleanupJoinedLobbySessionAsync();
                     relayStatus = "Relay Client 启动失败。";
                     status = relayStatus;
                     OnRelayStatusChanged?.Invoke(relayStatus);
@@ -451,6 +453,7 @@ namespace GanglandUndercover.Online
             }
             catch (Exception exception)
             {
+                await CleanupJoinedLobbySessionAsync();
                 relayStatus = "Relay 加入失败：" + exception.Message;
                 status = relayStatus;
                 AddCaseLog(status);
@@ -517,6 +520,7 @@ namespace GanglandUndercover.Online
         // --- Shutdown ---
         private void Shutdown()
         {
+            CleanupJoinedLobbySession();
             CleanupPublishedLobbySession();
             UnregisterMessages();
 

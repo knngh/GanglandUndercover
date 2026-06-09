@@ -19,9 +19,12 @@ namespace GanglandUndercover.Online
 
         private readonly List<LobbyRoomCandidate> lobbyRoomCandidates = new List<LobbyRoomCandidate>();
         private IHostSession publishedLobbySession;
+        private ISession joinedLobbySession;
         private bool lobbyBrowserRefreshInProgress;
         private bool lobbyPublishInProgress;
+        private bool lobbyJoinInProgress;
         private int lobbyPublishGeneration;
+        private int lobbyJoinGeneration;
         private int selectedLobbyRoomIndex = -1;
         private string lobbyBrowserStatus = "Lobby 房间列表待刷新。";
         private string publishedLobbySessionCode = string.Empty;
@@ -29,6 +32,7 @@ namespace GanglandUndercover.Online
         public int LobbyRoomCandidateCount => lobbyRoomCandidates.Count;
         public bool LobbyBrowserRefreshInProgress => lobbyBrowserRefreshInProgress;
         public bool LobbyPublishInProgress => lobbyPublishInProgress;
+        public bool LobbyJoinInProgress => lobbyJoinInProgress;
         public string LobbyBrowserStatus => lobbyBrowserStatus;
         public string LobbyBrowserSummary => BuildLobbyBrowserSummary(
             lobbyBrowserStatus,
@@ -83,10 +87,93 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            SetRelayJoinInput(room.RelayCode);
+            LobbyRoomSessionJoin join = BuildLobbyRoomSessionJoin(room.Id, room.RelayCode, room.Id == LocalRelayLobbyRoomId);
+            SetRelayJoinInput(join.RelayCode);
             lobbyBrowserStatus = "已选择 Lobby 房间：" + room.Name + "。";
-            status = "正在通过房间列表加入 Relay " + relayJoinInput + "。";
+
+            if (join.CanJoinSession)
+            {
+                _ = JoinLobbyRoomSessionThenRelayAsync(join, room.Name);
+                return;
+            }
+
+            status = join.StatusText;
             StartRelayClient();
+        }
+
+        private async Task JoinLobbyRoomSessionThenRelayAsync(LobbyRoomSessionJoin join, string roomNameValue)
+        {
+            if (lobbyJoinInProgress)
+            {
+                return;
+            }
+
+            lobbyJoinInProgress = true;
+            int joinGeneration = ++lobbyJoinGeneration;
+            lobbyBrowserStatus = "正在加入 Lobby Session：" + LimitText(roomNameValue, 24, "未命名房间") + "。";
+            status = lobbyBrowserStatus;
+
+            try
+            {
+                await CleanupJoinedLobbySessionAsync(false);
+                if (joinGeneration != lobbyJoinGeneration)
+                {
+                    return;
+                }
+
+                EnsureServiceBootstrap();
+                await serviceBootstrap.InitializeAsync();
+                if (joinGeneration != lobbyJoinGeneration)
+                {
+                    return;
+                }
+
+                if (!CanUseSessionBrowser(out string reason))
+                {
+                    if (joinGeneration == lobbyJoinGeneration)
+                    {
+                        lobbyBrowserStatus = reason;
+                        status = reason;
+                    }
+
+                    return;
+                }
+
+                ISession joinedSession = await MultiplayerService.Instance.JoinSessionByIdAsync(
+                    join.SessionId,
+                    BuildLobbyJoinSessionOptions());
+                if (joinGeneration != lobbyJoinGeneration)
+                {
+                    await LeaveLobbySessionAsync(joinedSession);
+                    return;
+                }
+
+                joinedLobbySession = joinedSession;
+                SetRelayJoinInput(join.RelayCode);
+                lobbyBrowserStatus = "已加入 Lobby Session，正在连接 Relay。";
+                status = lobbyBrowserStatus;
+                StartRelayClient();
+            }
+            catch (Exception exception)
+            {
+                if (joinGeneration == lobbyJoinGeneration)
+                {
+                    await CleanupJoinedLobbySessionAsync(false);
+                    lobbyBrowserStatus = "Lobby Session 加入失败，仍尝试通过 Relay 房间码加入。";
+                    status = lobbyBrowserStatus;
+                    SetRelayJoinInput(join.RelayCode);
+                    StartRelayClient();
+                }
+
+                Debug.LogWarning("Gangland lobby session join skipped: " + exception.Message);
+            }
+            finally
+            {
+                if (joinGeneration == lobbyJoinGeneration)
+                {
+                    lobbyJoinInProgress = false;
+                }
+            }
         }
 
         private async Task PublishRelayLobbySessionAsync()
@@ -253,6 +340,42 @@ namespace GanglandUndercover.Online
             return true;
         }
 
+        private async Task CleanupJoinedLobbySessionAsync(bool invalidateInFlight = true)
+        {
+            if (invalidateInFlight)
+            {
+                lobbyJoinGeneration++;
+                lobbyJoinInProgress = false;
+            }
+
+            ISession session = joinedLobbySession;
+            joinedLobbySession = null;
+
+            await LeaveLobbySessionAsync(session);
+        }
+
+        private void CleanupJoinedLobbySession()
+        {
+            _ = CleanupJoinedLobbySessionAsync();
+        }
+
+        private static async Task LeaveLobbySessionAsync(ISession session)
+        {
+            if (session == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await session.LeaveAsync();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("Gangland lobby session leave skipped: " + exception.GetType().Name);
+            }
+        }
+
         private async Task CleanupPublishedLobbySessionAsync(bool invalidateInFlight = true)
         {
             if (invalidateInFlight)
@@ -317,6 +440,14 @@ namespace GanglandUndercover.Online
                 IsPrivate = false,
                 IsLocked = false,
                 SessionProperties = BuildRelayLobbySessionProperties(relayCodeValue, mapNameValue, ruleSummaryValue)
+            };
+        }
+
+        private static JoinSessionOptions BuildLobbyJoinSessionOptions()
+        {
+            return new JoinSessionOptions
+            {
+                Type = LobbySessionTypeValue
             };
         }
 
@@ -421,6 +552,23 @@ namespace GanglandUndercover.Online
         private string CurrentLobbyRuleSummary()
         {
             return roomAutoFillAi ? "AI补位" : "真人优先";
+        }
+
+        private static LobbyRoomSessionJoin BuildLobbyRoomSessionJoin(
+            string sessionIdValue,
+            string relayCodeValue,
+            bool allowLocalPreview)
+        {
+            string safeSessionId = string.IsNullOrWhiteSpace(sessionIdValue) ? string.Empty : sessionIdValue.Trim();
+            string safeRelayCode = CleanRelayJoinInput(relayCodeValue);
+            bool canJoinSession = !allowLocalPreview
+                && !string.IsNullOrWhiteSpace(safeSessionId)
+                && !string.IsNullOrWhiteSpace(safeRelayCode);
+            string statusText = canJoinSession
+                ? "正在通过 Lobby Session 加入 Relay " + safeRelayCode + "。"
+                : "正在通过 Relay 房间码加入 " + safeRelayCode + "。";
+
+            return new LobbyRoomSessionJoin(safeSessionId, safeRelayCode, canJoinSession, statusText);
         }
 
         private static string BuildLobbyPublishStatus(bool publishInProgress, bool published, string sessionCode)
@@ -560,6 +708,22 @@ namespace GanglandUndercover.Online
             return properties.TryGetValue(key, out SessionProperty value) && value != null
                 ? value.Value ?? string.Empty
                 : string.Empty;
+        }
+
+        private readonly struct LobbyRoomSessionJoin
+        {
+            public readonly string SessionId;
+            public readonly string RelayCode;
+            public readonly bool CanJoinSession;
+            public readonly string StatusText;
+
+            public LobbyRoomSessionJoin(string sessionId, string relayCode, bool canJoinSession, string statusText)
+            {
+                SessionId = string.IsNullOrWhiteSpace(sessionId) ? string.Empty : sessionId.Trim();
+                RelayCode = CleanRelayJoinInput(relayCode);
+                CanJoinSession = canJoinSession;
+                StatusText = string.IsNullOrWhiteSpace(statusText) ? "正在通过 Relay 房间码加入。" : statusText.Trim();
+            }
         }
 
         private readonly struct LobbyRoomCandidate
