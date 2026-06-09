@@ -617,12 +617,31 @@ namespace GanglandUndercover.Online
             if (miniGameBridge == null)
             {
                 miniGameBridge = GetComponent<MiniGames.OnlineMiniGameBridge>();
-                if (miniGameBridge == null)
-                {
-                    miniGameBridge = gameObject.AddComponent<MiniGames.OnlineMiniGameBridge>();
-                }
             }
-            miniGameBridge.BindController(this);
+
+            if (miniGameBridge != null)
+            {
+                miniGameBridge.BindController(this);
+            }
+        }
+        internal void BindNetworkMiniGameBridge(MiniGames.OnlineMiniGameBridge bridge)
+        {
+            if (bridge == null)
+            {
+                return;
+            }
+
+            if (networkManager != null && bridge.NetworkManager != null && bridge.NetworkManager != networkManager)
+            {
+                return;
+            }
+
+            if (miniGameBridge == null || bridge.IsSpawned || !miniGameBridge.IsSpawned)
+            {
+                miniGameBridge = bridge;
+            }
+
+            bridge.BindController(this);
         }
         private void EnsureCameraRig()
         {

@@ -46,7 +46,8 @@ namespace GanglandUndercover.Online
         private const float CollisionTraceStep = 0.08f;
         private const float RoleRevealSeconds = 6.5f;
         private const ulong LocalPreviewClientId = 0UL;
-        private const uint SurveillanceCameraPrefabHash = 0x47554343; // "GUCC" stable runtime prefab source hash.
+        private const string SurveillanceCameraPrefabResourcePath = "Network/OnlineSecurityCamera";
+        private const string MiniGameBridgePrefabResourcePath = "Network/OnlineMiniGameBridge";
         // Camera constants moved to OnlineCameraRig — use _cameraRig.Configure() for all camera setup.
         private const float PlayerAliveVisualScale = 1.12f;
         private const float PlayerDeadVisualScaleX = 1.04f;
@@ -96,6 +97,7 @@ namespace GanglandUndercover.Online
         internal NetworkManager networkManager;
         private UnityTransport transport;
         internal GameObject surveillanceCameraTemplate; // A1: NetworkPrefab 模板
+        internal GameObject miniGameBridgeTemplate;
         private UnityServiceBootstrap serviceBootstrap;
         public OnlineWorldBuilder WorldBuilder;
         private OnlineWorldBuilder worldBuilder
@@ -731,7 +733,7 @@ namespace GanglandUndercover.Online
 
             if (Input.GetKeyDown(KeyCode.E))
             {
-                if (ShouldOpenLocalTaskPanel())
+                if (ShouldOpenLocalTaskPanel() && (miniGameBridge == null || !miniGameBridge.IsSpawned))
                 {
                     OnlineTaskState nearestTask = FindNearestTask(localPosition);
 
@@ -1438,35 +1440,33 @@ namespace GanglandUndercover.Online
             }
             else
             {
-                if (senderClientId == LocalClientId() && !player.IsBot && !submittingActiveTask)
+                if (!player.IsBot && !submittingActiveTask && miniGameBridge != null && miniGameBridge.IsSpawned)
                 {
-                    // M5.1: 委托给小游戏桥
-                    if (miniGameBridge != null && miniGameBridge.IsSpawned)
+                    if (nearestTask.Sabotaged)
+                    {
+                        miniGameBridge.OpenRepairMinigameOnClient(senderClientId, nearestTask.Id);
+                    }
+                    else if (!nearestTask.Completed)
                     {
                         miniGameBridge.OpenMinigameOnClient(senderClientId, nearestTask.Id);
                     }
-                    else
-                    {
-                        BeginActiveTask(nearestTask.Id); // 降级到旧 OnGUI 任务
-                    }
+
+                    return;
+                }
+
+                if (senderClientId == LocalClientId() && !player.IsBot && !submittingActiveTask)
+                {
+                    BeginActiveTask(nearestTask.Id); // 降级到旧 OnGUI 任务
                     return;
                 }
 
                 if (nearestTask.Sabotaged)
                 {
-                    // M5.3: 修复需要小游戏
-                    if (senderClientId == LocalClientId() && !player.IsBot && miniGameBridge != null && miniGameBridge.IsSpawned)
-                    {
-                        miniGameBridge.OpenRepairMinigameOnClient(senderClientId, nearestTask.Id);
-                    }
-                    else
-                    {
-                        nearestTask.Sabotaged = false;
-                        RepairSabotageEffect(SabotageForTask(nearestTask.Id));
-                        status = nearestTask.Name + " 的破坏已修复，危机效果下降。";
-                        lastSabotageEvent = status;
-                        AddCaseLog(status);
-                    }
+                    nearestTask.Sabotaged = false;
+                    RepairSabotageEffect(SabotageForTask(nearestTask.Id));
+                    status = nearestTask.Name + " 的破坏已修复，危机效果下降。";
+                    lastSabotageEvent = status;
+                    AddCaseLog(status);
                 }
                 else if (!nearestTask.Completed)
                 {

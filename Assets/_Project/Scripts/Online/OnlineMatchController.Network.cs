@@ -81,6 +81,7 @@ namespace GanglandUndercover.Online
             // A1: 注册监控摄像头 NetworkPrefab，避免运行时 AddComponent<NetworkObject>.Spawn()
             // 导致 globalObjectIdHash=0，远端无法复制。
             RegisterSurveillanceCameraPrefab();
+            RegisterMiniGameBridgePrefab();
         }
 
         // --- RegisterSurveillanceCameraPrefab ---
@@ -89,21 +90,17 @@ namespace GanglandUndercover.Online
             if (surveillanceCameraTemplate != null) return;
             if (TryReuseRegisteredSurveillanceCameraPrefab(out surveillanceCameraTemplate)) return;
 
-            surveillanceCameraTemplate = new GameObject("SurveillanceCameraTemplate");
-            surveillanceCameraTemplate.AddComponent<NetworkObject>();
-            var templateCamera = surveillanceCameraTemplate.AddComponent<Online.Surveillance.OnlineSecurityCamera>();
-            templateCamera.ZoneCenter = Vector2.zero;
-            templateCamera.ZoneSize = new Vector2(6f, 4f);
-            templateCamera.CameraLabel = "Template";
-            surveillanceCameraTemplate.SetActive(false);
-            DontDestroyOnLoad(surveillanceCameraTemplate);
+            surveillanceCameraTemplate = Resources.Load<GameObject>(SurveillanceCameraPrefabResourcePath);
+            if (surveillanceCameraTemplate == null)
+            {
+                Debug.LogError("[A1] Missing Resources prefab: " + SurveillanceCameraPrefabResourcePath);
+                return;
+            }
 
             networkManager.NetworkConfig.Prefabs.Add(
                 new Unity.Netcode.NetworkPrefab
                 {
-                    Override = NetworkPrefabOverride.Hash,
-                    SourceHashToOverride = SurveillanceCameraPrefabHash,
-                    OverridingTargetPrefab = surveillanceCameraTemplate
+                    Prefab = surveillanceCameraTemplate
                 });
         }
 
@@ -119,26 +116,105 @@ namespace GanglandUndercover.Online
 
             foreach (NetworkPrefab prefab in networkManager.NetworkConfig.Prefabs.Prefabs)
             {
-                if (prefab != null
-                    && prefab.Override == NetworkPrefabOverride.Hash
-                    && prefab.SourceHashToOverride == SurveillanceCameraPrefabHash)
+                GameObject candidate = prefab?.Prefab != null ? prefab.Prefab : prefab?.OverridingTargetPrefab;
+                if (candidate != null && candidate.GetComponent<Online.Surveillance.OnlineSecurityCamera>() != null)
                 {
-                    template = prefab.OverridingTargetPrefab != null ? prefab.OverridingTargetPrefab : prefab.Prefab;
-                    return template != null;
+                    template = candidate;
+                    return true;
                 }
             }
 
-            if (networkManager.NetworkConfig.Prefabs.NetworkPrefabOverrideLinks.TryGetValue(
-                    SurveillanceCameraPrefabHash,
-                    out NetworkPrefab registeredPrefab))
+            return false;
+        }
+
+        // --- RegisterMiniGameBridgePrefab ---
+        private void RegisterMiniGameBridgePrefab()
+        {
+            if (miniGameBridgeTemplate != null) return;
+            if (TryReuseRegisteredMiniGameBridgePrefab(out miniGameBridgeTemplate)) return;
+
+            miniGameBridgeTemplate = Resources.Load<GameObject>(MiniGameBridgePrefabResourcePath);
+            if (miniGameBridgeTemplate == null)
             {
-                template = registeredPrefab.OverridingTargetPrefab != null
-                    ? registeredPrefab.OverridingTargetPrefab
-                    : registeredPrefab.Prefab;
-                return template != null;
+                Debug.LogError("[MiniGameBridge] Missing Resources prefab: " + MiniGameBridgePrefabResourcePath);
+                return;
+            }
+
+            networkManager.NetworkConfig.Prefabs.Add(
+                new Unity.Netcode.NetworkPrefab
+                {
+                    Prefab = miniGameBridgeTemplate
+                });
+        }
+
+        // --- TryReuseRegisteredMiniGameBridgePrefab ---
+        private bool TryReuseRegisteredMiniGameBridgePrefab(out GameObject template)
+        {
+            template = null;
+
+            if (networkManager?.NetworkConfig?.Prefabs == null)
+            {
+                return false;
+            }
+
+            foreach (NetworkPrefab prefab in networkManager.NetworkConfig.Prefabs.Prefabs)
+            {
+                GameObject candidate = prefab?.Prefab != null ? prefab.Prefab : prefab?.OverridingTargetPrefab;
+                if (candidate != null && candidate.GetComponent<Online.MiniGames.OnlineMiniGameBridge>() != null)
+                {
+                    template = candidate;
+                    return true;
+                }
             }
 
             return false;
+        }
+
+        // --- EnsureMiniGameBridgeNetworkObject ---
+        private void EnsureMiniGameBridgeNetworkObject()
+        {
+            if (!Application.isPlaying || networkManager == null || !networkManager.IsServer)
+            {
+                return;
+            }
+
+            if (miniGameBridge != null && miniGameBridge.IsSpawned)
+            {
+                miniGameBridge.BindController(this);
+                return;
+            }
+
+            if (miniGameBridgeTemplate == null)
+            {
+                RegisterMiniGameBridgePrefab();
+            }
+
+            if (miniGameBridgeTemplate == null)
+            {
+                Debug.LogError("[MiniGameBridge] NetworkPrefab template not registered!");
+                return;
+            }
+
+            NetworkObject networkObject = NetworkObject.InstantiateAndSpawn(
+                miniGameBridgeTemplate,
+                networkManager,
+                ownerClientId: NetworkManager.ServerClientId,
+                destroyWithScene: false,
+                isPlayerObject: false,
+                forceOverride: false);
+
+            if (networkObject == null)
+            {
+                Debug.LogError("[MiniGameBridge] Failed to spawn NetworkPrefab.");
+                return;
+            }
+
+            GameObject bridgeObject = networkObject.gameObject;
+            bridgeObject.name = "OnlineMiniGameBridge";
+            DontDestroyOnLoad(bridgeObject);
+
+            miniGameBridge = bridgeObject.GetComponent<Online.MiniGames.OnlineMiniGameBridge>();
+            miniGameBridge.BindController(this);
         }
 
         // --- EnsureServiceBootstrap ---
@@ -197,6 +273,7 @@ namespace GanglandUndercover.Online
                     AddCaseLog(status);
                     UpsertLocalPlayer();
                     SendClientProfile();
+                    EnsureMiniGameBridgeNetworkObject();
                     EnsureSurveillanceCameraNetworkObjects();
                     PlayCue("start");
                     BroadcastSnapshot();
@@ -280,6 +357,7 @@ namespace GanglandUndercover.Online
                     AddCaseLog(status);
                     UpsertLocalPlayer();
                     SendClientProfile();
+                    EnsureMiniGameBridgeNetworkObject();
                     EnsureSurveillanceCameraNetworkObjects();
                     PlayCue("start");
                     BroadcastSnapshot();
@@ -551,6 +629,8 @@ namespace GanglandUndercover.Online
         {
             if (networkManager.IsServer)
             {
+                EnsureMiniGameBridgeNetworkObject();
+
                 Vector3 spawn = mapService.SpawnPosition(players.Count);
                 players[clientId] = new OnlinePlayerState(clientId, "玩家" + clientId, spawn, false, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
                 killSystem.killCooldowns[clientId] = 0f;

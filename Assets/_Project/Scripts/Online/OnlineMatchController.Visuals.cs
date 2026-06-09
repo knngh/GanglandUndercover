@@ -814,20 +814,31 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            GameObject cameraObj = Instantiate(surveillanceCameraTemplate, worldRoot.transform, false);
-            cameraObj.name = $"SurveillanceCamera_{zone.Label}";
-            cameraObj.transform.position = worldPos;
-            cameraObj.SetActive(true);
+            NetworkObject netObj = NetworkObject.InstantiateAndSpawn(
+                surveillanceCameraTemplate,
+                networkManager,
+                ownerClientId: NetworkManager.ServerClientId,
+                destroyWithScene: false,
+                isPlayerObject: false,
+                forceOverride: false,
+                position: worldPos);
 
-            var netObj = cameraObj.GetComponent<NetworkObject>();
+            if (netObj == null)
+            {
+                Debug.LogError("[A1] Failed to spawn surveillance camera NetworkPrefab.");
+                return;
+            }
+
+            GameObject cameraObj = netObj.gameObject;
+            cameraObj.name = $"SurveillanceCamera_{zone.Label}";
+            DontDestroyOnLoad(cameraObj);
+
             var camera = cameraObj.GetComponent<Online.Surveillance.OnlineSecurityCamera>();
+            camera.BindController(this);
             camera.ZoneCenter = new Vector2(worldPos.x, worldPos.y);
             camera.ZoneSize = new Vector2(worldSize.x, worldSize.y);
             camera.CameraLabel = zone.Label;
-            camera.BindController(this);
             surveillanceCameras.Add(camera);
-
-            netObj.Spawn();
         }
 
         // --- EnsureRuntimeSprites ---

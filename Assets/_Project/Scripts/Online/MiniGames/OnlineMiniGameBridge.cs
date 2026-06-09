@@ -26,6 +26,17 @@ namespace GanglandUndercover.Online.MiniGames
             _controller = controller;
         }
 
+        public override void OnNetworkSpawn()
+        {
+            base.OnNetworkSpawn();
+
+            if (_controller == null)
+            {
+                OnlineMatchController controller = FindAnyObjectByType<OnlineMatchController>();
+                controller?.BindNetworkMiniGameBridge(this);
+            }
+        }
+
         /// <summary>
         /// 服务器端：请求指定客户端打开小游戏。
         /// </summary>

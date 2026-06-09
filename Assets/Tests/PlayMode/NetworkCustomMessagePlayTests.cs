@@ -189,7 +189,7 @@ namespace GanglandUndercover.PlayTests
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             GameObject template = templateField?.GetValue(_serverController) as GameObject;
 
-            if (template != null)
+            if (template != null && template.scene.IsValid())
             {
                 UnityEngine.Object.Destroy(template);
             }
