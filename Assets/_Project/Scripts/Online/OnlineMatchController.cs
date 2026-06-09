@@ -1002,6 +1002,7 @@ namespace GanglandUndercover.Online
             status = "专案开始：身份已私发，准备进入九龙港城。";
             AddCaseLog(status);
             PlayCue("start");
+            SetPublishedLobbySessionLocked(true);
 
             if (broadcast)
             {
@@ -3478,6 +3479,7 @@ namespace GanglandUndercover.Online
 
             status = "已返回房间，可调整规则或重开。";
             AddCaseLog(status);
+            SetPublishedLobbySessionLocked(false);
             BroadcastSnapshot();
         }
 

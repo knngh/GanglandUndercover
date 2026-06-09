@@ -371,8 +371,13 @@ namespace GanglandUndercover.Tests
             object result = BuildLobbyRoomSessionJoin(
                 sessionId: "session-123",
                 relayCode: " 6kb6dh ",
+                playerCount: 2,
+                maxPlayers: 6,
+                isLocked: false,
+                hasPassword: false,
                 allowLocalPreview: false);
 
+            Assert.IsTrue(FieldBool(result, "CanJoinRelay"));
             Assert.IsTrue(FieldBool(result, "CanJoinSession"));
             Assert.AreEqual("session-123", FieldString(result, "SessionId"));
             Assert.AreEqual("6KB6DH", FieldString(result, "RelayCode"));
@@ -385,17 +390,95 @@ namespace GanglandUndercover.Tests
             object localPreview = BuildLobbyRoomSessionJoin(
                 sessionId: "local-relay-host",
                 relayCode: "6kb6dh",
+                playerCount: 1,
+                maxPlayers: 6,
+                isLocked: false,
+                hasPassword: false,
                 allowLocalPreview: true);
             object missingSession = BuildLobbyRoomSessionJoin(
                 sessionId: string.Empty,
                 relayCode: "6kb6dh",
+                playerCount: 1,
+                maxPlayers: 6,
+                isLocked: false,
+                hasPassword: false,
                 allowLocalPreview: false);
 
+            Assert.IsTrue(FieldBool(localPreview, "CanJoinRelay"));
+            Assert.IsTrue(FieldBool(missingSession, "CanJoinRelay"));
             Assert.IsFalse(FieldBool(localPreview, "CanJoinSession"));
             Assert.IsFalse(FieldBool(missingSession, "CanJoinSession"));
             Assert.AreEqual("6KB6DH", FieldString(localPreview, "RelayCode"));
             StringAssert.Contains("Relay", FieldString(localPreview, "StatusText"));
             StringAssert.Contains("Relay", FieldString(missingSession, "StatusText"));
+        }
+
+        [Test]
+        public void LobbyRoomSessionJoin_BlocksLockedRooms()
+        {
+            object result = BuildLobbyRoomSessionJoin(
+                sessionId: "session-123",
+                relayCode: "6kb6dh",
+                playerCount: 2,
+                maxPlayers: 6,
+                isLocked: true,
+                hasPassword: false,
+                allowLocalPreview: false);
+
+            Assert.IsFalse(FieldBool(result, "CanJoinRelay"));
+            Assert.IsFalse(FieldBool(result, "CanJoinSession"));
+            StringAssert.Contains("锁定", FieldString(result, "StatusText"));
+        }
+
+        [Test]
+        public void LobbyRoomSessionJoin_BlocksPasswordRooms()
+        {
+            object result = BuildLobbyRoomSessionJoin(
+                sessionId: "session-123",
+                relayCode: "6kb6dh",
+                playerCount: 2,
+                maxPlayers: 6,
+                isLocked: false,
+                hasPassword: true,
+                allowLocalPreview: false);
+
+            Assert.IsFalse(FieldBool(result, "CanJoinRelay"));
+            Assert.IsFalse(FieldBool(result, "CanJoinSession"));
+            StringAssert.Contains("密码", FieldString(result, "StatusText"));
+        }
+
+        [Test]
+        public void LobbyRoomSessionJoin_BlocksFullRooms()
+        {
+            object result = BuildLobbyRoomSessionJoin(
+                sessionId: "session-123",
+                relayCode: "6kb6dh",
+                playerCount: 6,
+                maxPlayers: 6,
+                isLocked: false,
+                hasPassword: false,
+                allowLocalPreview: false);
+
+            Assert.IsFalse(FieldBool(result, "CanJoinRelay"));
+            Assert.IsFalse(FieldBool(result, "CanJoinSession"));
+            StringAssert.Contains("已满", FieldString(result, "StatusText"));
+        }
+
+        [Test]
+        public void LobbyRoomSessionJoin_BlocksMissingRelayCode()
+        {
+            object result = BuildLobbyRoomSessionJoin(
+                sessionId: "session-123",
+                relayCode: string.Empty,
+                playerCount: 2,
+                maxPlayers: 6,
+                isLocked: false,
+                hasPassword: false,
+                allowLocalPreview: false);
+
+            Assert.IsFalse(FieldBool(result, "CanJoinRelay"));
+            Assert.IsFalse(FieldBool(result, "CanJoinSession"));
+            StringAssert.Contains("Relay 房间码", FieldString(result, "StatusText"));
         }
 
         [Test]
@@ -1404,6 +1487,10 @@ namespace GanglandUndercover.Tests
         private static object BuildLobbyRoomSessionJoin(
             string sessionId,
             string relayCode,
+            int playerCount,
+            int maxPlayers,
+            bool isLocked,
+            bool hasPassword,
             bool allowLocalPreview)
         {
             Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
@@ -1411,6 +1498,10 @@ namespace GanglandUndercover.Tests
             {
                 sessionId,
                 relayCode,
+                playerCount,
+                maxPlayers,
+                isLocked,
+                hasPassword,
                 allowLocalPreview
             });
         }
