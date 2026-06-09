@@ -1,0 +1,88 @@
+{
+  "source": "Kenney Interface Sounds and Kenney Impact Sounds CC0 packs",
+  "importedAt": "2026-06-08",
+  "policy": "Curated runtime slice only. Full downloaded zip packs remain in .asset_cache/free/kenney and are not imported wholesale into Unity.",
+  "runtimeRoot": "Audio/SFX/Kenney",
+  "files": [
+    {
+      "runtimeFile": "SFX_UIClick.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/click_002.ogg"
+    },
+    {
+      "runtimeFile": "SFX_Footstep.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_impact-sounds.zip",
+      "sourceFile": "Audio/footstep_concrete_001.ogg"
+    },
+    {
+      "runtimeFile": "SFX_Kill.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_impact-sounds.zip",
+      "sourceFile": "Audio/impactPunch_heavy_002.ogg"
+    },
+    {
+      "runtimeFile": "SFX_BodyReport.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_impact-sounds.zip",
+      "sourceFile": "Audio/impactBell_heavy_000.ogg"
+    },
+    {
+      "runtimeFile": "SFX_Report.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/question_001.ogg"
+    },
+    {
+      "runtimeFile": "SFX_MeetingStart.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/confirmation_002.ogg"
+    },
+    {
+      "runtimeFile": "SFX_VoteCast.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/select_003.ogg"
+    },
+    {
+      "runtimeFile": "SFX_PlayerEliminated.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_impact-sounds.zip",
+      "sourceFile": "Audio/impactBell_heavy_001.ogg"
+    },
+    {
+      "runtimeFile": "SFX_TaskComplete.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/confirmation_001.ogg"
+    },
+    {
+      "runtimeFile": "SFX_Sabotage.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/error_003.ogg"
+    },
+    {
+      "runtimeFile": "SFX_Victory.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/maximize_005.ogg"
+    },
+    {
+      "runtimeFile": "SFX_Defeat.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/error_008.ogg"
+    },
+    {
+      "runtimeFile": "SFX_Emergency.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/error_007.ogg"
+    },
+    {
+      "runtimeFile": "SFX_VentOpen.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/open_001.ogg"
+    },
+    {
+      "runtimeFile": "SFX_VentClose.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/close_001.ogg"
+    },
+    {
+      "runtimeFile": "SFX_ButtonHover.ogg",
+      "sourceZip": ".asset_cache/free/kenney/kenney_interface-sounds.zip",
+      "sourceFile": "Audio/tick_001.ogg"
+    }
+  ]
+}

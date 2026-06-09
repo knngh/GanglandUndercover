@@ -17,6 +17,10 @@ namespace GanglandUndercover.Online
         public string LobbyReadinessSummary => BuildLobbyReadinessSummary();
         public string LobbyRoadmap => BuildPhaseRoadmap();
         public string LocalObjectiveSummary => BuildLocalObjectiveSummary();
+        public string OnboardingBriefingTitle => BuildOnboardingBriefingTitle();
+        public string OnboardingBriefingBody => BuildOnboardingBriefingBody();
+        public string OnboardingActionPrompt => BuildOnboardingActionPrompt();
+        public bool HasOnboardingGuidance => HasReadableOnboardingGuidance();
         public string LocalProfessionDisplayName => LocalProfessionName();
         public string PhaseDisplayName => PhaseName(phase);
         public string MatchTimeText => FormatMatchTime(matchElapsedSeconds);
@@ -611,6 +615,136 @@ namespace GanglandUndercover.Online
 
             OnlineTaskState recommended = FindRecommendedTask(LocalCameraTarget());
             return "完成任务、报案、投出黑帮；当前推荐 " + recommended.Name + "。";
+        }
+
+        private string BuildOnboardingBriefingTitle()
+        {
+            if (!IsOnline)
+            {
+                return "身份简报 | 行动演练";
+            }
+
+            if (phase == OnlineMatchPhase.Lobby)
+            {
+                return "身份简报 | 大厅准备";
+            }
+
+            switch (LocalEffectiveRole())
+            {
+                case OnlineRole.Gang:
+                    return "身份简报 | 黑帮行动";
+                case OnlineRole.Undercover:
+                    return "身份简报 | 卧底潜线";
+                case OnlineRole.Mole:
+                    return "身份简报 | 线人掩护";
+                default:
+                    return "身份简报 | 警方搜证";
+            }
+        }
+
+        private string BuildOnboardingBriefingBody()
+        {
+            OnlineRole role = LocalEffectiveRole();
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("身份: " + RoleName(role));
+            builder.AppendLine("公开身份: " + PublicIdentityName(role));
+            builder.AppendLine("职责: " + LocalProfessionName());
+            builder.AppendLine("胜利目标: " + RoleWinGoal(role));
+            builder.AppendLine("当前目标: " + BuildLocalObjectiveSummary());
+            builder.Append("操作入口: " + BuildOnboardingActionPrompt());
+            return builder.ToString();
+        }
+
+        private string BuildOnboardingActionPrompt()
+        {
+            if (!IsOnline)
+            {
+                return "创建 Host 或单机试玩局，先用本地 AI 跑完整流程。";
+            }
+
+            if (!IsLocalAlive())
+            {
+                return "你已出局，继续观察路线、会议票型和结算身份。";
+            }
+
+            if (activeTaskId >= 0)
+            {
+                return "任务面板已打开：按 1/2/3 校准，按住 Space 扫描，Esc 退出。";
+            }
+
+            switch (phase)
+            {
+                case OnlineMatchPhase.Lobby:
+                    return "Ready 后等待房主开始；房主可补 AI 并开局。";
+                case OnlineMatchPhase.Opening:
+                    return "先记住真实身份、公开身份和职责；倒计时结束后按推荐路线行动。";
+                case OnlineMatchPhase.Action:
+                    return ActionPromptForRole(LocalEffectiveRole());
+                case OnlineMatchPhase.Meeting:
+                case OnlineMatchPhase.Voting:
+                    return "核对证据板和发言，选择可疑目标投票；证据不足时可跳过。";
+                case OnlineMatchPhase.Result:
+                    return "查看结算和身份复盘，房主可重开或返回房间。";
+                default:
+                    return BuildLocalActionHint();
+            }
+        }
+
+        private bool HasReadableOnboardingGuidance()
+        {
+            string title = BuildOnboardingBriefingTitle();
+            string body = BuildOnboardingBriefingBody();
+            string prompt = BuildOnboardingActionPrompt();
+            return !string.IsNullOrWhiteSpace(title)
+                && !string.IsNullOrWhiteSpace(body)
+                && !string.IsNullOrWhiteSpace(prompt)
+                && body.Contains("身份")
+                && body.Contains("目标");
+        }
+
+        private static string PublicIdentityName(OnlineRole role)
+        {
+            if (role == OnlineRole.Undercover)
+            {
+                return "黑帮成员（隐藏警方目标）";
+            }
+
+            if (role == OnlineRole.Mole)
+            {
+                return "警方成员（隐藏黑帮目标）";
+            }
+
+            return RoleName(role);
+        }
+
+        private static string RoleWinGoal(OnlineRole role)
+        {
+            switch (role)
+            {
+                case OnlineRole.Gang:
+                    return "拖慢证据链，利用破坏/击倒创造人数优势，会议里误导投票。";
+                case OnlineRole.Undercover:
+                    return "伪装成黑帮推进取证，关键时刻帮助警方锁定黑帮。";
+                case OnlineRole.Mole:
+                    return "披着警方身份掩护黑帮，破坏证据链并把怀疑导向他人。";
+                default:
+                    return "完成任务收集证据，报案开会，投出黑帮成员。";
+            }
+        }
+
+        private static string ActionPromptForRole(OnlineRole role)
+        {
+            switch (role)
+            {
+                case OnlineRole.Gang:
+                    return "E 破坏附近任务，Q 击倒落单目标，F 使用能力或暗线，会议里误导票型。";
+                case OnlineRole.Mole:
+                    return "E 破坏或伪装修复，F 使用职业能力，会议里用警方身份误导搜查。";
+                case OnlineRole.Undercover:
+                    return "E 推进任务取证，R 报案，M 看路线，会议里隐藏卧底身份。";
+                default:
+                    return "E 推进/修复任务，R 报案，M 大地图，I 案情板。";
+            }
         }
 
         // --- BuildNextEvidenceMilestoneHint (moved from main controller) ---

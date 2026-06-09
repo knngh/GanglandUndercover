@@ -83,6 +83,12 @@ namespace GanglandUndercover.Online.Surveillance
         public void StartWatchingServerRpc(RpcParams rpcParams = default)
         {
             ulong watcherId = rpcParams.Receive.SenderClientId;
+            if (_controller == null || !_controller.CanClientWatchCamera(watcherId, ZoneCenter))
+            {
+                _watchingPlayers.Remove(watcherId);
+                return;
+            }
+
             _watchingPlayers.Add(watcherId);
         }
 

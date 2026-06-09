@@ -28,6 +28,10 @@ namespace GanglandUndercover.Art
         private Sprite[] _rightFrames;
         private Sprite _corpseSprite;
 
+        public int WalkFrameIndex => _walkFrame;
+        public bool DirectionVisible => DirRenderer != null && DirRenderer.enabled;
+        public Sprite CurrentBodySprite => BodyRenderer != null ? BodyRenderer.sprite : null;
+
         public void Initialize(OnlinePlayerState state, Sprite2DAssetCache.ProfSpriteSet spriteSet,
             Sprite corpseSprite, Sprite dirArrow)
         {
@@ -42,15 +46,26 @@ namespace GanglandUndercover.Art
             if (BodyRenderer == null && transform.childCount > 0)
                 BodyRenderer = transform.GetChild(0).GetComponent<SpriteRenderer>();
 
-            // 方向指示器在 Body 的子节点上
-            if (transform.childCount > 1)
-                DirRenderer = transform.GetChild(1).GetComponent<SpriteRenderer>();
+            // 方向指示器在 Body 的子节点上，通常只有一个箭头子节点。
+            DirRenderer = null;
+            for (int i = 0; i < transform.childCount; i++)
+            {
+                SpriteRenderer childRenderer = transform.GetChild(i).GetComponent<SpriteRenderer>();
+                if (childRenderer != null && childRenderer != BodyRenderer)
+                {
+                    DirRenderer = childRenderer;
+                    break;
+                }
+            }
+        }
+
+        public void RefreshState(OnlinePlayerState state)
+        {
+            State = state;
         }
 
         private void LateUpdate()
         {
-            if (State.ClientId == 0) return;
-
             // 死亡 → 尸体 sprite
             if (!State.Alive)
             {
@@ -78,16 +93,20 @@ namespace GanglandUndercover.Art
             // 正常存活状态
             Vector3 move = State.Position - _lastPos;
             _lastPos = State.Position;
-            float speed = move.magnitude / Mathf.Max(0.016f, Time.deltaTime);
+            Vector2 input = State.Input;
+            bool hasInput = input.sqrMagnitude > 0.0025f;
+            float speed = hasInput ? input.magnitude : move.magnitude / Mathf.Max(0.016f, Time.deltaTime);
 
             // 面向方向
             Sprite[] bodyFrames = _frontFrames;
             if (speed > 0.05f)
             {
-                if (Mathf.Abs(move.x) > Mathf.Abs(move.y))
-                    bodyFrames = move.x > 0 ? _rightFrames : _leftFrames;
+                Vector2 facing = hasInput ? input.normalized : new Vector2(move.x, move.y).normalized;
+
+                if (Mathf.Abs(facing.x) > Mathf.Abs(facing.y))
+                    bodyFrames = facing.x > 0 ? _rightFrames : _leftFrames;
                 else
-                    bodyFrames = move.y > 0 ? _backFrames : _frontFrames;
+                    bodyFrames = facing.y > 0 ? _backFrames : _frontFrames;
 
                 // 行走动画帧切换
                 _animTimer += Time.deltaTime;
@@ -111,7 +130,8 @@ namespace GanglandUndercover.Art
                 DirRenderer.enabled = speed > 0.01f;
                 if (speed > 0.01f)
                 {
-                    float angle = Mathf.Atan2(move.y, move.x) * Mathf.Rad2Deg - 90f;
+                    Vector2 facing = hasInput ? input.normalized : new Vector2(move.x, move.y).normalized;
+                    float angle = Mathf.Atan2(facing.y, facing.x) * Mathf.Rad2Deg - 90f;
                     DirRenderer.transform.localRotation = Quaternion.Euler(0, 0, angle);
                 }
             }

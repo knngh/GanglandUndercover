@@ -114,8 +114,44 @@ namespace GanglandUndercover.PlayTests
         }
 
         [UnityTest]
+        public IEnumerator Character2DAnimator_UpdatesLocalAndRemoteWalkFrames()
+        {
+            yield return null;
+
+            Invoke("EditorSimulateLocalMatch");
+            yield return null;
+            Invoke("EditorSkipOpeningForSmokeTest");
+            yield return null;
+
+            Assert.IsTrue(InvokeBool("EditorForceLocal2DWalkAnimationForSmokeTest"),
+                "本地玩家应创建 2D 动画控制器、身体 Sprite 和方向箭头。");
+            yield return new WaitForSeconds(0.36f);
+
+            Assert.GreaterOrEqual(GetInt("Character2DAnimationControllerCount"), GetInt("PlayerCount"),
+                "每名玩家都应有 CharacterAnimController。");
+            Assert.GreaterOrEqual(GetInt("Character2DReadyRendererCount"), GetInt("PlayerCount"),
+                "每名玩家都应绑定身体和方向 SpriteRenderer。");
+            Assert.Greater(GetInt("Character2DVisibleDirectionCount"), 0,
+                "移动中角色应显示方向箭头。");
+            Assert.Greater(GetInt("Character2DWalkingFrameCount"), 0,
+                "本地玩家移动时应推进到非 idle 行走帧。");
+
+            Assert.IsTrue(InvokeBool("EditorForceRemote2DWalkAnimationForSmokeTest"),
+                "远端/AI 玩家也应创建 2D 动画控制器、身体 Sprite 和方向箭头。");
+            yield return new WaitForSeconds(0.36f);
+
+            Assert.Greater(GetInt("Character2DVisibleDirectionCount"), 0,
+                "远端/AI 移动中角色应显示方向箭头。");
+            Assert.Greater(GetInt("Character2DWalkingFrameCount"), 0,
+                "远端/AI 移动时应推进到非 idle 行走帧。");
+        }
+
+        [UnityTest]
         public IEnumerator ClientDisconnect_ReleasesTaskLocksVotesAndKeepsBodyReportable()
         {
+            yield return null;
+
+            Invoke("EditorSimulateLocalMatch");
             yield return null;
 
             Type playerStateType = RuntimeType("GanglandUndercover.Online.OnlinePlayerState");

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
@@ -15,6 +16,10 @@ namespace GanglandUndercover.Online
 {
     public sealed partial class OnlineMatchController
     {
+        private const int ChatMaxContentBytes = 4096;
+        private const int ChatMaxNameBytes = 256;
+        private const int ChatMaxIdBytes = 64;
+        private const int ChatWriterCapacityBytes = ChatMaxContentBytes + 1024;
 
         // --- EnsureNetworkStack ---
         private void EnsureNetworkStack()
@@ -1270,14 +1275,16 @@ namespace GanglandUndercover.Online
 
             try
             {
-                Vector3 senderPos = GetLocalPlayerPosition();
-                string payload = ((int)role) + "|" + ((int)channel) + "|" +
-                    senderPos.x.ToString("F2") + "|" + senderPos.y.ToString("F2") + "|" + senderPos.z.ToString("F2") + "|" + content;
-                byte[] payloadBytes = System.Text.Encoding.UTF8.GetBytes(payload);
-                using FastBufferWriter writer = new FastBufferWriter(4 + payloadBytes.Length + 2048, Unity.Collections.Allocator.Temp);
-                writer.WriteValueSafe(payloadBytes.Length);
-                writer.WriteBytes(payloadBytes, payloadBytes.Length);
-                networkManager.CustomMessagingManager.SendNamedMessage(ChatSendMessage, NetworkManager.ServerClientId, writer);
+                FastBufferWriter writer = new FastBufferWriter(ChatWriterCapacityBytes, Unity.Collections.Allocator.Temp);
+                try
+                {
+                    WriteChatSendPayload(ref writer, content);
+                    networkManager.CustomMessagingManager.SendNamedMessage(ChatSendMessage, NetworkManager.ServerClientId, writer);
+                }
+                finally
+                {
+                    writer.Dispose();
+                }
             }
             catch (System.Exception ex)
             {
@@ -1293,93 +1300,96 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            reader.ReadValueSafe(out int payloadLength);
-
-            if (payloadLength <= 0 || payloadLength > 4096)
+            if (!TryReadChatSendPayload(ref reader, out string content))
             {
                 return;
             }
 
-            byte[] payloadBytes = new byte[payloadLength];
-            reader.ReadBytes(ref payloadBytes, payloadLength);
-            string payload = System.Text.Encoding.UTF8.GetString(payloadBytes);
-            string[] parts = payload.Split('|');
-
-            // 格式: role|channel|posX|posY|posZ|content (6+ parts)
-            if (parts.Length < 6)
+            if (!players.TryGetValue(senderClientId, out OnlinePlayerState senderState))
             {
                 return;
             }
 
-            string content = string.Join("|", parts, 5, parts.Length - 5);
-            if (!int.TryParse(parts[0], out int roleValue)) return;
-            OnlineRole role = (OnlineRole)roleValue;
-            if (!int.TryParse(parts[1], out int channelValue)) return;
-            ChatChannel channel = (ChatChannel)channelValue;
-            float.TryParse(parts[2], out float senderPosX);
-            float.TryParse(parts[3], out float senderPosY);
-            float.TryParse(parts[4], out float senderPosZ);
-            Vector3 senderPos = new Vector3(senderPosX, senderPosY, senderPosZ);
-
+            OnlineRole role = GetPrivateRole(senderClientId);
+            ChatChannel channel = ChatSystem.DetermineChannel(phase, senderState.Alive);
+            Vector3 senderPos = senderState.Position;
             Faction faction = ChatSystem.RoleToFaction(role);
-            bool isDead = !players.TryGetValue(senderClientId, out OnlinePlayerState senderState) || !senderState.Alive;
-            string senderName = players.TryGetValue(senderClientId, out OnlinePlayerState nameState) ? nameState.DisplayName : "玩家" + senderClientId;
+            bool isDead = !senderState.Alive;
+            string senderName = senderState.DisplayName;
 
             // 本地显示（服务器也显示）
             chatSystem.ReceiveMessage(senderClientId.ToString(), senderName, content, isDead, faction, channel);
 
             // 按通道路由转发
-            string forwardPayload = senderClientId + "|" + senderName + "|" + content + "|" + (isDead ? "1" : "0") + "|" + ((int)faction) + "|" + ((int)channel);
-            byte[] forwardBytes = System.Text.Encoding.UTF8.GetBytes(forwardPayload);
-            using FastBufferWriter writer = new FastBufferWriter(4 + forwardBytes.Length + 2048, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe(forwardBytes.Length);
-            writer.WriteBytes(forwardBytes, forwardBytes.Length);
+            FastBufferWriter writer = new FastBufferWriter(ChatWriterCapacityBytes, Unity.Collections.Allocator.Temp);
+            try
+            {
+                WriteChatBroadcastPayload(
+                    ref writer,
+                    senderClientId.ToString(),
+                    senderName,
+                    content,
+                    isDead,
+                    faction,
+                    channel);
 
-            if (channel == ChatChannel.Meeting)
-            {
-                // 会议频道：广播给所有存活玩家
-                networkManager.CustomMessagingManager.SendNamedMessageToAll(ChatBroadcastMessage, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
-            }
-            else if (channel == ChatChannel.Ghost)
-            {
-                // 鬼魂频道：仅发送给死亡玩家
-                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
+                if (channel == ChatChannel.Meeting)
                 {
-                    if (kv.Key == senderClientId) continue;
-                    if (!kv.Value.Alive)
+                    // 会议频道：仅发送给存活玩家
+                    foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
                     {
-                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                        if (kv.Key == senderClientId) continue;
+                        if (kv.Value.Alive)
+                        {
+                            networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                        }
                     }
                 }
-            }
-            else if (channel == ChatChannel.Proximity)
-            {
-                // 近距离频道：发送给发送者附近范围的存活玩家（不分阵营）
-                const float proximityRange = 12f;
-                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
+                else if (channel == ChatChannel.Ghost)
                 {
-                    if (kv.Key == senderClientId) continue;
-                    if (!kv.Value.Alive) continue;
+                    // 鬼魂频道：仅发送给死亡玩家
+                    foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
+                    {
+                        if (kv.Key == senderClientId) continue;
+                        if (!kv.Value.Alive)
+                        {
+                            networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                        }
+                    }
+                }
+                else if (channel == ChatChannel.Proximity)
+                {
+                    // 近距离频道：发送给发送者附近范围的存活玩家（不分阵营）
+                    const float proximityRange = 12f;
+                    foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
+                    {
+                        if (kv.Key == senderClientId) continue;
+                        if (!kv.Value.Alive) continue;
 
-                    Vector3 targetPos = GetPlayerPosition(kv.Key);
-                    float dist = Vector3.Distance(senderPos, targetPos);
-                    if (dist <= proximityRange)
+                        Vector3 targetPos = GetPlayerPosition(kv.Key);
+                        float dist = Vector3.Distance(senderPos, targetPos);
+                        if (dist <= proximityRange)
+                        {
+                            networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                        }
+                    }
+                }
+                else // Global
+                {
+                    // 全局频道：发送给所有存活玩家
+                    foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
                     {
-                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                        if (kv.Key == senderClientId) continue;
+                        if (kv.Value.Alive)
+                        {
+                            networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
+                        }
                     }
                 }
             }
-            else // Global
+            finally
             {
-                // 全局频道：发送给所有存活玩家
-                foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
-                {
-                    if (kv.Key == senderClientId) continue;
-                    if (kv.Value.Alive)
-                    {
-                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
-                    }
-                }
+                writer.Dispose();
             }
         }
 
@@ -1391,44 +1401,141 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            reader.ReadValueSafe(out int length);
-
-            if (length <= 0 || length > 4096)
+            if (TryReadChatBroadcastPayload(
+                    ref reader,
+                    out string senderId,
+                    out string senderName,
+                    out string content,
+                    out bool isDead,
+                    out Faction faction,
+                    out ChatChannel channel))
             {
-                return;
+                chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction, channel);
+            }
+        }
+
+        // --- WriteChatSendPayload ---
+        private static void WriteChatSendPayload(ref FastBufferWriter writer, string content)
+        {
+            WriteBoundedUtf8String(ref writer, ChatSystem.Sanitize(content) ?? string.Empty);
+        }
+
+        // --- TryReadChatSendPayload ---
+        private static bool TryReadChatSendPayload(ref FastBufferReader reader, out string content)
+        {
+            content = string.Empty;
+
+            if (!TryReadBoundedUtf8String(ref reader, ChatMaxContentBytes, out string rawContent))
+            {
+                return false;
             }
 
-            byte[] bytes = new byte[length];
-            reader.ReadBytes(ref bytes, length);
-            string payload = System.Text.Encoding.UTF8.GetString(bytes);
-            string[] parts = payload.Split('|');
+            content = ChatSystem.Sanitize(rawContent) ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(content);
+        }
 
-            // 新格式: senderId|senderName|content|isDead|faction|channel (6 parts)
-            // 兼容旧格式: senderId|senderName|content|isDead|faction (5 parts)
-            if (parts.Length < 5)
+        // --- WriteChatBroadcastPayload ---
+        private static void WriteChatBroadcastPayload(
+            ref FastBufferWriter writer,
+            string senderId,
+            string senderName,
+            string content,
+            bool isDead,
+            Faction faction,
+            ChatChannel channel)
+        {
+            WriteBoundedUtf8String(ref writer, senderId ?? string.Empty);
+            WriteBoundedUtf8String(ref writer, senderName ?? string.Empty);
+            WriteBoundedUtf8String(ref writer, ChatSystem.Sanitize(content) ?? string.Empty);
+            writer.WriteValueSafe(isDead);
+            writer.WriteValueSafe((int)faction);
+            writer.WriteValueSafe((int)channel);
+        }
+
+        // --- TryReadChatBroadcastPayload ---
+        private static bool TryReadChatBroadcastPayload(
+            ref FastBufferReader reader,
+            out string senderId,
+            out string senderName,
+            out string content,
+            out bool isDead,
+            out Faction faction,
+            out ChatChannel channel)
+        {
+            senderId = string.Empty;
+            senderName = string.Empty;
+            content = string.Empty;
+            faction = Faction.None;
+            isDead = false;
+            channel = ChatChannel.Global;
+
+            if (!TryReadBoundedUtf8String(ref reader, ChatMaxIdBytes, out senderId)
+                || !TryReadBoundedUtf8String(ref reader, ChatMaxNameBytes, out senderName)
+                || !TryReadBoundedUtf8String(ref reader, ChatMaxContentBytes, out content))
             {
-                return;
+                return false;
             }
 
-            string senderId = parts[0];
-            string senderName = parts[1];
-            string content = parts[2];
-            bool isDead = parts[3] == "1";
-            int factionValue;
-
-            if (!int.TryParse(parts[4], out factionValue))
+            try
             {
-                return;
-            }
+                reader.ReadValueSafe(out isDead);
+                reader.ReadValueSafe(out int factionValue);
+                reader.ReadValueSafe(out int channelValue);
 
-            Faction faction = (Faction)factionValue;
-            ChatChannel channel = ChatChannel.Global;
-            if (parts.Length >= 6)
-            {
-                int.TryParse(parts[5], out int channelValue);
-                channel = (ChatChannel)channelValue;
+                faction = Enum.IsDefined(typeof(Faction), factionValue) ? (Faction)factionValue : Faction.None;
+                channel = Enum.IsDefined(typeof(ChatChannel), channelValue) ? (ChatChannel)channelValue : ChatChannel.Global;
+                content = ChatSystem.Sanitize(content) ?? string.Empty;
+                return !string.IsNullOrWhiteSpace(senderId)
+                    && !string.IsNullOrWhiteSpace(senderName)
+                    && !string.IsNullOrWhiteSpace(content);
             }
-            chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction, channel);
+            catch
+            {
+                return false;
+            }
+        }
+
+        // --- WriteBoundedUtf8String ---
+        private static void WriteBoundedUtf8String(ref FastBufferWriter writer, string value)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+            writer.WriteValueSafe(bytes.Length);
+
+            if (bytes.Length > 0)
+            {
+                writer.WriteBytesSafe(bytes, bytes.Length);
+            }
+        }
+
+        // --- TryReadBoundedUtf8String ---
+        private static bool TryReadBoundedUtf8String(ref FastBufferReader reader, int maxBytes, out string value)
+        {
+            value = string.Empty;
+
+            try
+            {
+                reader.ReadValueSafe(out int length);
+
+                if (length < 0 || length > maxBytes)
+                {
+                    return false;
+                }
+
+                if (length == 0)
+                {
+                    return true;
+                }
+
+                byte[] bytes = new byte[length];
+                reader.ReadBytesSafe(ref bytes, length);
+                value = Encoding.UTF8.GetString(bytes);
+                return true;
+            }
+            catch
+            {
+                value = string.Empty;
+                return false;
+            }
         }
 
         // --- ReceiveMapSelect ---

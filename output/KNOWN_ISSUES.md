@@ -1,86 +1,66 @@
 # Gangland Undercover — KNOWN_ISSUES.md
 
-> **最后更新**: 2026-06-07 | **版本**: v0.1.0-pre
+> **最后更新**: 2026-06-09 12:15 | **版本**: v0.2.0-dev
 
 ---
 
-## 发布阻断 (P0) — 必须在首次发布前修复
+## 发布阻断 (P0) — 已清零
 
-### P0-1: BuildScript 场景路径不存在
-- **影响**: macOS/Windows 构建直接失败，无法出包
-- **原因**: `BuildScript.ScenePaths` 引用了 7 个不存在的场景（MainMenu/Lobby/HarbourDistrict/PoliceStation/KowloonWalledCity/GameOver/Tutorial），实际项目只有 `Prototype.unity` 和 `Stage1VerticalSlice.unity`
-- **状态**: ✅ 已修复 — ScenePaths 改为 `Stage1VerticalSlice.unity` + `Prototype.unity`
-- **等待**: 重新构建验证
+> ✅ 全部 P0 已修复并验证
 
 ---
 
-## 高优先级 (P1) — 影响体验，建议发布前修复
+## 高优先级 (P1) — 阶段1 剩余扩展
 
-### P1-1: AudioManager AudioClip 槽位未赋值
-- **影响**: 所有音效（点击/击杀/报告/会议等）静默不播放
-- **原因**: `AudioManager.cs` 使用 `[SerializeField] AudioClip`，未在 prefab 上拖入音频文件
-- **复现**: 启动 Play Mode，触发任何音效事件，无声音
-- **修复**: 在 Editor 中打开 AudioManager prefab，将 `Resources/Audio/SFX/*.wav` 和 `Resources/Audio/BGM/*.ogg` 拖入对应槽位
-- **建议**: 同时在 `Awake()` 中添加 `Resources.Load` fallback
-
-### P1-2: 角色动画控制器未验证
-- **影响**: 角色移动时可能不显示 walk 帧动画（始终显示 idle 帧）
-- **原因**: `Character2DDirectionIndicator` 依赖 Animator 组件切换 idle/walk sprite，但未验证 Animator Controller 是否配置
-- **复现**: Play Mode 中移动角色，观察 sprite 是否切换
-- **修复**: 检查 prefab 上 Animator 组件的 Controller 引用
-
-### P1-3: 地图可能渲染纯色几何而非 CC0 tileset
-- **影响**: 地图视觉为程序化圆形/矩形色块，而非像素 art tileset
-- **原因**: `LoadCCTile()` 使用 `Resources.LoadAll<Texture2D>()` 加载第一个文件。若 Resources 路径不匹配，fallback 到 `DrawFloorWood()` 等程序化方法
-- **复现**: Play Mode 中观察地图，若为纯色几何体则 CC0 未加载
-- **修复**: 验证 `Sprites/Tilesets/*/floors/` 下的 PNG 文件 texture type 为 Sprite(2D and UI)
+### P1-3: 地图美术资产化仍需继续扩展 🔁
+- **已完成切片**: 关键地标可读性 + 任务事件反馈层已补齐；关键地标主体已替换为 Modern Exteriors 真实 sprite；每个任务点加入 LimeZu 破坏设备盖板和现场证物包；金融/电房/证物库/诊所/夜市/后巷已加入 Exteriors room prop sprite；监控室、指挥点、证物库、诊所和舰内房间已加入 Modern Office room prop sprite；海关、茶餐厅、夜市、金融、电房、天台、后巷、诊所、舰内各房间和舰桥继续加入 Modern Interiors 医疗/安防/生活类 room prop sprite；击杀现场和黑灯场景已加入命名 VFX 层，并纳入 EditMode + PrototypeSmoke 覆盖
+- **剩余影响**: 角色动画帧、会议/任务/战术地图 UI、关键截图基线和更细粒度动画 VFX 仍需继续资产化扩展
+- **下一步**: 刷新关键截图基线，继续替换会议/任务/战术地图 UI 与角色动画帧，并把剩余程序化兜底件迁移到精选 2D sprite
 
 ---
 
-## 中优先级 (P2) — 可延至首次热更新
+## 中优先级 (P2)
 
-### P2-1: Resources 目录体积 832MB（冗余 3D 资产）
-- **影响**: 构建速度慢、包体大（估计增加 500MB+）
-- **原因**: Synty/Quaternius 3D 模型 + AssetStore Free Pack 大 WAV 文件仍在 Resources 中
-- **修复**: 移动到 `Assets/_Project/Legacy3D/`，仅保留 `Resources/Sprites/` 和 `Resources/Audio/`
-- **工作量**: 中（需验证无人引用被移动的资产）
+### P2-2: Bot 不使用暗线通道
+- **修复**: OnlineBotController 添加 vent 寻路逻辑
 
-### P2-2: 尸体显示使用几何图形而非角色精灵
-- **影响**: 无法区分不同职业的尸体（全部一样）
-- **原因**: `WorldBuilder.CreateBodyVisual()` 使用 `CreateProp()` 创建圆形/矩形，未使用角色对应的倒下精灵
-- **修复**: 在 `CreateBodyVisual` 中根据 `body.VictimClientId` 查找职业并加载对应 sprite
-
-### P2-3: Bot 不使用暗线通道
-- **影响**: Bot 不会利用 vent/underworld 捷径，降低对局难度
-- **修复**: 在 `OnlineBotController` 中添加通道寻路逻辑
+### P2-3: 双端恶意 Client 覆盖不足 ⏳
+- **影响**: EditMode 已覆盖 Task/Repair 越权拒绝、Chat/CharacterCustom payload 安全，但 Chat/Camera/CharacterCustom 仍缺真实双进程恶意消息注入测试
+- **修复**: 增加双进程或测试 harness，伪造 Chat/Camera/CharacterCustom 入站消息并断言服务端拒绝或安全转发
 
 ---
 
-## 低优先级 (P3) — 可延期
+## 低优先级 (P3)
 
-### P3-1: OnGUI 遗留代码未全量迁移到 uGUI Canvas
-- **影响**: OnGUI 每帧调用，有轻微性能开销；某些 UI 元素不一致
-- **状态**: 大部分已迁移到 `OnlineMatchController.OnGUI.cs` partial class
-- **修复**: 逐项迁移剩余 OnGUI 绘制到 Canvas 预制件
-
-### P3-2: 网络 Host 迁移未充分测试
-- **影响**: 多人游戏中 Host 掉线时迁移可能失败
-- **修复**: 需要多客户端环境测试
+### P3-1: OnGUI 遗留代码
+### P3-2: 网络 Host 迁移测试不足
+### P3-3: CharacterCustom 转发行为仍需双端实测确认
 
 ---
 
-## 已修复 (归档)
+## 已修复 (v0.1.0 → v0.2.0)
 
-> 无历史记录（首次建立 known issues 列表）
-
----
-
-## 统计
-
-| 优先级 | 数量 |
-|--------|------|
-| P0 阻断 | 1 (已修复，等验证) |
-| P1 高 | 3 |
-| P2 中 | 3 |
-| P3 低 | 2 |
-| **总计** | **9** |
+- ✅ P0-1: BuildScript 场景路径修复 + macOS 构建 417MB
+- ✅ P1-1: AudioManager Resources 自动加载 fallback
+- ✅ 地图基准切片: 瓦片铺贴 + 墙壁边框 + 低饱和行动照明层
+- ✅ EditMode 测试程序集引用修复: `GanglandUndercover.Tests.asmdef` 补 TestRunner/NUnit 引用
+- ✅ P2-1: Resources 832MB → 104MB
+- ✅ NGO deprecated warning: 全部清零
+- ✅ Bot 卡住检测: 5秒位移<0.03m 自动重寻路
+- ✅ 证据系统统一: 会议 UI 改用 MeetingEvidenceDossier
+- ✅ UI 行动 HUD 基准: 低饱和警署行动风、CJK 字体优先、状态卡 / 命令条 / 身份卡三段式
+- ✅ BGM 淡入淡出 + SFX 随机音调
+- ✅ 尸体显示角色对应倒下 sprite
+- ✅ MapSelect 改为广播给所有客户端
+- ✅ Chat payload 改为结构化字段，内容包含 `|` 不再破坏解析
+- ✅ Task/Repair 直接伪造完成会被服务器 active lock / range 校验拒绝
+- ✅ 监控摄像头开始观看增加 Action/alive/技能或距离校验
+- ✅ CharacterCustom 改为服务端校验 owner 后定向转发，payload 增加长度上限
+- ✅ P1-2: 新玩家目标引导补齐；控制器暴露身份简报/目标/操作提示，Canvas HUD 接入，并由 EditMode + PrototypeSmoke 覆盖
+- ✅ P1-1: 角色 2D Animator / walk 帧 PlayMode 验证完成；本地与远端移动输入会驱动方向指示和 walk frame 计数
+- ✅ P1-3 切片A: 地图关键地标 + 任务事件反馈层补齐；12 个关键地标、每任务 4 个事件反馈标记，并由 EditMode + PrototypeSmoke 覆盖
+- ✅ P1-3 切片B: Modern Exteriors 真实地标 PNG 精选导入；关键地标主体与任务事件反馈改用 LimeZu sprite，并由 EditMode + PrototypeSmoke + PlayMode 覆盖
+- ✅ UI 按钮音效: 在线 HUD 动态按钮挂接 `UiButtonSfx`，使用 Kenney `SFX_ButtonHover.ogg` 悬停/选中反馈，点击继续使用 `SFX_UIClick.ogg`
+- ✅ P1-3 切片C: Modern Exteriors room-props 精选导入；金融/电房/证物库/诊所/夜市/后巷加入真实房间道具 sprite，尸体击杀现场与黑灯场景加入命名 VFX 门槛
+- ✅ P1-3 切片D: Modern Office room-props 精选导入；监控室、指挥点、证物库、诊所和舰内房间新增 16 个真实室内办公/医疗道具 sprite，room prop 门槛提升到 30
+- ✅ P1-3 切片E: Modern Interiors room-props 精选导入；海关、茶餐厅、夜市、金融、电房、天台、后巷、诊所、舰内各房间和舰桥新增医疗/安防/生活类真实室内道具 sprite，room prop 门槛提升到 75

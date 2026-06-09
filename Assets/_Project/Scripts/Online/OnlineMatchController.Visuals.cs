@@ -21,8 +21,18 @@ namespace GanglandUndercover.Online
         public int StageTwoForensicSceneCount => CountNamedWorldObjects("Stage2 Forensic");
         public int StageTwoRuntimeRigCount => worldRoot == null ? 0 : worldRoot.GetComponentsInChildren<StageTwoCharacterRig>(true).Length;
         public int StageTwoConfiguredRigCount => CountConfiguredStageTwoRigs();
+        public int Character2DAnimationControllerCount => CountCharacter2DAnimationControllers();
+        public int Character2DReadyRendererCount => CountCharacter2DReadyRenderers();
+        public int Character2DDirectionIndicatorCount => CountNamedWorldObjects("2DDir_");
+        public int Character2DVisibleDirectionCount => CountCharacter2DVisibleDirections();
+        public int Character2DWalkingFrameCount => CountCharacter2DWalkingFrames();
         public int TaskMiniGameCanvasElementCount => onlineHud == null ? 0 : onlineHud.TaskMiniGameCanvasElementCount;
+        public int TaskOverlayVisualElementCount => onlineHud == null ? 0 : onlineHud.TaskOverlayVisualElementCount;
+        public int TaskOverlay2DAssetElementCount => onlineHud == null ? 0 : onlineHud.TaskOverlay2DAssetElementCount;
         public int MeetingSeatCanvasElementCount => onlineHud == null ? 0 : onlineHud.MeetingSeatCanvasElementCount;
+        public int MeetingOverlayVisualElementCount => onlineHud == null ? 0 : onlineHud.MeetingOverlayVisualElementCount;
+        public int MeetingOverlay2DAssetElementCount => onlineHud == null ? 0 : onlineHud.MeetingOverlay2DAssetElementCount;
+        public int HudButtonSfxFeedbackCount => onlineHud == null ? 0 : onlineHud.ButtonSfxFeedbackCount;
         public bool CanvasHudLayoutComplete => onlineHud != null && onlineHud.HasCompleteLayout;
         public int LargePortVistaCount => CountNamedWorldObjects("大场景港区层");
         public int UnderworldPassageNodeCount => worldRoot == null ? 0 : CountNamedWorldObjects("暗线节点");
@@ -224,6 +234,7 @@ namespace GanglandUndercover.Online
                     ? baseScale
                     : new Vector3(baseScale.x * 0.92f, baseScale.y * 0.48f, baseScale.z);
                 AnimatePlayerVisual(visual, state);
+                SyncCharacterAnimationState(visual, state);
                 SetPlayerVisualColors(visual, state, isLocalPlayer);
                 UpdatePlayerStageTwoStateLayer(visual, state, isLocalPlayer);
                 SetSortingFromZ(visual);
@@ -241,6 +252,25 @@ namespace GanglandUndercover.Online
             }
 
             RemoveStalePlayerVisuals(seen);
+        }
+
+        private static void SyncCharacterAnimationState(GameObject visual, OnlinePlayerState state)
+        {
+            if (visual == null)
+            {
+                return;
+            }
+
+            GanglandUndercover.Art.CharacterAnimController[] animators =
+                visual.GetComponentsInChildren<GanglandUndercover.Art.CharacterAnimController>(true);
+
+            for (int i = 0; i < animators.Length; i++)
+            {
+                if (animators[i] != null)
+                {
+                    animators[i].RefreshState(state);
+                }
+            }
         }
 
         // --- RemoveStalePlayerVisuals ---
@@ -282,6 +312,82 @@ namespace GanglandUndercover.Online
         {
             if (killSystem != null)
                 killSystem.UpdateBodyVisuals();
+        }
+
+        private int CountCharacter2DAnimationControllers()
+        {
+            return worldRoot == null ? 0 : worldRoot.GetComponentsInChildren<GanglandUndercover.Art.CharacterAnimController>(true).Length;
+        }
+
+        private int CountCharacter2DReadyRenderers()
+        {
+            if (worldRoot == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            GanglandUndercover.Art.CharacterAnimController[] animators =
+                worldRoot.GetComponentsInChildren<GanglandUndercover.Art.CharacterAnimController>(true);
+
+            for (int i = 0; i < animators.Length; i++)
+            {
+                GanglandUndercover.Art.CharacterAnimController animator = animators[i];
+
+                if (animator != null
+                    && animator.BodyRenderer != null
+                    && animator.DirRenderer != null
+                    && animator.CurrentBodySprite != null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private int CountCharacter2DVisibleDirections()
+        {
+            if (worldRoot == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            GanglandUndercover.Art.CharacterAnimController[] animators =
+                worldRoot.GetComponentsInChildren<GanglandUndercover.Art.CharacterAnimController>(true);
+
+            for (int i = 0; i < animators.Length; i++)
+            {
+                if (animators[i] != null && animators[i].DirectionVisible)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private int CountCharacter2DWalkingFrames()
+        {
+            if (worldRoot == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            GanglandUndercover.Art.CharacterAnimController[] animators =
+                worldRoot.GetComponentsInChildren<GanglandUndercover.Art.CharacterAnimController>(true);
+
+            for (int i = 0; i < animators.Length; i++)
+            {
+                if (animators[i] != null && animators[i].WalkFrameIndex > 0)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         // --- AnimatePlayerVisual ---
@@ -435,7 +541,26 @@ namespace GanglandUndercover.Online
         // --- CreateBodyVisual ---
         private GameObject CreateBodyVisual(OnlineBodyState body)
         {
-            return worldBuilder.CreateBodyVisual(body);
+            // P2-1: Use victim's character sprite for the body
+            Sprite bodySprite = GetBodySpriteForClient(body.VictimClientId);
+            return worldBuilder.CreateBodyVisual(body, bodySprite);
+        }
+
+        internal Sprite GetBodySpriteForClient(ulong clientId)
+        {
+            OnlineProfession prof = players.TryGetValue(clientId, out var victim)
+                ? victim.Profession : OnlineProfession.Inspector;
+            return GetBodySpriteForProfession(prof);
+        }
+
+        private Sprite GetBodySpriteForProfession(OnlineProfession prof)
+        {
+            // Try to get the front idle frame from CC0 character set
+            if (GanglandUndercover.Art.Sprite2DAssetCache.CharacterSets.TryGetValue(prof, out var set))
+            {
+                return set.Front_Frame0 ?? set.Front_Frame1 ?? set.Front_Frame2;
+            }
+            return null;
         }
 
         // --- CreateSolidPrimitiveProp ---

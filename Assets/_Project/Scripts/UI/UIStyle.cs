@@ -6,8 +6,8 @@ namespace GanglandUndercover.UI
 {
     /// <summary>
     /// Centralized UI theme for Gangland Undercover.
-    /// Gangland noir pixel-art aesthetic — dark backgrounds, neon accents, scanline grit.
-    /// Smart font system: Kenney Future for ASCII, system CJK font for Chinese/Japanese/Korean.
+    /// Noir police-operation aesthetic: dark surfaces, restrained status accents,
+    /// and readable CJK-first typography.
     /// </summary>
     public static class UIStyle
     {
@@ -16,30 +16,30 @@ namespace GanglandUndercover.UI
         // ═══════════════════════════════════════════════
 
         // Backgrounds
-        public static readonly Color BgDeep    = new Color(0.04f, 0.05f, 0.06f, 0.96f);
-        public static readonly Color BgPanel   = new Color(0.06f, 0.07f, 0.09f, 0.94f);
-        public static readonly Color BgDock    = new Color(0.07f, 0.09f, 0.11f, 0.92f);
-        public static readonly Color BgOverlay = new Color(0.02f, 0.03f, 0.04f, 0.88f);
+        public static readonly Color BgDeep    = new Color(0.018f, 0.023f, 0.027f, 0.96f);
+        public static readonly Color BgPanel   = new Color(0.042f, 0.050f, 0.056f, 0.94f);
+        public static readonly Color BgDock    = new Color(0.030f, 0.038f, 0.044f, 0.92f);
+        public static readonly Color BgOverlay = new Color(0.012f, 0.016f, 0.020f, 0.88f);
 
-        // Accents — Neon
-        public static readonly Color NeonBlue   = new Color(0.18f, 0.72f, 0.92f, 1f);
-        public static readonly Color NeonRed    = new Color(0.89f, 0.18f, 0.14f, 1f);
-        public static readonly Color NeonAmber  = new Color(0.92f, 0.70f, 0.15f, 1f);
-        public static readonly Color NeonGreen  = new Color(0.18f, 0.76f, 0.40f, 1f);
-        public static readonly Color NeonPurple = new Color(0.64f, 0.38f, 0.92f, 1f);
-        public static readonly Color NeonPink   = new Color(0.92f, 0.28f, 0.52f, 1f);
+        // Accents. Kept under the old names for compatibility with existing code.
+        public static readonly Color NeonBlue   = new Color(0.30f, 0.58f, 0.68f, 1f);
+        public static readonly Color NeonRed    = new Color(0.72f, 0.20f, 0.17f, 1f);
+        public static readonly Color NeonAmber  = new Color(0.78f, 0.58f, 0.20f, 1f);
+        public static readonly Color NeonGreen  = new Color(0.28f, 0.58f, 0.38f, 1f);
+        public static readonly Color NeonPurple = new Color(0.48f, 0.42f, 0.62f, 1f);
+        public static readonly Color NeonPink   = new Color(0.64f, 0.30f, 0.42f, 1f);
 
         // Text
-        public static readonly Color TextPrimary   = new Color(0.90f, 0.88f, 0.84f, 1f);
-        public static readonly Color TextSecondary = new Color(0.62f, 0.66f, 0.64f, 1f);
-        public static readonly Color TextDim       = new Color(0.38f, 0.42f, 0.40f, 1f);
-        public static readonly Color TextWarning   = new Color(0.94f, 0.82f, 0.25f, 1f);
+        public static readonly Color TextPrimary   = new Color(0.88f, 0.86f, 0.80f, 1f);
+        public static readonly Color TextSecondary = new Color(0.62f, 0.65f, 0.62f, 1f);
+        public static readonly Color TextDim       = new Color(0.36f, 0.40f, 0.38f, 1f);
+        public static readonly Color TextWarning   = new Color(0.82f, 0.70f, 0.28f, 1f);
 
         // Borders
         public static readonly Color BorderSubtle = new Color(1f, 1f, 1f, 0.08f);
-        public static readonly Color BorderStrong = new Color(0.18f, 0.72f, 0.92f, 0.30f);
-        public static readonly Color BorderGold   = new Color(0.92f, 0.70f, 0.15f, 0.35f);
-        public static readonly Color BorderRed    = new Color(0.89f, 0.18f, 0.14f, 0.30f);
+        public static readonly Color BorderStrong = new Color(0.30f, 0.58f, 0.68f, 0.28f);
+        public static readonly Color BorderGold   = new Color(0.78f, 0.58f, 0.20f, 0.32f);
+        public static readonly Color BorderRed    = new Color(0.72f, 0.20f, 0.17f, 0.30f);
 
         // ═══════════════════════════════════════════════
         //  FONT SYSTEM — Smart CJK fallback
@@ -97,14 +97,14 @@ namespace GanglandUndercover.UI
         }
 
         /// <summary>
-        /// Returns the best font for the given text.
-        /// Uses Kenney Future for pure ASCII, CJK font for anything with CJK characters.
+        /// Returns the best font for runtime UI. The game is Chinese-first, so
+        /// the tactical HUD favors a clean CJK-capable font over a decorative
+        /// pixel font even for short ASCII labels.
         /// </summary>
         public static Font GetFontForText(string text)
         {
-            if (string.IsNullOrEmpty(text)) return PixelFont;
-            if (ContainsCJK(text)) return CJKFont;
-            return PixelFont;
+            EnsureFonts();
+            return _cjkFont != null ? _cjkFont : _pixelFont;
         }
 
         private static bool ContainsCJK(string text)
@@ -216,7 +216,7 @@ namespace GanglandUndercover.UI
             var go = new GameObject(name, typeof(RectTransform), typeof(Text));
             go.transform.SetParent(parent, false);
             var text = go.GetComponent<Text>();
-            text.font = PixelFont;
+            text.font = CJKFont;
             text.fontSize = fontSize;
             text.alignment = alignment;
             text.color = color;
@@ -258,7 +258,7 @@ namespace GanglandUndercover.UI
             var labelGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
             labelGo.transform.SetParent(btnGo.transform, false);
             var labelText = labelGo.GetComponent<Text>();
-            labelText.font = PixelFont;
+            labelText.font = CJKFont;
             labelText.fontSize = 14;
             labelText.alignment = TextAnchor.MiddleCenter;
             labelText.color = Color.white;

@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
+using GanglandUndercover.Art;
+using GanglandUndercover.Audio;
 using GanglandUndercover.Core;
 using GanglandUndercover.UI;
 using UnityEngine;
@@ -40,6 +42,17 @@ namespace GanglandUndercover.Online
         private string taskMiniGameKey = string.Empty;
         private bool taskChargeHeld;
         private float nextMapRefreshTime;
+        private Sprite meetingPanelSprite;
+        private Sprite meetingButtonSprite;
+        private Sprite meetingVoteCardSprite;
+        private Sprite meetingAvatarFrameSprite;
+        private bool meetingAssetSpritesLoaded;
+        private Sprite taskPanelSprite;
+        private Sprite taskBoardSprite;
+        private Sprite taskTileSprite;
+        private Sprite taskScanSprite;
+        private Sprite taskWarningSprite;
+        private bool taskAssetSpritesLoaded;
 
         private GameObject connectionGroup;
         private GameObject settingsGroup;
@@ -135,7 +148,13 @@ namespace GanglandUndercover.Online
 
         public int VerticalSliceStaticMapElementCount => mapStaticRoot == null ? 0 : CountNamedChildren(mapStaticRoot, "Vertical Slice");
         public int TaskMiniGameCanvasElementCount => taskMiniGameRoot == null ? 0 : CountNamedChildren(taskMiniGameRoot, "Task MiniGame");
+        public int TaskOverlayVisualElementCount => taskOverlay == null ? 0 : CountNamedChildren(taskOverlay.transform, "Task Visual");
+        public int TaskOverlay2DAssetElementCount => taskOverlay == null ? 0 : CountImagesWithSprites(taskOverlay.transform);
         public int MeetingSeatCanvasElementCount => meetingSeatRoot == null ? 0 : CountNamedChildren(meetingSeatRoot, "Meeting Seat");
+        public int MeetingOverlayVisualElementCount => meetingOverlay == null ? 0 : CountNamedChildren(meetingOverlay.transform, "Meeting Visual");
+        public int MeetingOverlay2DAssetElementCount => meetingOverlay == null ? 0 : CountImagesWithSprites(meetingOverlay.transform);
+        public int CompactActionHudVisualElementCount => compactActionHud == null ? 0 : CountNamedChildren(compactActionHud.transform, "Compact Visual");
+        public int ButtonSfxFeedbackCount => canvas == null ? 0 : canvas.GetComponentsInChildren<UiButtonSfx>(true).Length;
         public bool HasCompleteLayout => HasRequiredLayoutReferences();
 
         private void Awake()
@@ -215,6 +234,12 @@ namespace GanglandUndercover.Online
             HandleMapSelectInput(); // D5
 
             Refresh(false);
+        }
+
+        public void EditorRefreshForSmokeTest()
+        {
+            EnsureLayout();
+            Refresh(true);
         }
 
         private void EnsureLayout()
@@ -454,10 +479,6 @@ namespace GanglandUndercover.Online
             hudBackdrop = CreatePanel("HUD Backdrop", transform, BackdropColor);
             Stretch(hudBackdrop.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
-            // CRT scanline overlay on full HUD
-            UIStyle.AddScanlines(transform, 0.03f);
-
-            // Header — styled with neon-blue bottom border accent
             Transform header = CreateHorizontalPanel(
                 "Header",
                 transform,
@@ -645,41 +666,106 @@ namespace GanglandUndercover.Online
 
         private void BuildMeetingOverlay()
         {
+            EnsureMeetingAssetSprites();
             meetingOverlay = CreatePanel("Meeting Overlay", transform, new Color(0.008f, 0.01f, 0.012f, 0.82f));
             Stretch(meetingOverlay.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
             Transform modal = CreateVerticalPanel(
-                "Meeting Panel",
+                "Meeting Visual Command Panel",
                 meetingOverlay.transform,
-                new Color(0.038f, 0.048f, 0.052f, 0.97f),
-                new Vector2(0.16f, 0.14f),
-                new Vector2(0.84f, 0.86f),
-                new RectOffset(22, 22, 18, 18),
-                12f);
+                new Color(0.032f, 0.040f, 0.044f, 0.98f),
+                new Vector2(0.08f, 0.10f),
+                new Vector2(0.92f, 0.90f),
+                new RectOffset(18, 18, 14, 16),
+                10f);
+            ApplySpriteSkin(modal.gameObject, meetingPanelSprite, new Color(0.032f, 0.040f, 0.044f, 0.98f));
+            AddAccentEdge(modal.gameObject, "Meeting Visual Command Accent", BlueAccent, 4f, true);
 
-            meetingTitleText = CreateText("Meeting Title", modal, 28, TextAnchor.MiddleCenter, TextColor);
-            AddLayout(meetingTitleText.gameObject, 48f, 0f, 0f);
-            meetingBodyText = CreateText("Meeting Body", modal, 15, TextAnchor.UpperLeft, TextColor);
-            AddLayout(meetingBodyText.gameObject, 118f, 0f, 0f);
+            Transform header = CreateHorizontalLayoutPanel(
+                "Meeting Visual Header Strip",
+                modal,
+                new Color(0.018f, 0.024f, 0.028f, 0.92f),
+                new RectOffset(14, 14, 8, 8),
+                12f,
+                58f,
+                0f,
+                1f,
+                0f);
+            AddAccentEdge(header.gameObject, "Meeting Visual Header Accent", AmberAccent, 3f, false);
 
-            GameObject seatBoard = CreatePanel("Meeting Seat Board", modal, new Color(0.024f, 0.03f, 0.032f, 0.96f));
-            AddLayout(seatBoard, 126f, 0f, 0f);
+            meetingTitleText = CreateText("Meeting Title", header, 24, TextAnchor.MiddleLeft, TextColor);
+            AddLayout(meetingTitleText.gameObject, 0f, 0f, 1f);
+
+            Text statusChip = CreateText("Meeting Visual Status Chip", header, 13, TextAnchor.MiddleRight, AmberAccent);
+            statusChip.text = "会议原因 / 证据墙 / 票型 / 语音";
+            AddLayout(statusChip.gameObject, 0f, 288f, 0f);
+
+            Transform body = CreateHorizontalLayoutPanel(
+                "Meeting Visual Body Grid",
+                modal,
+                new Color(0f, 0f, 0f, 0f),
+                new RectOffset(0, 0, 0, 0),
+                12f,
+                0f,
+                0f,
+                1f,
+                1f);
+
+            Transform evidenceColumn = CreateVerticalPanel(
+                "Meeting Visual Evidence Column",
+                body,
+                new Color(0.020f, 0.027f, 0.030f, 0.94f),
+                Vector2.zero,
+                Vector2.one,
+                new RectOffset(14, 14, 12, 12),
+                8f,
+                false);
+            ApplySpriteSkin(evidenceColumn.gameObject, meetingPanelSprite, new Color(0.020f, 0.027f, 0.030f, 0.94f));
+            AddAccentEdge(evidenceColumn.gameObject, "Meeting Visual Evidence Accent", BlueAccent, 3f, true);
+            AddLayout(evidenceColumn.gameObject, 0f, 276f, 0f, 1f);
+
+            Text evidenceHeader = CreateText("Meeting Visual Evidence Header", evidenceColumn, 16, TextAnchor.UpperLeft, AmberAccent);
+            evidenceHeader.text = "证据板";
+            AddLayout(evidenceHeader.gameObject, 24f, 0f, 0f);
+            meetingBodyText = CreateText("Meeting Body", evidenceColumn, 14, TextAnchor.UpperLeft, TextColor);
+            meetingBodyText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddLayout(meetingBodyText.gameObject, 0f, 0f, 1f, 1f);
+
+            GameObject seatBoard = CreatePanel("Meeting Seat Board", body, new Color(0.022f, 0.028f, 0.031f, 0.96f));
+            ApplySpriteSkin(seatBoard, meetingPanelSprite, new Color(0.022f, 0.028f, 0.031f, 0.96f));
+            AddPanelBorder(seatBoard, UIStyle.BorderStrong, 1f);
+            AddLayout(seatBoard, 0f, 0f, 1f, 1f);
             meetingSeatRoot = seatBoard.GetComponent<RectTransform>();
 
-            Text voteHeader = CreateText("Vote Header", modal, 17, TextAnchor.UpperLeft, AmberAccent);
+            Transform voteColumn = CreateVerticalPanel(
+                "Meeting Visual Vote Column",
+                body,
+                new Color(0.020f, 0.026f, 0.030f, 0.94f),
+                Vector2.zero,
+                Vector2.one,
+                new RectOffset(12, 12, 12, 12),
+                8f,
+                false);
+            ApplySpriteSkin(voteColumn.gameObject, meetingPanelSprite, new Color(0.020f, 0.026f, 0.030f, 0.94f));
+            AddAccentEdge(voteColumn.gameObject, "Meeting Visual Vote Accent", RedAccent, 3f, true);
+            AddLayout(voteColumn.gameObject, 0f, 318f, 0f, 1f);
+
+            Text voteHeader = CreateText("Vote Header", voteColumn, 17, TextAnchor.UpperLeft, AmberAccent);
             voteHeader.text = "投票面板";
             AddLayout(voteHeader.gameObject, 28f, 0f, 0f);
 
-            GameObject voteScrollObject = CreatePanel("Vote Scroll", modal, PanelDeepColor);
-            AddLayout(voteScrollObject, 250f, 0f, 1f, 1f);
+            GameObject voteScrollObject = CreatePanel("Meeting Visual Vote Scroll", voteColumn, PanelDeepColor);
+            ApplySpriteSkin(voteScrollObject, meetingVoteCardSprite, PanelDeepColor);
+            AddLayout(voteScrollObject, 0f, 0f, 1f, 1f);
             ScrollRect voteScroll = voteScrollObject.AddComponent<ScrollRect>();
             voteScroll.horizontal = false;
             voteScroll.vertical = true;
+            voteScroll.scrollSensitivity = 26f;
 
             GameObject voteViewport = CreatePanel("Vote Viewport", voteScrollObject.transform, new Color(0f, 0f, 0f, 0f));
             voteViewport.AddComponent<RectMask2D>();
             RectTransform voteViewportRect = voteViewport.GetComponent<RectTransform>();
-            Stretch(voteViewportRect, Vector2.zero, Vector2.one, new Vector2(6f, 6f), new Vector2(-6f, -6f));
+            Stretch(voteViewportRect, Vector2.zero, Vector2.one, new Vector2(8f, 8f), new Vector2(-8f, -8f));
 
             GameObject voteContent = new GameObject("Vote Buttons", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
             voteContent.transform.SetParent(voteViewport.transform, false);
@@ -734,30 +820,83 @@ namespace GanglandUndercover.Online
 
         private void BuildTaskOverlay()
         {
+            EnsureTaskAssetSprites();
             taskOverlay = CreatePanel("Task Overlay", transform, new Color(0.008f, 0.01f, 0.012f, 0.72f));
             Stretch(taskOverlay.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
             Transform modal = CreateVerticalPanel(
-                "Task Panel",
+                "Task Visual Command Panel",
                 taskOverlay.transform,
-                new Color(0.036f, 0.046f, 0.05f, 0.98f),
-                new Vector2(0.25f, 0.20f),
-                new Vector2(0.75f, 0.80f),
-                new RectOffset(24, 24, 20, 20),
-                12f);
+                new Color(0.030f, 0.039f, 0.043f, 0.98f),
+                new Vector2(0.22f, 0.16f),
+                new Vector2(0.78f, 0.84f),
+                new RectOffset(18, 18, 14, 16),
+                10f);
+            ApplySpriteSkin(modal.gameObject, taskPanelSprite, new Color(0.030f, 0.039f, 0.043f, 0.98f));
+            AddAccentEdge(modal.gameObject, "Task Visual Command Accent", BlueAccent, 4f, true);
 
-            taskTitleText = CreateText("Task Title", modal, 26, TextAnchor.MiddleCenter, TextColor);
-            AddLayout(taskTitleText.gameObject, 42f, 0f, 0f);
-            taskBodyText = CreateText("Task Body", modal, 15, TextAnchor.UpperLeft, TextColor);
-            AddLayout(taskBodyText.gameObject, 86f, 0f, 0f);
+            Transform header = CreateHorizontalLayoutPanel(
+                "Task Visual Header Strip",
+                modal,
+                new Color(0.018f, 0.024f, 0.028f, 0.92f),
+                new RectOffset(14, 14, 8, 8),
+                12f,
+                52f,
+                0f,
+                1f,
+                0f);
+            AddAccentEdge(header.gameObject, "Task Visual Header Accent", AmberAccent, 3f, false);
 
-            GameObject miniGameObject = CreatePanel("Task MiniGame Board", modal, new Color(0.026f, 0.032f, 0.034f, 0.96f));
-            AddLayout(miniGameObject, 138f, 0f, 0f);
+            taskTitleText = CreateText("Task Title", header, 24, TextAnchor.MiddleLeft, TextColor);
+            AddLayout(taskTitleText.gameObject, 0f, 0f, 1f);
+
+            Text taskModeChip = CreateText("Task Visual Mode Chip", header, 13, TextAnchor.MiddleRight, AmberAccent);
+            taskModeChip.text = "现场终端 / 三步校验 / 扫描确认";
+            AddLayout(taskModeChip.gameObject, 0f, 242f, 0f);
+
+            Transform briefRow = CreateHorizontalLayoutPanel(
+                "Task Visual Brief Row",
+                modal,
+                new Color(0f, 0f, 0f, 0f),
+                new RectOffset(0, 0, 0, 0),
+                10f,
+                96f,
+                0f,
+                1f,
+                0f);
+
+            GameObject stationObject = CreatePanel("Task Visual Station Preview", briefRow, new Color(1f, 1f, 1f, 0.10f));
+            ApplySpriteSkin(stationObject, taskTileSprite, Color.white);
+            AddPanelBorder(stationObject, UIStyle.BorderStrong, 1f);
+            AddLayout(stationObject, 0f, 94f, 0f);
+
+            Transform briefCard = CreateVerticalPanel(
+                "Task Visual Brief Card",
+                briefRow,
+                new Color(0.020f, 0.027f, 0.030f, 0.94f),
+                Vector2.zero,
+                Vector2.one,
+                new RectOffset(12, 12, 8, 8),
+                4f,
+                false);
+            ApplySpriteSkin(briefCard.gameObject, taskBoardSprite, new Color(0.020f, 0.027f, 0.030f, 0.94f));
+            AddAccentEdge(briefCard.gameObject, "Task Visual Brief Accent", GreenAccent, 3f, true);
+            AddLayout(briefCard.gameObject, 0f, 0f, 1f);
+
+            taskBodyText = CreateText("Task Body", briefCard, 14, TextAnchor.UpperLeft, TextColor);
+            taskBodyText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddLayout(taskBodyText.gameObject, 78f, 0f, 0f);
+
+            GameObject miniGameObject = CreatePanel("Task Visual MiniGame Board", modal, new Color(0.022f, 0.028f, 0.031f, 0.96f));
+            miniGameObject.name = "Task MiniGame Board Task Visual Board";
+            ApplySpriteSkin(miniGameObject, taskBoardSprite, new Color(0.022f, 0.028f, 0.031f, 0.96f));
+            AddPanelBorder(miniGameObject, UIStyle.BorderStrong, 1f);
+            AddLayout(miniGameObject, 166f, 0f, 0f);
             taskMiniGameRoot = miniGameObject.GetComponent<RectTransform>();
 
             taskProgressFill = CreateProgressBar(modal, "现场进度", BlueAccent);
             taskFeedbackText = CreateText("Task Feedback", modal, 15, TextAnchor.MiddleCenter, AmberAccent);
-            AddLayout(taskFeedbackText.gameObject, 30f, 0f, 0f);
+            AddLayout(taskFeedbackText.gameObject, 28f, 0f, 0f);
 
             Transform stepRow = CreateButtonRow(modal, 50f);
             CreateButton("键 1", stepRow, 50f, () => controller.RequestTaskStep(controller.ActiveTaskCorrectStepOne));
@@ -776,39 +915,42 @@ namespace GanglandUndercover.Online
             Stretch(compactActionHud.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
             Transform topLeft = CreateVerticalPanel(
-                "Compact Top Left",
+                "Compact Visual Status Card",
                 compactActionHud.transform,
-                new Color(0.022f, 0.03f, 0.032f, 0.84f),
-                new Vector2(0.015f, 0.79f),
-                new Vector2(0.31f, 0.975f),
-                new RectOffset(12, 12, 10, 10),
+                new Color(0.020f, 0.027f, 0.032f, 0.88f),
+                new Vector2(0.018f, 0.772f),
+                new Vector2(0.322f, 0.972f),
+                new RectOffset(16, 16, 12, 12),
                 6f);
+            AddAccentEdge(topLeft.gameObject, "Compact Visual Status Accent", BlueAccent, 4f, true);
             compactTopText = CreateText("Compact Top Text", topLeft, 15, TextAnchor.UpperLeft, TextColor);
-            AddLayout(compactTopText.gameObject, 78f, 0f, 0f);
+            AddLayout(compactTopText.gameObject, 112f, 0f, 0f);
 
             Transform bottomCenter = CreateVerticalPanel(
-                "Compact Bottom Center",
+                "Compact Visual Command Bar",
                 compactActionHud.transform,
-                new Color(0.02f, 0.026f, 0.028f, 0.9f),
-                new Vector2(0.25f, 0.015f),
-                new Vector2(0.75f, 0.13f),
-                new RectOffset(16, 16, 8, 8),
-                6f);
+                new Color(0.018f, 0.023f, 0.027f, 0.94f),
+                new Vector2(0.245f, 0.018f),
+                new Vector2(0.755f, 0.145f),
+                new RectOffset(18, 18, 9, 9),
+                5f);
+            AddAccentEdge(bottomCenter.gameObject, "Compact Visual Command Accent", AmberAccent, 3f, false);
             compactActionBarText = CreateText("Compact Action Bar", bottomCenter, 16, TextAnchor.MiddleCenter, TextColor);
             AddLayout(compactActionBarText.gameObject, 34f, 0f, 0f);
             compactPromptText = CreateText("Compact Prompt", bottomCenter, 13, TextAnchor.MiddleCenter, MutedTextColor);
             AddLayout(compactPromptText.gameObject, 32f, 0f, 0f);
 
-            Transform bottomLeft = CreateVerticalPanel(
-                "Compact Bottom Left",
+            Transform bottomRight = CreateVerticalPanel(
+                "Compact Visual Identity Card",
                 compactActionHud.transform,
-                new Color(0.022f, 0.03f, 0.032f, 0.84f),
-                new Vector2(0.015f, 0.015f),
-                new Vector2(0.29f, 0.19f),
-                new RectOffset(12, 12, 10, 10),
-                6f);
-            compactAbilityText = CreateText("Compact Ability", bottomLeft, 14, TextAnchor.UpperLeft, TextColor);
-            AddLayout(compactAbilityText.gameObject, 60f, 0f, 0f);
+                new Color(0.020f, 0.026f, 0.030f, 0.88f),
+                new Vector2(0.735f, 0.018f),
+                new Vector2(0.982f, 0.188f),
+                new RectOffset(16, 16, 12, 12),
+                5f);
+            AddAccentEdge(bottomRight.gameObject, "Compact Visual Identity Accent", GreenAccent, 4f, true);
+            compactAbilityText = CreateText("Compact Ability", bottomRight, 14, TextAnchor.UpperLeft, TextColor);
+            AddLayout(compactAbilityText.gameObject, 78f, 0f, 0f);
         }
 
         private void BuildMapOverlay()
@@ -1005,8 +1147,9 @@ namespace GanglandUndercover.Online
                 + "\n房间: " + controller.HumanPlayerCount + " 真人 / " + controller.BotCount + " AI"
                 + "\n\n【地图】← → 切换" + (controller.IsHost ? "（房主可选）" : "") + " | 当前: " + MapSelectLabel();
 
-            actionStatusText.text = controller.LocalObjectiveSummary
-                + "\n" + controller.LocalActionHint
+            actionStatusText.text = controller.OnboardingBriefingTitle
+                + "\n" + controller.LocalObjectiveSummary
+                + "\n" + controller.OnboardingActionPrompt
                 + "\n技能冷却 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s | 击倒冷却 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s";
 
             resultStatusText.text = controller.ResultSummary;
@@ -1015,17 +1158,17 @@ namespace GanglandUndercover.Online
             notebookTitleText.text = NotebookTitle();
             notebookBodyText.text = NotebookBody();
             compactTopText.text = controller.RoomName
-                + "\n" + controller.PhaseDisplayName
+                + "\n行动态势 | " + controller.PhaseDisplayName
                 + " | " + controller.MatchTimeText + "/20:00"
                 + "\n证据 " + controller.EvidenceScore + "/" + controller.EvidenceTarget
                 + " | 存活 " + controller.AlivePlayerCount + "/" + Mathf.Max(1, controller.Players.Count)
                 + "\n" + controller.HazardSummary
                 + "\n" + controller.VoiceHudLine;
             compactActionBarText.text = BuildCompactActionBar();
-            compactPromptText.text = controller.LocalActionHint;
-            compactAbilityText.text = "身份: " + controller.RoleDisplayName(controller.LocalRole)
-                + "\n职责: " + controller.LocalProfessionDisplayName
-                + "\n任务: " + controller.LocalObjectiveSummary
+            compactPromptText.text = controller.OnboardingActionPrompt;
+            compactAbilityText.text = controller.OnboardingBriefingTitle
+                + "\n职责 " + controller.LocalProfessionDisplayName
+                + "\n目标 " + controller.LocalObjectiveSummary
                 + "\n技能 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s | 击倒 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s";
             footerText.text = controller.Status
                 + " | " + Localization.T("hud.compact.hint");
@@ -1108,13 +1251,13 @@ namespace GanglandUndercover.Online
         private string BuildCompactActionBar()
         {
             bool actionPlayable = controller.Phase == OnlineMatchPhase.Action && controller.LocalAlive;
-            string interact = actionPlayable ? Localization.T("action.interact.ready") : Localization.T("action.interact.na");
+            string interact = actionPlayable ? "E 互动" : "E -";
             string kill = actionPlayable && controller.LocalRole == OnlineRole.Gang
-                ? Localization.T("action.kill.ready") + " " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s"
-                : Localization.T("action.kill.na");
-            string report = actionPlayable ? Localization.T("action.report.ready") : Localization.T("action.report.na");
-            string ability = actionPlayable ? Localization.T("action.ability.ready") + " " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s" : Localization.T("action.ability.na");
-            return interact + "    " + kill + "    " + report + "    " + ability + "    " + Localization.T("action.map") + "    " + Localization.T("action.intel");
+                ? "Q 击倒 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s"
+                : "Q -";
+            string report = actionPlayable ? "R 报案" : "R -";
+            string ability = actionPlayable ? "F 技能 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s" : "F -";
+            return interact + "   " + report + "   " + kill + "   " + ability + "   M 地图   I 案情";
         }
 
         private string BuildCenterTitle()
@@ -1129,7 +1272,7 @@ namespace GanglandUndercover.Online
                 case OnlineMatchPhase.Lobby:
                     return "房间准备";
                 case OnlineMatchPhase.Opening:
-                    return "身份简报";
+                    return controller.OnboardingBriefingTitle;
                 case OnlineMatchPhase.Action:
                     return "港区行动";
                 case OnlineMatchPhase.Meeting:
@@ -1146,7 +1289,12 @@ namespace GanglandUndercover.Online
         {
             if (!controller.IsOnline)
             {
-                return "选择本地完整局可立刻进入 10-20 分钟标准局；联网时可直连或 Relay 开房。\n\n"
+                return "港区潜线 - 行动简报\n\n"
+                    + "身份: 潜入黑帮组织的卧底警探\n"
+                    + "目标: 完成任务收集证据, 通过会议锁定黑帮成员\n"
+                    + "风险: 黑帮会击倒探员, 破坏任务, 干扰票型\n\n"
+                    + "开局: 补 AI 开局可自动填满 8 人局\n"
+                    + "演练: 本地完整局可单人加 Bot 试玩\n\n"
                     + controller.ReleaseReadinessText;
             }
 
@@ -1157,16 +1305,15 @@ namespace GanglandUndercover.Online
                         + "\n" + controller.LobbyRoadmap
                         + "\n房间规则: " + (controller.AutoFillAi ? "AI 补位" : "真人优先")
                         + " | " + (controller.RevealRoleOnEject ? "出局公开身份" : "身份隐藏")
-                        + " | " + (controller.ProximityVoiceEnabled ? "近距离语音" : "会议语音");
+                        + " | " + (controller.ProximityVoiceEnabled ? "近距离语音" : "会议语音")
+                        + "\n引导: " + controller.OnboardingActionPrompt;
                 case OnlineMatchPhase.Opening:
-                    return "你的身份: " + controller.RoleDisplayName(controller.LocalRole)
-                        + " | 职责: " + controller.LocalProfessionDisplayName
-                        + "\n" + controller.LocalObjectiveSummary
-                        + "\n开局倒计时 " + Mathf.CeilToInt(controller.PhaseTimer) + "s。";
+                    return controller.OnboardingBriefingBody
+                        + "\n\n开局倒计时 " + Mathf.CeilToInt(controller.PhaseTimer) + " 秒";
                 case OnlineMatchPhase.Action:
                     return controller.MatchPressureSummary
                         + "\n\n你的任务: " + controller.LocalObjectiveSummary
-                        + "\n行动提示: " + controller.LocalActionHint
+                        + "\n行动提示: " + controller.OnboardingActionPrompt
                         + "\n最近证据: " + controller.LastEvidenceEvent
                         + "\n最近破坏: " + controller.LastSabotageEvent
                         + "\n危机: " + controller.HazardSummary;
@@ -1244,12 +1391,26 @@ namespace GanglandUndercover.Online
                 }
 
                 ulong captured = pair.Key;
-                Button voteButton = CreateButton(state.DisplayName + (state.IsBot ? " [AI]" : string.Empty) + " | 嫌疑 " + state.Suspicion, voteButtonRoot, 40f, () => controller.RequestVote(captured));
+                Button voteButton = CreateVoteButton(
+                    "Meeting Visual Vote Player " + pair.Key,
+                    state.DisplayName + (state.IsBot ? " [AI]" : string.Empty),
+                    "嫌疑 " + state.Suspicion + " | " + controller.ProfessionDisplayName(state.Profession),
+                    RoleAccent(state.PublicRole, state.Profession),
+                    voteButtonRoot,
+                    54f,
+                    () => controller.RequestVote(captured));
                 voteButton.interactable = canVote;
                 voteButtons.Add(voteButton.gameObject);
             }
 
-            Button skipButton = CreateButton("跳过投票", voteButtonRoot, 42f, () => controller.RequestSkipVote());
+            Button skipButton = CreateVoteButton(
+                "Meeting Visual Vote Skip",
+                "跳过投票",
+                "保留疑点, 等待下一轮证据",
+                AmberAccent,
+                voteButtonRoot,
+                54f,
+                () => controller.RequestSkipVote());
             skipButton.interactable = canVote;
             voteButtons.Add(skipButton.gameObject);
         }
@@ -1262,10 +1423,10 @@ namespace GanglandUndercover.Online
             }
 
             ClearChildren(meetingSeatRoot);
-            CreateMeetingBoardBlock("Meeting Seat Round Table", new Vector2(0.28f, 0.18f), new Vector2(0.72f, 0.82f), new Color(0.10f, 0.11f, 0.10f, 0.96f), "会议圆桌");
-            CreateMeetingBoardBlock("Meeting Seat Evidence Wall", new Vector2(0.03f, 0.12f), new Vector2(0.23f, 0.88f), new Color(0.055f, 0.066f, 0.07f, 0.98f), "证据墙");
-            CreateMeetingBoardBlock("Meeting Seat Voice Channel", new Vector2(0.77f, 0.62f), new Vector2(0.97f, 0.88f), BlueAccent, "语音全员");
-            CreateMeetingBoardBlock("Meeting Seat Vote Clock", new Vector2(0.77f, 0.12f), new Vector2(0.97f, 0.56f), AmberAccent, Mathf.CeilToInt(controller.PhaseTimer) + "s");
+            CreateMeetingBoardBlock("Meeting Seat Round Table", new Vector2(0.27f, 0.17f), new Vector2(0.73f, 0.83f), new Color(0.070f, 0.078f, 0.074f, 0.96f), "会议圆桌");
+            CreateMeetingBoardBlock("Meeting Seat Evidence Wall Meeting Visual", new Vector2(0.035f, 0.12f), new Vector2(0.235f, 0.88f), new Color(0.030f, 0.042f, 0.048f, 0.98f), "证据墙");
+            CreateMeetingBoardBlock("Meeting Seat Voice Channel Meeting Visual", new Vector2(0.765f, 0.62f), new Vector2(0.965f, 0.88f), BlueAccent, "语音全员");
+            CreateMeetingBoardBlock("Meeting Seat Vote Clock Meeting Visual", new Vector2(0.765f, 0.12f), new Vector2(0.965f, 0.56f), AmberAccent, Mathf.CeilToInt(controller.PhaseTimer) + "s");
 
             int index = 0;
             int total = Mathf.Max(1, controller.Players.Count);
@@ -1275,12 +1436,8 @@ namespace GanglandUndercover.Online
                 OnlinePlayerState state = pair.Value;
                 float angle = Mathf.PI * 2f * index / total - Mathf.PI * 0.5f;
                 Vector2 center = new Vector2(0.5f + Mathf.Cos(angle) * 0.18f, 0.5f + Mathf.Sin(angle) * 0.28f);
-                Vector2 size = new Vector2(0.078f, 0.128f);
-                Color color = state.Alive
-                    ? pair.Key == controller.LocalClientIdValue ? GreenAccent : state.IsBot ? new Color(0.52f, 0.58f, 0.58f, 0.98f) : BlueAccent
-                    : new Color(0.19f, 0.2f, 0.2f, 0.92f);
-                string label = state.Alive ? ShortName(state.DisplayName) : "出局";
-                CreateMeetingBoardBlock("Meeting Seat Player " + pair.Key, center - size * 0.5f, center + size * 0.5f, color, label);
+                Vector2 size = new Vector2(0.096f, 0.165f);
+                CreateMeetingPlayerCard(pair.Key, state, center - size * 0.5f, center + size * 0.5f);
                 index++;
             }
         }
@@ -1288,7 +1445,12 @@ namespace GanglandUndercover.Online
         private void CreateMeetingBoardBlock(string name, Vector2 anchorMin, Vector2 anchorMax, Color color, string label)
         {
             GameObject block = CreatePanel(name, meetingSeatRoot, color);
+            if (name.Contains("Meeting Visual") || name.Contains("Meeting Seat Round Table"))
+            {
+                ApplySpriteSkin(block, meetingVoteCardSprite, color);
+            }
             Stretch(block.GetComponent<RectTransform>(), anchorMin, anchorMax, Vector2.zero, Vector2.zero);
+            AddPanelBorder(block, new Color(1f, 1f, 1f, 0.08f), 1f);
 
             if (string.IsNullOrEmpty(label))
             {
@@ -1298,6 +1460,115 @@ namespace GanglandUndercover.Online
             Text text = CreateText("Label", block.transform, 11, TextAnchor.MiddleCenter, TextColor);
             text.text = label;
             Stretch(text.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(2f, 1f), new Vector2(-2f, -1f));
+        }
+
+        private void CreateMeetingPlayerCard(ulong clientId, OnlinePlayerState state, Vector2 anchorMin, Vector2 anchorMax)
+        {
+            Color accent = state.Alive
+                ? clientId == controller.LocalClientIdValue ? GreenAccent : RoleAccent(state.PublicRole, state.Profession)
+                : new Color(0.22f, 0.23f, 0.24f, 0.92f);
+            GameObject card = CreatePanel("Meeting Seat Player " + clientId + " Meeting Visual Card", meetingSeatRoot, new Color(0.026f, 0.032f, 0.035f, 0.96f));
+            ApplySpriteSkin(card, meetingVoteCardSprite, new Color(0.026f, 0.032f, 0.035f, 0.96f));
+            Stretch(card.GetComponent<RectTransform>(), anchorMin, anchorMax, Vector2.zero, Vector2.zero);
+            AddPanelBorder(card, new Color(accent.r, accent.g, accent.b, 0.34f), 1f);
+            AddAccentEdge(card, "Meeting Visual Player Accent", accent, 2f, false);
+
+            GameObject portraitFrame = CreatePanel("Meeting Visual Player Portrait Frame", card.transform, new Color(1f, 1f, 1f, 0.08f));
+            ApplySpriteSkin(portraitFrame, meetingAvatarFrameSprite, Color.white);
+            Stretch(portraitFrame.GetComponent<RectTransform>(), new Vector2(0.19f, 0.40f), new Vector2(0.81f, 0.94f), Vector2.zero, Vector2.zero);
+
+            GameObject portrait = CreatePanel("Meeting Visual Player Portrait", card.transform, Color.white);
+            Image portraitImage = portrait.GetComponent<Image>();
+            portraitImage.sprite = MeetingPortraitSprite(state.Profession);
+            portraitImage.preserveAspect = true;
+            portraitImage.color = state.Alive ? Color.white : new Color(0.42f, 0.42f, 0.46f, 0.72f);
+            Stretch(portrait.GetComponent<RectTransform>(), new Vector2(0.24f, 0.45f), new Vector2(0.76f, 0.88f), Vector2.zero, Vector2.zero);
+
+            Text nameText = CreateText("Label", card.transform, 10, TextAnchor.MiddleCenter, state.Alive ? TextColor : MutedTextColor);
+            nameText.text = state.Alive ? ShortName(state.DisplayName) : "出局";
+            Stretch(nameText.GetComponent<RectTransform>(), new Vector2(0.06f, 0.18f), new Vector2(0.94f, 0.38f), Vector2.zero, Vector2.zero);
+
+            Text metaText = CreateText("Meeting Visual Player Meta", card.transform, 9, TextAnchor.MiddleCenter, MutedTextColor);
+            metaText.text = state.IsBot ? "AI" : controller.ProfessionDisplayName(state.Profession);
+            Stretch(metaText.GetComponent<RectTransform>(), new Vector2(0.06f, 0.04f), new Vector2(0.94f, 0.18f), Vector2.zero, Vector2.zero);
+        }
+
+        private Button CreateVoteButton(string name, string title, string subtitle, Color accent, Transform parent, float height, UnityEngine.Events.UnityAction onClick)
+        {
+            GameObject buttonObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
+            buttonObject.transform.SetParent(parent, false);
+            ApplySpriteSkin(buttonObject, meetingButtonSprite, new Color(0.060f, 0.074f, 0.082f, 0.98f));
+            AddPanelBorder(buttonObject, new Color(accent.r, accent.g, accent.b, 0.28f), 1f);
+            AddAccentEdge(buttonObject, "Meeting Visual Vote Button Accent", accent, 3f, true);
+
+            Button button = buttonObject.GetComponent<Button>();
+            ColorBlock colors = button.colors;
+            colors.normalColor = new Color(0.060f, 0.074f, 0.082f, 1f);
+            colors.highlightedColor = new Color(0.110f, 0.140f, 0.152f, 1f);
+            colors.pressedColor = new Color(0.036f, 0.044f, 0.050f, 1f);
+            colors.disabledColor = new Color(0.050f, 0.055f, 0.060f, 0.44f);
+            colors.colorMultiplier = 1f;
+            colors.fadeDuration = 0.1f;
+            button.colors = colors;
+            AttachHoverSfx(buttonObject);
+            button.onClick.AddListener(() =>
+            {
+                AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+                onClick?.Invoke();
+            });
+
+            Text titleText = CreateText("Label", buttonObject.transform, 13, TextAnchor.UpperLeft, TextColor);
+            titleText.text = title;
+            Stretch(titleText.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(14f, 7f), new Vector2(-10f, -22f));
+
+            Text subtitleText = CreateText("Meeting Visual Vote Meta", buttonObject.transform, 10, TextAnchor.LowerLeft, MutedTextColor);
+            subtitleText.text = subtitle;
+            Stretch(subtitleText.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(14f, 5f), new Vector2(-10f, -6f));
+
+            AddLayout(buttonObject, height, 0f, 1f);
+            return button;
+        }
+
+        private Sprite MeetingPortraitSprite(OnlineProfession profession)
+        {
+            EnsureMeetingAssetSprites();
+
+            if (Sprite2DAssetCache.CharacterSets.TryGetValue(profession, out Sprite2DAssetCache.ProfSpriteSet set))
+            {
+                if (set.Avatar != null)
+                {
+                    return set.Avatar;
+                }
+
+                if (set.Front_Frame0 != null)
+                {
+                    return set.Front_Frame0;
+                }
+            }
+
+            return Sprite2DAssetCache.CharBody_Front;
+        }
+
+        private static Color RoleAccent(OnlineRole publicRole, OnlineProfession profession)
+        {
+            if (profession == OnlineProfession.Mole)
+            {
+                return new Color(RedAccent.r, RedAccent.g, RedAccent.b, 0.98f);
+            }
+
+            switch (publicRole)
+            {
+                case OnlineRole.Gang:
+                    return RedAccent;
+                case OnlineRole.Undercover:
+                    return VerticalSliceAccent;
+                case OnlineRole.Mole:
+                    return RedAccent;
+                case OnlineRole.Police:
+                    return BlueAccent;
+                default:
+                    return MutedTextColor;
+            }
         }
 
         private static string ShortName(string value)
@@ -1510,7 +1781,8 @@ namespace GanglandUndercover.Online
 
         private void BuildTaskMiniGameStatusRail()
         {
-            CreateTaskMiniGameBlock("Task MiniGame Step Rail", new Vector2(0.948f, 0.18f), new Vector2(0.984f, 0.72f), new Color(0.018f, 0.024f, 0.026f, 0.92f), string.Empty);
+            EnsureTaskAssetSprites();
+            CreateTaskMiniGameBlock("Task MiniGame Step Rail Task Visual Rail", new Vector2(0.948f, 0.18f), new Vector2(0.984f, 0.72f), new Color(0.018f, 0.024f, 0.026f, 0.92f), string.Empty, taskBoardSprite);
 
             for (int i = 0; i < 3; i++)
             {
@@ -1520,15 +1792,15 @@ namespace GanglandUndercover.Online
                 bool current = controller.ActiveTaskStepValue == i;
                 Color color = completed ? GreenAccent : current ? AmberAccent : new Color(0.16f, 0.2f, 0.21f, 0.96f);
                 float y = 0.22f + (2 - i) * 0.16f;
-                CreateTaskMiniGameBlock("Task MiniGame Step Chip " + i, new Vector2(0.938f, y), new Vector2(0.992f, y + 0.08f), color, (i + 1).ToString());
+                CreateTaskMiniGameBlock("Task MiniGame Step Chip " + i + " Task Visual Step Chip", new Vector2(0.938f, y), new Vector2(0.992f, y + 0.08f), color, (i + 1).ToString(), taskBoardSprite);
             }
 
             float charge = Mathf.Clamp01(controller.ActiveTaskChargeValue);
-            CreateTaskMiniGameBlock("Task MiniGame Charge Track", new Vector2(0.06f, 0.015f), new Vector2(0.58f, 0.05f), new Color(0.018f, 0.024f, 0.026f, 0.94f), "扫描");
+            CreateTaskMiniGameBlock("Task MiniGame Charge Track Task Visual Scan Track", new Vector2(0.06f, 0.015f), new Vector2(0.58f, 0.05f), new Color(0.018f, 0.024f, 0.026f, 0.94f), "扫描", taskScanSprite);
 
             if (charge > 0.01f)
             {
-                CreateTaskMiniGameBlock("Task MiniGame Charge Fill", new Vector2(0.06f, 0.015f), new Vector2(0.06f + 0.52f * charge, 0.05f), BlueAccent, string.Empty);
+                CreateTaskMiniGameBlock("Task MiniGame Charge Fill Task Visual Scan Fill", new Vector2(0.06f, 0.015f), new Vector2(0.06f + 0.52f * charge, 0.05f), BlueAccent, string.Empty, taskScanSprite);
             }
         }
 
@@ -1542,10 +1814,10 @@ namespace GanglandUndercover.Online
                 int col = i % 3;
                 bool selected = i == controller.ActiveTaskCorrectStepOne - 1 || i == controller.ActiveTaskCorrectStepTwo + 2 || i == controller.ActiveTaskCorrectStepThree + 5;
                 Color color = selected ? new Color(0.12f, 0.7f, 0.94f, 0.95f) : new Color(0.05f, 0.12f, 0.15f, 0.95f);
-                CreateTaskMiniGameBlock("Task MiniGame CCTV screen " + i, new Vector2(0.06f + col * 0.3f, 0.18f + (2 - row) * 0.18f), new Vector2(0.28f + col * 0.3f, 0.32f + (2 - row) * 0.18f), color, "C" + (i + 1));
+                CreateTaskMiniGameBlock("Task MiniGame CCTV screen " + i + " Task Visual Monitor", new Vector2(0.06f + col * 0.3f, 0.18f + (2 - row) * 0.18f), new Vector2(0.28f + col * 0.3f, 0.32f + (2 - row) * 0.18f), color, "C" + (i + 1), taskTileSprite);
             }
 
-            CreateTaskMiniGameBlock("Task MiniGame CCTV timeline", new Vector2(0.06f, 0.06f), new Vector2(0.94f, 0.11f), new Color(0.9f, 0.68f, 0.12f, 0.92f), "可疑时间轴");
+            CreateTaskMiniGameBlock("Task MiniGame CCTV timeline Task Visual Timeline", new Vector2(0.06f, 0.06f), new Vector2(0.94f, 0.11f), new Color(0.9f, 0.68f, 0.12f, 0.92f), "可疑时间轴", taskScanSprite);
         }
 
         private void BuildRecordingTaskCanvas()
@@ -1557,12 +1829,12 @@ namespace GanglandUndercover.Online
                 float x0 = 0.06f + i * 0.064f;
                 float height = 0.12f + Mathf.Abs(Mathf.Sin(i * 1.31f)) * 0.42f;
                 bool hot = i == controller.ActiveTaskCorrectStepOne + 1 || i == controller.ActiveTaskCorrectStepTwo + 5 || i == controller.ActiveTaskCorrectStepThree + 8;
-                CreateTaskMiniGameBlock("Task MiniGame Recording waveform " + i, new Vector2(x0, 0.16f), new Vector2(x0 + 0.04f, 0.16f + height), hot ? GreenAccent : new Color(0.12f, 0.46f, 0.42f, 0.95f), string.Empty);
+                CreateTaskMiniGameBlock("Task MiniGame Recording waveform " + i + " Task Visual Waveform", new Vector2(x0, 0.16f), new Vector2(x0 + 0.04f, 0.16f + height), hot ? GreenAccent : new Color(0.12f, 0.46f, 0.42f, 0.95f), string.Empty, taskScanSprite);
             }
 
-            CreateTaskMiniGameBlock("Task MiniGame Recording keyword A", new Vector2(0.08f, 0.61f), new Vector2(0.32f, 0.72f), new Color(0.18f, 0.12f, 0.08f, 0.96f), "码头");
-            CreateTaskMiniGameBlock("Task MiniGame Recording keyword B", new Vector2(0.38f, 0.61f), new Vector2(0.62f, 0.72f), new Color(0.18f, 0.12f, 0.08f, 0.96f), "车牌");
-            CreateTaskMiniGameBlock("Task MiniGame Recording keyword C", new Vector2(0.68f, 0.61f), new Vector2(0.92f, 0.72f), new Color(0.18f, 0.12f, 0.08f, 0.96f), "暗号");
+            CreateTaskMiniGameBlock("Task MiniGame Recording keyword A Task Visual Keyword", new Vector2(0.08f, 0.61f), new Vector2(0.32f, 0.72f), new Color(0.18f, 0.12f, 0.08f, 0.96f), "码头", taskBoardSprite);
+            CreateTaskMiniGameBlock("Task MiniGame Recording keyword B Task Visual Keyword", new Vector2(0.38f, 0.61f), new Vector2(0.62f, 0.72f), new Color(0.18f, 0.12f, 0.08f, 0.96f), "车牌", taskBoardSprite);
+            CreateTaskMiniGameBlock("Task MiniGame Recording keyword C Task Visual Keyword", new Vector2(0.68f, 0.61f), new Vector2(0.92f, 0.72f), new Color(0.18f, 0.12f, 0.08f, 0.96f), "暗号", taskBoardSprite);
         }
 
         private void BuildBreakerTaskCanvas()
@@ -1580,25 +1852,25 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < 4; i++)
             {
                 float y = 0.2f + i * 0.13f;
-                CreateTaskMiniGameBlock("Task MiniGame Breaker left socket " + i, new Vector2(0.08f, y), new Vector2(0.18f, y + 0.08f), wireColors[i], (i + 1).ToString());
-                CreateTaskMiniGameBlock("Task MiniGame Breaker wire " + i, new Vector2(0.2f, y + 0.03f), new Vector2(0.78f, y + 0.05f), wireColors[(i + controller.ActiveTaskStepValue) % wireColors.Length], string.Empty);
-                CreateTaskMiniGameBlock("Task MiniGame Breaker right socket " + i, new Vector2(0.8f, y), new Vector2(0.9f, y + 0.08f), new Color(0.05f, 0.07f, 0.07f, 0.96f), (4 - i).ToString());
+                CreateTaskMiniGameBlock("Task MiniGame Breaker left socket " + i + " Task Visual Socket", new Vector2(0.08f, y), new Vector2(0.18f, y + 0.08f), wireColors[i], (i + 1).ToString(), taskBoardSprite);
+                CreateTaskMiniGameBlock("Task MiniGame Breaker wire " + i + " Task Visual Wire", new Vector2(0.2f, y + 0.03f), new Vector2(0.78f, y + 0.05f), wireColors[(i + controller.ActiveTaskStepValue) % wireColors.Length], string.Empty, taskScanSprite);
+                CreateTaskMiniGameBlock("Task MiniGame Breaker right socket " + i + " Task Visual Socket", new Vector2(0.8f, y), new Vector2(0.9f, y + 0.08f), new Color(0.05f, 0.07f, 0.07f, 0.96f), (4 - i).ToString(), taskBoardSprite);
             }
 
-            CreateTaskMiniGameBlock("Task MiniGame Breaker warning strip", new Vector2(0.08f, 0.08f), new Vector2(0.9f, 0.14f), new Color(0.88f, 0.18f, 0.08f, 0.9f), "断电风险");
+            CreateTaskMiniGameBlock("Task MiniGame Breaker warning strip Task Visual Warning", new Vector2(0.08f, 0.08f), new Vector2(0.9f, 0.14f), new Color(0.88f, 0.18f, 0.08f, 0.9f), "断电风险", taskWarningSprite);
         }
 
         private void BuildPlateTaskCanvas()
         {
             CreateTaskMiniGameText("Task MiniGame Plate Header", "车牌路线比对", new Vector2(0.04f, 0.76f), new Vector2(0.96f, 0.96f), BlueAccent);
-            CreateTaskMiniGameBlock("Task MiniGame Plate road", new Vector2(0.08f, 0.2f), new Vector2(0.92f, 0.38f), new Color(0.08f, 0.09f, 0.09f, 0.96f), string.Empty);
-            CreateTaskMiniGameBlock("Task MiniGame Plate suspect car", new Vector2(0.16f, 0.42f), new Vector2(0.42f, 0.62f), new Color(0.76f, 0.62f, 0.12f, 0.96f), "HK 7X2");
-            CreateTaskMiniGameBlock("Task MiniGame Plate patrol car", new Vector2(0.58f, 0.42f), new Vector2(0.84f, 0.62f), new Color(0.08f, 0.26f, 0.68f, 0.96f), "巡逻");
+            CreateTaskMiniGameBlock("Task MiniGame Plate road Task Visual Route", new Vector2(0.08f, 0.2f), new Vector2(0.92f, 0.38f), new Color(0.08f, 0.09f, 0.09f, 0.96f), string.Empty, taskScanSprite);
+            CreateTaskMiniGameBlock("Task MiniGame Plate suspect car Task Visual Vehicle", new Vector2(0.16f, 0.42f), new Vector2(0.42f, 0.62f), new Color(0.76f, 0.62f, 0.12f, 0.96f), "HK 7X2", taskTileSprite);
+            CreateTaskMiniGameBlock("Task MiniGame Plate patrol car Task Visual Vehicle", new Vector2(0.58f, 0.42f), new Vector2(0.84f, 0.62f), new Color(0.08f, 0.26f, 0.68f, 0.96f), "巡逻", taskTileSprite);
 
             for (int i = 0; i < 6; i++)
             {
                 bool hot = i == controller.ActiveTaskStepValue + 2;
-                CreateTaskMiniGameBlock("Task MiniGame Plate digit " + i, new Vector2(0.14f + i * 0.12f, 0.08f), new Vector2(0.22f + i * 0.12f, 0.16f), hot ? RedAccent : new Color(0.9f, 0.88f, 0.76f, 0.96f), i.ToString());
+                CreateTaskMiniGameBlock("Task MiniGame Plate digit " + i + " Task Visual Digit", new Vector2(0.14f + i * 0.12f, 0.08f), new Vector2(0.22f + i * 0.12f, 0.16f), hot ? RedAccent : new Color(0.9f, 0.88f, 0.76f, 0.96f), i.ToString(), taskBoardSprite);
             }
         }
 
@@ -1611,7 +1883,7 @@ namespace GanglandUndercover.Online
                 bool completed = i == 0 && controller.ActiveTaskStepOneDone
                     || i == 1 && controller.ActiveTaskStepTwoDone
                     || i == 2 && controller.ActiveTaskStepThreeDone;
-                CreateTaskMiniGameBlock("Task MiniGame Generic step " + i, new Vector2(0.14f + i * 0.27f, 0.22f), new Vector2(0.34f + i * 0.27f, 0.58f), completed ? GreenAccent : new Color(0.12f, 0.16f, 0.17f, 0.96f), "步骤 " + (i + 1));
+                CreateTaskMiniGameBlock("Task MiniGame Generic step " + i + " Task Visual Step", new Vector2(0.14f + i * 0.27f, 0.22f), new Vector2(0.34f + i * 0.27f, 0.58f), completed ? GreenAccent : new Color(0.12f, 0.16f, 0.17f, 0.96f), "步骤 " + (i + 1), taskBoardSprite);
             }
         }
 
@@ -1642,7 +1914,14 @@ namespace GanglandUndercover.Online
 
         private void CreateTaskMiniGameBlock(string name, Vector2 anchorMin, Vector2 anchorMax, Color color, string label)
         {
+            CreateTaskMiniGameBlock(name, anchorMin, anchorMax, color, label, null);
+        }
+
+        private void CreateTaskMiniGameBlock(string name, Vector2 anchorMin, Vector2 anchorMax, Color color, string label, Sprite sprite)
+        {
             GameObject block = CreatePanel(name, taskMiniGameRoot, color);
+            ApplySpriteSkin(block, sprite, color);
+            AddPanelBorder(block, new Color(1f, 1f, 1f, 0.08f), 1f);
             RectTransform rect = block.GetComponent<RectTransform>();
             Stretch(rect, anchorMin, anchorMax, Vector2.zero, Vector2.zero);
 
@@ -1729,6 +2008,75 @@ namespace GanglandUndercover.Online
             return section;
         }
 
+        private void EnsureMeetingAssetSprites()
+        {
+            if (meetingAssetSpritesLoaded)
+            {
+                return;
+            }
+
+            meetingAssetSpritesLoaded = true;
+            Sprite2DAssetCache.Ensure();
+            meetingPanelSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_grey", 100f) ?? Sprite2DAssetCache.PanelBg;
+            meetingButtonSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_blue", 100f) ?? Sprite2DAssetCache.ButtonBg;
+            meetingVoteCardSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_beige", 100f) ?? Sprite2DAssetCache.VoteCardBg;
+            meetingAvatarFrameSprite = Sprite2DAssetCache.AvatarFrame;
+        }
+
+        private void EnsureTaskAssetSprites()
+        {
+            if (taskAssetSpritesLoaded)
+            {
+                return;
+            }
+
+            taskAssetSpritesLoaded = true;
+            Sprite2DAssetCache.Ensure();
+            taskPanelSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_grey", 100f) ?? Sprite2DAssetCache.PanelBg;
+            taskBoardSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_beige", 100f) ?? Sprite2DAssetCache.VoteCardBg;
+            taskTileSprite = LoadRuntimeSprite("Sprites/Tilesets/PoliceStation/decorations/circuit-board", 32f)
+                ?? LoadRuntimeSprite("Sprites/Tilesets/PoliceStation/walls/display-screen", 32f)
+                ?? Sprite2DAssetCache.PropEvidenceBox;
+            taskScanSprite = LoadRuntimeSprite("Sprites/Tilesets/Harbour/floors/metal-grid", 32f)
+                ?? LoadRuntimeSprite("Sprites/Tilesets/PoliceStation/floors/command-deck", 32f)
+                ?? Sprite2DAssetCache.FloorMetal;
+            taskWarningSprite = LoadRuntimeSprite("Sprites/Tilesets/Harbour/decorations/warning-sign_industrial-district", 32f)
+                ?? Sprite2DAssetCache.ButtonBg;
+        }
+
+        private static Sprite LoadRuntimeSprite(string resourcePath, float pixelsPerUnit)
+        {
+            Texture2D texture = Resources.Load<Texture2D>(resourcePath);
+
+            if (texture == null)
+            {
+                return null;
+            }
+
+            texture.filterMode = FilterMode.Point;
+            return Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), pixelsPerUnit);
+        }
+
+        private static void ApplySpriteSkin(GameObject target, Sprite sprite, Color color)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            Image image = target.GetComponent<Image>();
+
+            if (image == null)
+            {
+                return;
+            }
+
+            image.sprite = sprite;
+            image.type = sprite != null && sprite.border != Vector4.zero ? Image.Type.Sliced : Image.Type.Simple;
+            image.preserveAspect = false;
+            image.color = color;
+        }
+
         private Transform CreateVerticalPanel(string name, Transform parent, Color color, Vector2 anchorMin, Vector2 anchorMax, RectOffset padding, float spacing, bool stretch = true)
         {
             GameObject panel = CreatePanel(name, parent, color);
@@ -1737,6 +2085,11 @@ namespace GanglandUndercover.Online
             if (stretch)
             {
                 Stretch(rect, anchorMin, anchorMax, Vector2.zero, Vector2.zero);
+            }
+
+            if (color.a > 0.05f)
+            {
+                AddPanelBorder(panel, UIStyle.BorderSubtle, 1f);
             }
 
             VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
@@ -1750,10 +2103,26 @@ namespace GanglandUndercover.Online
             return panel.transform;
         }
 
+        private Transform CreateHorizontalLayoutPanel(string name, Transform parent, Color color, RectOffset padding, float spacing, float preferredHeight, float preferredWidth, float flexibleWidth, float flexibleHeight)
+        {
+            GameObject panel = CreatePanel(name, parent, color);
+            HorizontalLayoutGroup layout = panel.AddComponent<HorizontalLayoutGroup>();
+            layout.padding = padding;
+            layout.spacing = spacing;
+            layout.childAlignment = TextAnchor.MiddleLeft;
+            layout.childControlHeight = true;
+            layout.childControlWidth = true;
+            layout.childForceExpandHeight = true;
+            layout.childForceExpandWidth = false;
+            AddLayout(panel, preferredHeight, preferredWidth, flexibleWidth, flexibleHeight);
+            return panel.transform;
+        }
+
         private Transform CreateHorizontalPanel(string name, Transform parent, Color color, Vector2 anchorMin, Vector2 anchorMax, RectOffset padding, float spacing)
         {
             GameObject panel = CreatePanel(name, parent, color);
             Stretch(panel.GetComponent<RectTransform>(), anchorMin, anchorMax, Vector2.zero, Vector2.zero);
+            AddPanelBorder(panel, UIStyle.BorderSubtle, 1f);
 
             HorizontalLayoutGroup layout = panel.AddComponent<HorizontalLayoutGroup>();
             layout.padding = padding;
@@ -1780,23 +2149,73 @@ namespace GanglandUndercover.Online
             return row.transform;
         }
 
+        private static void AddPanelBorder(GameObject panel, Color color, float width)
+        {
+            if (panel == null || width <= 0f)
+            {
+                return;
+            }
+
+            CreatePanelEdge(panel.transform, "Border Top", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, width), Vector2.zero, color);
+            CreatePanelEdge(panel.transform, "Border Bottom", Vector2.zero, new Vector2(1f, 0f), new Vector2(0f, width), Vector2.zero, color);
+            CreatePanelEdge(panel.transform, "Border Left", Vector2.zero, new Vector2(0f, 1f), new Vector2(width, 0f), Vector2.zero, color);
+            CreatePanelEdge(panel.transform, "Border Right", new Vector2(1f, 0f), Vector2.one, new Vector2(width, 0f), Vector2.zero, color);
+        }
+
+        private static void AddAccentEdge(GameObject panel, string name, Color color, float width, bool left)
+        {
+            if (panel == null || width <= 0f)
+            {
+                return;
+            }
+
+            Vector2 anchorMin = left ? Vector2.zero : new Vector2(0f, 1f);
+            Vector2 anchorMax = left ? new Vector2(0f, 1f) : Vector2.one;
+            Vector2 size = left ? new Vector2(width, 0f) : new Vector2(0f, width);
+            CreatePanelEdge(panel.transform, name, anchorMin, anchorMax, size, Vector2.zero, color);
+        }
+
+        private static void CreatePanelEdge(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 sizeDelta, Vector2 anchoredPosition, Color color)
+        {
+            GameObject edge = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+            edge.transform.SetParent(parent, false);
+
+            RectTransform rect = edge.GetComponent<RectTransform>();
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.sizeDelta = sizeDelta;
+            rect.anchoredPosition = anchoredPosition;
+
+            Image image = edge.GetComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+
+            edge.GetComponent<LayoutElement>().ignoreLayout = true;
+        }
+
         private Button CreateButton(string label, Transform parent, float height, UnityEngine.Events.UnityAction onClick)
         {
             GameObject buttonObject = new GameObject(label + " Button", typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
             Image image = buttonObject.GetComponent<Image>();
-            image.color = new Color(0.12f, 0.14f, 0.16f, 1f);
+            image.color = new Color(0.075f, 0.090f, 0.100f, 1f);
+            AddPanelBorder(buttonObject, new Color(1f, 1f, 1f, 0.10f), 1f);
 
             Button button = buttonObject.GetComponent<Button>();
             ColorBlock colors = button.colors;
-            colors.normalColor      = new Color(0.12f, 0.14f, 0.16f, 1f);
-            colors.highlightedColor = new Color(0.18f, 0.55f, 0.72f, 0.82f);  // neon blue glow on hover
-            colors.pressedColor     = new Color(0.06f, 0.08f, 0.10f, 1f);
-            colors.disabledColor    = new Color(0.08f, 0.09f, 0.10f, 0.45f);
+            colors.normalColor      = new Color(0.075f, 0.090f, 0.100f, 1f);
+            colors.highlightedColor = new Color(0.16f, 0.22f, 0.25f, 1f);
+            colors.pressedColor     = new Color(0.045f, 0.055f, 0.062f, 1f);
+            colors.disabledColor    = new Color(0.055f, 0.060f, 0.064f, 0.45f);
             colors.colorMultiplier  = 1f;
             colors.fadeDuration     = 0.1f;
             button.colors = colors;
-            button.onClick.AddListener(onClick);
+            AttachHoverSfx(buttonObject);
+            button.onClick.AddListener(() =>
+            {
+                AudioManager.Instance?.PlaySFX(SoundEffect.UIClick);
+                onClick?.Invoke();
+            });
 
             Text text = CreateText("Label", buttonObject.transform, 14, TextAnchor.MiddleCenter, TextColor);
             text.text = label;
@@ -1804,6 +2223,17 @@ namespace GanglandUndercover.Online
 
             AddLayout(buttonObject, height, 0f, 1f);
             return button;
+        }
+
+        private static void AttachHoverSfx(GameObject buttonObject)
+        {
+            UiButtonSfx feedback = buttonObject.GetComponent<UiButtonSfx>();
+            if (feedback == null)
+            {
+                feedback = buttonObject.AddComponent<UiButtonSfx>();
+            }
+
+            feedback.Configure(hover: true, suppressDisabled: true);
         }
 
         private InputField CreateInputRow(Transform parent, string label, string placeholder, UnityEngine.Events.UnityAction<string> onEndEdit)
@@ -1996,7 +2426,7 @@ namespace GanglandUndercover.Online
 
         private static void ConfigureText(Text text, int fontSize, TextAnchor alignment, Color color)
         {
-            text.font = UIStyle.PixelFont;
+            text.font = UIStyle.CJKFont;
             text.fontSize = fontSize;
             text.alignment = alignment;
             text.color = color;
@@ -2084,6 +2514,27 @@ namespace GanglandUndercover.Online
             foreach (Transform child in root)
             {
                 count += CountNamedChildren(child, nameFragment);
+            }
+
+            return count;
+        }
+
+        private static int CountImagesWithSprites(Transform root)
+        {
+            if (root == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            Image[] images = root.GetComponentsInChildren<Image>(true);
+
+            for (int i = 0; i < images.Length; i++)
+            {
+                if (images[i] != null && images[i].sprite != null)
+                {
+                    count++;
+                }
             }
 
             return count;

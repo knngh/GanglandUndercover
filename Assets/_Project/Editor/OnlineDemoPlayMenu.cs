@@ -59,9 +59,72 @@ namespace GanglandUndercover.Editor
         [MenuItem("Gangland/Capture Online Demo Screenshot")]
         public static void CaptureOnlineDemoScreenshot()
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(ScreenshotPath));
+            string absoluteScreenshotPath = Path.GetFullPath(ScreenshotPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(absoluteScreenshotPath));
+
+            Camera camera = Camera.main;
+
+            if (camera != null)
+            {
+                if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+                {
+                    Debug.LogWarning("Gangland online demo screenshot skipped: Unity is running without a graphics device. Run this method without -nographics or use the editor menu.");
+                    return;
+                }
+
+                CaptureCameraToPng(camera, absoluteScreenshotPath, 1600, 900);
+                Debug.Log("Gangland online demo screenshot saved with gameplay HUD: " + absoluteScreenshotPath);
+                return;
+            }
+
             ScreenCapture.CaptureScreenshot(ScreenshotPath);
-            Debug.Log("Gangland online demo screenshot queued with gameplay HUD: " + Path.GetFullPath(ScreenshotPath));
+            Debug.Log("Gangland online demo screenshot queued with gameplay HUD: " + absoluteScreenshotPath);
+        }
+
+        public static void CaptureOnlineDemoScreenshotBaseline()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+            GameObject cameraObject = new GameObject("Online Demo Screenshot Camera");
+            Camera camera = cameraObject.AddComponent<Camera>();
+            cameraObject.AddComponent<AudioListener>();
+            camera.tag = "MainCamera";
+
+            GameObject onlineObject = new GameObject("Online Demo Screenshot Match");
+            OnlineMatchController controller = onlineObject.AddComponent<OnlineMatchController>();
+
+            controller.EditorSimulateLocalMatch();
+            controller.EditorSkipOpeningForSmokeTest();
+            controller.EditorConfigureActionCameraForSmokeTest();
+            controller.EditorForceActionPreviewForSmokeTest();
+            controller.EditorRefreshWorldVisualsForSmokeTest();
+            CaptureOnlineDemoScreenshot();
+        }
+
+        private static void CaptureCameraToPng(Camera camera, string absoluteScreenshotPath, int width, int height)
+        {
+            RenderTexture renderTexture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            Texture2D texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            RenderTexture previousActive = RenderTexture.active;
+            RenderTexture previousTarget = camera.targetTexture;
+
+            try
+            {
+                camera.targetTexture = renderTexture;
+                RenderTexture.active = renderTexture;
+                camera.Render();
+                texture.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
+                texture.Apply();
+                File.WriteAllBytes(absoluteScreenshotPath, texture.EncodeToPNG());
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget;
+                RenderTexture.active = previousActive;
+                Object.DestroyImmediate(texture);
+                renderTexture.Release();
+                Object.DestroyImmediate(renderTexture);
+            }
         }
 
         private static void Tick()

@@ -11,6 +11,10 @@ using UnityEngine;
 
 public static class CIRunner
 {
+    private const string PlayModeWatchdogActiveKey = "GanglandUndercover.CI.PlayModeWatchdogActive";
+    private const string PlayModeWatchdogStartTicksKey = "GanglandUndercover.CI.PlayModeWatchdogStartTicks";
+    private const string PlayModeWatchdogTimeoutKey = "GanglandUndercover.CI.PlayModeWatchdogTimeout";
+
     // ── Stage 1: Compile Check ──
     public static void Compile()
     {
@@ -35,93 +39,13 @@ public static class CIRunner
     // ── Stage 2: EditMode Tests ──
     public static void RunEditModeTests()
     {
-        Debug.Log("[CI] EditMode tests starting...");
-
-        var runner = ScriptableObject.CreateInstance<TestRunnerApi>();
-        var filter = new Filter
-        {
-            testMode = TestMode.EditMode,
-            groupNames = new[] { "GanglandUndercover" },
-        };
-
-        bool completed = false;
-        int passCount = 0;
-        int failCount = 0;
-        int skipCount = 0;
-
-        runner.RegisterCallbacks(new TestCallbacks(
-            (result) =>
-            {
-                passCount = result.passCount;
-                failCount = result.failCount;
-                skipCount = result.skipCount;
-                Debug.Log($"[CI] EditMode: {passCount} passed, {failCount} failed, {skipCount} skipped");
-            },
-            () => { completed = true; }
-        ));
-
-        runner.Execute(new ExecutionSettings(filter));
-
-        // Wait for completion with 2-minute timeout
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!completed && sw.ElapsedMilliseconds < 120000)
-        {
-            System.Threading.Thread.Sleep(100);
-        }
-
-        if (!completed || failCount > 0)
-        {
-            Debug.LogError($"[CI] EditMode tests FAILED — {failCount} failures, timeout={!completed}");
-            EditorApplication.Exit(1);
-        }
-
-        Debug.Log($"[CI] EditMode tests PASSED — {passCount} passed, {skipCount} skipped");
+        RunTests(TestMode.EditMode, "EditMode", 120.0);
     }
 
     // ── Stage 3: PlayMode Tests ──
     public static void RunPlayModeTests()
     {
-        Debug.Log("[CI] PlayMode tests starting...");
-
-        var runner = ScriptableObject.CreateInstance<TestRunnerApi>();
-        var filter = new Filter
-        {
-            testMode = TestMode.PlayMode,
-            groupNames = new[] { "GanglandUndercover" },
-        };
-
-        bool completed = false;
-        int passCount = 0;
-        int failCount = 0;
-        int skipCount = 0;
-
-        runner.RegisterCallbacks(new TestCallbacks(
-            (result) =>
-            {
-                passCount = result.passCount;
-                failCount = result.failCount;
-                skipCount = result.skipCount;
-                Debug.Log($"[CI] PlayMode: {passCount} passed, {failCount} failed, {skipCount} skipped");
-            },
-            () => { completed = true; }
-        ));
-
-        runner.Execute(new ExecutionSettings(filter));
-
-        // Wait for completion with 5-minute timeout
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!completed && sw.ElapsedMilliseconds < 300000)
-        {
-            System.Threading.Thread.Sleep(100);
-        }
-
-        if (!completed || failCount > 0)
-        {
-            Debug.LogError($"[CI] PlayMode tests FAILED — {failCount} failures, timeout={!completed}");
-            EditorApplication.Exit(1);
-        }
-
-        Debug.Log($"[CI] PlayMode tests PASSED — {passCount} passed, {skipCount} skipped");
+        RunTests(TestMode.PlayMode, "PlayMode", 300.0);
     }
 
     // ── Stage 4: Build All ──
@@ -180,15 +104,176 @@ public static class CIRunner
         return null;
     }
 
+    private static void RunTests(TestMode mode, string label, double timeoutSeconds)
+    {
+        Debug.Log($"[CI] {label} tests starting...");
+
+        var runner = ScriptableObject.CreateInstance<TestRunnerApi>();
+        var filter = new Filter { testMode = mode };
+        double deadline = EditorApplication.timeSinceStartup + timeoutSeconds;
+        bool completed = false;
+        int passCount = 0;
+        int failCount = 0;
+        int skipCount = 0;
+
+        var callbacks = new TestCallbacks(
+            (result) =>
+            {
+                passCount = result.passCount;
+                failCount = result.failCount;
+                skipCount = result.skipCount;
+                completed = true;
+                Debug.Log($"[CI] {label}: {passCount} passed, {failCount} failed, {skipCount} skipped");
+            });
+
+        TestRunnerApi.RegisterTestCallback(callbacks);
+
+        if (mode == TestMode.PlayMode)
+        {
+            SessionState.SetBool(PlayModeWatchdogActiveKey, true);
+            SessionState.SetString(PlayModeWatchdogStartTicksKey, System.DateTime.UtcNow.Ticks.ToString());
+            SessionState.SetFloat(PlayModeWatchdogTimeoutKey, (float)timeoutSeconds);
+            RegisterPlayModeResultWatchdog();
+        }
+
+        runner.Execute(new ExecutionSettings(filter));
+
+        void Watchdog()
+        {
+            if (completed)
+            {
+                EditorApplication.update -= Watchdog;
+                TestRunnerApi.UnregisterTestCallback(callbacks);
+                Object.DestroyImmediate(runner);
+                if (mode == TestMode.PlayMode)
+                {
+                    SessionState.SetBool(PlayModeWatchdogActiveKey, false);
+                    EditorApplication.update -= PlayModeResultWatchdog;
+                }
+
+                if (failCount > 0)
+                {
+                    Debug.LogError($"[CI] {label} tests FAILED — {failCount} failures");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
+                Debug.Log($"[CI] {label} tests PASSED — {passCount} passed, {skipCount} skipped");
+                EditorApplication.Exit(0);
+                return;
+            }
+
+            if (EditorApplication.timeSinceStartup >= deadline)
+            {
+                EditorApplication.update -= Watchdog;
+                TestRunnerApi.UnregisterTestCallback(callbacks);
+                Object.DestroyImmediate(runner);
+                if (mode == TestMode.PlayMode)
+                {
+                    SessionState.SetBool(PlayModeWatchdogActiveKey, false);
+                    EditorApplication.update -= PlayModeResultWatchdog;
+                }
+                Debug.LogError($"[CI] {label} tests FAILED — 0 failures, timeout=True");
+                EditorApplication.Exit(1);
+            }
+        }
+
+        EditorApplication.update += Watchdog;
+    }
+
+    [InitializeOnLoadMethod]
+    private static void ResumePlayModeResultWatchdog()
+    {
+        if (SessionState.GetBool(PlayModeWatchdogActiveKey, false))
+        {
+            RegisterPlayModeResultWatchdog();
+        }
+    }
+
+    private static void RegisterPlayModeResultWatchdog()
+    {
+        EditorApplication.update -= PlayModeResultWatchdog;
+        EditorApplication.update += PlayModeResultWatchdog;
+    }
+
+    private static void PlayModeResultWatchdog()
+    {
+        if (!SessionState.GetBool(PlayModeWatchdogActiveKey, false))
+        {
+            EditorApplication.update -= PlayModeResultWatchdog;
+            return;
+        }
+
+        System.DateTime startUtc = PlayModeWatchdogStartUtc();
+        double timeoutSeconds = SessionState.GetFloat(PlayModeWatchdogTimeoutKey, 300f);
+        if ((System.DateTime.UtcNow - startUtc).TotalSeconds > timeoutSeconds)
+        {
+            SessionState.SetBool(PlayModeWatchdogActiveKey, false);
+            EditorApplication.update -= PlayModeResultWatchdog;
+            Debug.LogError("[CI] PlayMode tests FAILED — result watchdog timeout=True");
+            EditorApplication.Exit(1);
+            return;
+        }
+
+        string resultPath = System.IO.Path.Combine(Application.persistentDataPath, "TestResults.xml");
+        if (!System.IO.File.Exists(resultPath) || System.IO.File.GetLastWriteTimeUtc(resultPath) < startUtc)
+            return;
+
+        try
+        {
+            var doc = new System.Xml.XmlDocument();
+            doc.Load(resultPath);
+            System.Xml.XmlElement root = doc.DocumentElement;
+            int passed = ParseXmlInt(root, "passed");
+            int failed = ParseXmlInt(root, "failed");
+            int skipped = ParseXmlInt(root, "skipped");
+
+            SessionState.SetBool(PlayModeWatchdogActiveKey, false);
+            EditorApplication.update -= PlayModeResultWatchdog;
+
+            if (failed > 0)
+            {
+                Debug.LogError($"[CI] PlayMode tests FAILED — {failed} failures, {passed} passed, {skipped} skipped");
+                EditorApplication.Exit(1);
+                return;
+            }
+
+            Debug.Log($"[CI] PlayMode tests PASSED — {passed} passed, {skipped} skipped");
+            EditorApplication.Exit(0);
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[CI] PlayMode result watchdog could not parse results yet: " + ex.Message);
+        }
+    }
+
+    private static System.DateTime PlayModeWatchdogStartUtc()
+    {
+        string ticksText = SessionState.GetString(PlayModeWatchdogStartTicksKey, string.Empty);
+        if (long.TryParse(ticksText, out long ticks))
+        {
+            return new System.DateTime(ticks, System.DateTimeKind.Utc);
+        }
+
+        return System.DateTime.UtcNow;
+    }
+
+    private static int ParseXmlInt(System.Xml.XmlElement element, string attributeName)
+    {
+        if (element == null)
+            return 0;
+
+        string value = element.GetAttribute(attributeName);
+        return int.TryParse(value, out int parsed) ? parsed : 0;
+    }
+
     private class TestCallbacks : ICallbacks
     {
         private readonly System.Action<TestRunResult> onResult;
-        private readonly System.Action onFinish;
 
-        public TestCallbacks(System.Action<TestRunResult> onResult, System.Action onFinish)
+        public TestCallbacks(System.Action<TestRunResult> onResult)
         {
             this.onResult = onResult;
-            this.onFinish = onFinish;
         }
 
         public void RunFinished(ITestResultAdaptor result)
@@ -200,7 +285,6 @@ public static class CIRunner
                 skipCount = result.SkipCount,
                 resultState = result.FailCount > 0 ? TestRunState.Fail : TestRunState.Pass,
             });
-            onFinish();
         }
 
         public void RunStarted(ITestAdaptor testsToRun) { }

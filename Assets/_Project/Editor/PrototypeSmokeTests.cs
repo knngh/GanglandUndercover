@@ -537,6 +537,16 @@ namespace GanglandUndercover.Editor
                 throw new InvalidOperationException("Smoke test failed: vertical slice stage-one editable anchors are not all present.");
             }
 
+            if (controller.LimeZuFirstScreenSpriteElementCount < 32)
+            {
+                throw new InvalidOperationException("Smoke test failed: vertical slice first screen is not using enough LimeZu runtime sprites.");
+            }
+
+            if (controller.LimeZuTaskMiniGameSetPieceSpriteElementCount < 28)
+            {
+                throw new InvalidOperationException("Smoke test failed: vertical slice task set pieces are not using enough LimeZu runtime sprites.");
+            }
+
             if (!controller.EditorForceStageOneOpeningShotForSmokeTest())
             {
                 throw new InvalidOperationException("Smoke test failed: vertical slice stage-one opening shot did not configure.");
@@ -592,6 +602,15 @@ namespace GanglandUndercover.Editor
                 throw new InvalidOperationException("Smoke test failed: online match did not expose a role objective summary.");
             }
 
+            if (!controller.HasOnboardingGuidance
+                || string.IsNullOrWhiteSpace(controller.OnboardingBriefingBody)
+                || !controller.OnboardingBriefingBody.Contains("身份")
+                || !controller.OnboardingBriefingBody.Contains("目标")
+                || string.IsNullOrWhiteSpace(controller.OnboardingActionPrompt))
+            {
+                throw new InvalidOperationException("Smoke test failed: online match did not expose complete new-player onboarding guidance.");
+            }
+
             if (!controller.EditorConfigureActionCameraForSmokeTest())
             {
                 throw new InvalidOperationException("Smoke test failed: online action camera did not switch to 2.5D perspective.");
@@ -603,6 +622,41 @@ namespace GanglandUndercover.Editor
             }
 
             controller.EditorRefreshWorldVisualsForSmokeTest();
+
+            if (controller.LimeZuTaskStationSpriteElementCount < controller.TaskCount * 3)
+            {
+                throw new InvalidOperationException("Smoke test failed: online task stations are not using enough LimeZu runtime sprites.");
+            }
+
+            if (controller.LimeZuLandmarkSpriteElementCount < 12)
+            {
+                throw new InvalidOperationException("Smoke test failed: online key landmarks are not using enough LimeZu runtime sprites.");
+            }
+
+            if (controller.KeyLandmarkVisualCount < 12)
+            {
+                throw new InvalidOperationException("Smoke test failed: online map does not expose enough readable key landmark visuals.");
+            }
+
+            if (controller.LimeZuTaskEventFeedbackSpriteElementCount < controller.TaskCount * 2)
+            {
+                throw new InvalidOperationException("Smoke test failed: online task event feedback is not using enough LimeZu runtime sprites.");
+            }
+
+            if (controller.LimeZuRoomPropSpriteElementCount < 75)
+            {
+                throw new InvalidOperationException("Smoke test failed: online room dressing is not using enough LimeZu room prop sprites.");
+            }
+
+            if (controller.TaskEventFeedbackMarkerCount < controller.TaskCount * 4)
+            {
+                throw new InvalidOperationException("Smoke test failed: online task stations do not expose enough event feedback markers.");
+            }
+
+            if (controller.HudButtonSfxFeedbackCount < 18)
+            {
+                throw new InvalidOperationException("Smoke test failed: online HUD buttons did not attach hover SFX feedback.");
+            }
 
             if (controller.FreeCharacterAdapterCount < controller.HumanPlayerCount + controller.BotCount)
             {
@@ -689,6 +743,11 @@ namespace GanglandUndercover.Editor
                 throw new InvalidOperationException("Smoke test failed: stage-two body report and forensic scene feedback did not become visible.");
             }
 
+            if (controller.KillSceneVfxCount < 4)
+            {
+                throw new InvalidOperationException("Smoke test failed: stage-two kill scene VFX was not authored on body visuals.");
+            }
+
             controller.EditorForceMeetingForSmokeTest();
             controller.EditorRefreshWorldVisualsForSmokeTest();
 
@@ -732,6 +791,11 @@ namespace GanglandUndercover.Editor
             if (!controller.EditorForceStageOneBlackoutShotForSmokeTest())
             {
                 throw new InvalidOperationException("Smoke test failed: vertical slice stage-one blackout camera shot did not configure.");
+            }
+
+            if (controller.BlackoutVfxCount < 5)
+            {
+                throw new InvalidOperationException("Smoke test failed: blackout VFX markers were not authored in the world.");
             }
 
             if (controller.EvidenceMilestoneIndex < 0)

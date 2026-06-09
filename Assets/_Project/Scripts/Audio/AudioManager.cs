@@ -46,6 +46,8 @@ namespace GanglandUndercover.Audio
     /// </summary>
     public sealed class AudioManager : MonoBehaviour
     {
+        public const string KenneySfxResourceRoot = "Audio/SFX/Kenney";
+
         // ── Singleton ──────────────────────────────────────────
         private static AudioManager _instance;
         public static AudioManager Instance => _instance;
@@ -188,29 +190,39 @@ namespace GanglandUndercover.Audio
         /// </summary>
         private void AutoLoadMissingClips()
         {
-            void TryLoad(ref AudioClip field, string path)
+            void TryLoadDirect(ref AudioClip field, string path)
             {
-                if (field == null) field = Resources.Load<AudioClip>(path);
+                if (field != null) return;
+
+                field = Resources.Load<AudioClip>(path);
             }
-            TryLoad(ref uiClickClip,          "Audio/SFX/SFX_UIClick");
-            TryLoad(ref footstepClip,         "Audio/SFX/SFX_Footstep");
-            TryLoad(ref killClip,             "Audio/SFX/SFX_Kill");
-            TryLoad(ref bodyReportClip,       "Audio/SFX/SFX_BodyReport");
-            TryLoad(ref reportClip,           "Audio/SFX/SFX_Report");
-            TryLoad(ref meetingStartClip,     "Audio/SFX/SFX_MeetingStart");
-            TryLoad(ref voteCastClip,         "Audio/SFX/SFX_VoteCast");
-            TryLoad(ref playerEliminatedClip, "Audio/SFX/SFX_PlayerEliminated");
-            TryLoad(ref taskCompleteClip,     "Audio/SFX/SFX_TaskComplete");
-            TryLoad(ref sabotageClip,         "Audio/SFX/SFX_Sabotage");
-            TryLoad(ref victoryClip,          "Audio/SFX/SFX_Victory");
-            TryLoad(ref defeatClip,           "Audio/SFX/SFX_Defeat");
-            TryLoad(ref emergencyClip,        "Audio/SFX/SFX_Emergency");
-            TryLoad(ref ventOpenClip,         "Audio/SFX/SFX_VentOpen");
-            TryLoad(ref ventCloseClip,        "Audio/SFX/SFX_VentClose");
-            TryLoad(ref buttonHoverClip,      "Audio/SFX/SFX_ButtonHover");
-            TryLoad(ref mainMenuBGM,          "Audio/BGM/BGM_MainMenu");
-            TryLoad(ref inGameBGM,            "Audio/BGM/BGM_InGame");
-            TryLoad(ref meetingBGM,           "Audio/BGM/BGM_Meeting");
+
+            void TryLoadSfx(ref AudioClip field, string path)
+            {
+                if (field != null) return;
+
+                string fileName = path.Substring(path.LastIndexOf('/') + 1);
+                field = Resources.Load<AudioClip>($"{KenneySfxResourceRoot}/{fileName}") ?? Resources.Load<AudioClip>(path);
+            }
+            TryLoadSfx(ref uiClickClip,          "Audio/SFX/SFX_UIClick");
+            TryLoadSfx(ref footstepClip,         "Audio/SFX/SFX_Footstep");
+            TryLoadSfx(ref killClip,             "Audio/SFX/SFX_Kill");
+            TryLoadSfx(ref bodyReportClip,       "Audio/SFX/SFX_BodyReport");
+            TryLoadSfx(ref reportClip,           "Audio/SFX/SFX_Report");
+            TryLoadSfx(ref meetingStartClip,     "Audio/SFX/SFX_MeetingStart");
+            TryLoadSfx(ref voteCastClip,         "Audio/SFX/SFX_VoteCast");
+            TryLoadSfx(ref playerEliminatedClip, "Audio/SFX/SFX_PlayerEliminated");
+            TryLoadSfx(ref taskCompleteClip,     "Audio/SFX/SFX_TaskComplete");
+            TryLoadSfx(ref sabotageClip,         "Audio/SFX/SFX_Sabotage");
+            TryLoadSfx(ref victoryClip,          "Audio/SFX/SFX_Victory");
+            TryLoadSfx(ref defeatClip,           "Audio/SFX/SFX_Defeat");
+            TryLoadSfx(ref emergencyClip,        "Audio/SFX/SFX_Emergency");
+            TryLoadSfx(ref ventOpenClip,         "Audio/SFX/SFX_VentOpen");
+            TryLoadSfx(ref ventCloseClip,        "Audio/SFX/SFX_VentClose");
+            TryLoadSfx(ref buttonHoverClip,      "Audio/SFX/SFX_ButtonHover");
+            TryLoadDirect(ref mainMenuBGM,       "Audio/BGM/BGM_MainMenu");
+            TryLoadDirect(ref inGameBGM,         "Audio/BGM/BGM_InGame");
+            TryLoadDirect(ref meetingBGM,        "Audio/BGM/BGM_Meeting");
         }
 
         // ── E2: BGM cross-fade ──
@@ -331,9 +343,10 @@ namespace GanglandUndercover.Audio
             if (inspectorClip != null)
                 return inspectorClip;
 
-            // Fallback: auto-load from Resources/Audio/SFX/
+            // Fallback: prefer curated Kenney SFX, then legacy Resources/Audio/SFX clips.
             string resourcePath = $"Audio/SFX/SFX_{effect}";
-            return LoadFromResources(resourcePath);
+            string kenneyResourcePath = $"{KenneySfxResourceRoot}/SFX_{effect}";
+            return LoadFromResources(kenneyResourcePath) ?? LoadFromResources(resourcePath);
         }
 
         private AudioClip ResolveMusicClip(MusicTrack track)

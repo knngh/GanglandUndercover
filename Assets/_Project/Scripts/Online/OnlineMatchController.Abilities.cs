@@ -176,7 +176,7 @@ namespace GanglandUndercover.Online
 
         public void AccumulateMoleIntel(ulong moleId, int amount)
         {
-            if (!HasAbility(moleId, AbilityType.SabotageCooldownReduce)) return;
+            // C1-1: Fixed — removed wrong SabotageCooldownReduce gate, role check is sufficient
             if (!players.TryGetValue(moleId, out var state) || GetPrivateRole(moleId) != OnlineRole.Mole) return;
 
             if (!_moleIntel.ContainsKey(moleId))
@@ -210,6 +210,22 @@ namespace GanglandUndercover.Online
         public bool CanRemoteSurveil(ulong clientId)
         {
             return HasAbility(clientId, AbilityType.RemoteSurveillance);
+        }
+
+        public bool CanClientWatchCamera(ulong clientId, Vector2 cameraCenter)
+        {
+            if (phase != OnlineMatchPhase.Action)
+                return false;
+
+            if (!players.TryGetValue(clientId, out OnlinePlayerState state) || !state.Alive)
+                return false;
+
+            if (CanRemoteSurveil(clientId))
+                return true;
+
+            float range = ruleSet != null ? Mathf.Max(2.5f, ruleSet.InteractionRange) : 2.5f;
+            Vector2 playerPosition = new Vector2(state.Position.x, state.Position.y);
+            return Vector2.Distance(playerPosition, cameraCenter) <= range;
         }
 
         // ============================================================

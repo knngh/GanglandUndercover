@@ -1,0 +1,85 @@
+{
+  "source": "LimeZu purchased itch.io packs",
+  "importedAt": "2026-06-09",
+  "policy": "Curated runtime slice only. Full purchased packs remain in .asset_cache/purchased/limezu and are not imported wholesale into Unity.",
+  "packs": [
+    {
+      "name": "Modern Interiors",
+      "cachePath": ".asset_cache/purchased/limezu/modern-interiors/moderninteriors-win",
+      "runtimeFiles": [
+        "Interiors/floors/room-builder-floors-16.png",
+        "Interiors/floors/floors-only-16.png",
+        "Interiors/room-props/Modern_Interiors_48x48_HospitalResonanceMachine.png",
+        "Interiors/room-props/Modern_Interiors_48x48_HospitalScreenColor.png",
+        "Interiors/room-props/Modern_Interiors_48x48_HospitalSink.png",
+        "Interiors/room-props/Modern_Interiors_48x48_HospitalXrayMachine.png",
+        "Interiors/room-props/Modern_Interiors_48x48_HospitalXrayScreen.png",
+        "Interiors/room-props/Modern_Interiors_48x48_MorgueFreezerCorpseDoor.png",
+        "Interiors/room-props/Modern_Interiors_48x48_SecurityCameraWallRight.png",
+        "Interiors/room-props/Modern_Interiors_48x48_SafeGold.png",
+        "Interiors/room-props/Modern_Interiors_48x48_SafeBucks.png",
+        "Interiors/room-props/Modern_Interiors_48x48_GroceryCheckoutRoller.png",
+        "Interiors/room-props/Modern_Interiors_48x48_GroceryGlassFridge.png",
+        "Interiors/room-props/Modern_Interiors_48x48_ButcherCarcass.png",
+        "Interiors/room-props/Modern_Interiors_48x48_KitchenBbq.png",
+        "Interiors/room-props/Modern_Interiors_48x48_KitchenOven4Cookers.png",
+        "Interiors/room-props/Modern_Interiors_48x48_KitchenSink.png",
+        "Interiors/room-props/Modern_Interiors_48x48_CanteenCakeFridge.png",
+        "Interiors/room-props/Modern_Interiors_48x48_ShoppingCartBlueFull.png",
+        "Interiors/room-props/Modern_Interiors_48x48_OldTv.png",
+        "Interiors/room-props/Modern_Interiors_48x48_JailLockerFull.png",
+        "Interiors/room-props/Modern_Interiors_48x48_MuseumLaserHorizontal.png",
+        "Interiors/room-props/Modern_Interiors_48x48_Trapdoor.png",
+        "Interiors/room-props/Modern_Interiors_48x48_TicketMachine.png",
+        "Interiors/room-props/Modern_Interiors_48x48_HospitalTvReportage.png",
+        "Interiors/room-props/Modern_Interiors_48x48_FishCuttingSink.png",
+        "Interiors/walls/room-builder-walls-16.png",
+        "Interiors/walls/interiors-tilesets-16.png"
+      ]
+    },
+    {
+      "name": "Modern Exteriors",
+      "cachePath": ".asset_cache/purchased/limezu/modern-exteriors/modernexteriors-win",
+      "runtimeFiles": [
+        "Exteriors/floors/asphalt-48-a.png",
+        "Exteriors/landmarks/ME_Singles_Office_48x48_Building_Sign_1.png",
+        "Exteriors/landmarks/ME_Singles_Office_48x48_Building_Sign_2.png",
+        "Exteriors/landmarks/22_Post_Office_48x48_Blue_Mailbox_1_Front.png",
+        "Exteriors/landmarks/22_Post_Office_48x48_Truck_Front.png",
+        "Exteriors/landmarks/24_Additional_Houses_Modern_House_Umbrella_Right_48x48.png",
+        "Exteriors/landmarks/24_Additional_Houses_Modern_House_Tiny_Table_With_Drinks_1_48x48.png",
+        "Exteriors/landmarks/22_Post_Office_48x48_Big_Single_Package_1.png",
+        "Exteriors/landmarks/ME_Singles_Office_48x48_Air_Duct_3_Roof_Prop.png",
+        "Exteriors/landmarks/24_Additional_Houses_Modern_House_Door_Open_48x48.png",
+        "Exteriors/landmarks/24_Additional_Houses_Modern_House_Potted_Plant_48x48.png",
+        "Exteriors/room-props/24_Additional_Houses_Post_Apocalyptic_House_Generator_2_48x48.png",
+        "Exteriors/room-props/ME_Singles_Subway_and_Train_Station_48x48_Monitor.png",
+        "Exteriors/room-props/ME_Singles_Subway_and_Train_Station_48x48_Control_Big_Monitor.png",
+        "Exteriors/room-props/ME_Singles_Worksite_48x48_Tool_Box_1.png",
+        "Exteriors/room-props/ME_Singles_Worksite_48x48_Light_Tower_1.png",
+        "Exteriors/room-props/ME_Singles_Subway_and_Train_Station_48x48_SOS_Box.png",
+        "Exteriors/room-props/ME_Singles_Camping_48x48_Chair_1.png",
+        "Exteriors/room-props/ME_Singles_Camping_48x48_Benched_Table_2.png",
+        "Exteriors/room-props/ME_Singles_City_Props_48x48_Black_Closed_Trash_Can.png",
+        "Exteriors/room-props/ME_Singles_City_Props_48x48_Trash_Pile_1.png"
+      ]
+    },
+    {
+      "name": "Modern Office Revamped",
+      "cachePath": ".asset_cache/purchased/limezu/modern-office/Modern_Office_Revamped_v1",
+      "runtimeFiles": [
+        "Office/floors/room-builder-office-16.png",
+        "Office/walls/office-walls-floors-16.png",
+        "Office/props/modern-office-16.png",
+        "Office/room-props/Modern_Office_Singles_48x48_170_Whiteboard.png",
+        "Office/room-props/Modern_Office_Singles_48x48_172_ChartBoard.png",
+        "Office/room-props/Modern_Office_Singles_48x48_176_ServerRack.png",
+        "Office/room-props/Modern_Office_Singles_48x48_178_Printer.png",
+        "Office/room-props/Modern_Office_Singles_48x48_203_CornerDesk.png",
+        "Office/room-props/Modern_Office_Singles_48x48_227_DualMonitorDesk.png",
+        "Office/room-props/Modern_Office_Singles_48x48_276_CctvCameraRig.png",
+        "Office/room-props/Modern_Office_Singles_48x48_320_MedicalCart.png"
+      ]
+    }
+  ]
+}

@@ -6,6 +6,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
+using GanglandUndercover.Art;
 using GanglandUndercover.Core;
 using GanglandUndercover.SocialDeduction;
 
@@ -72,24 +73,78 @@ namespace GanglandUndercover.Online
         public int UnderworldPassageCount => _underworldPassageCount;
         public int ModelPrefabCacheCount => _modelPrefabCache.Count;
         public int RuntimeMeshMaterialCount => _runtimeMeshMaterials.Count;
+        public int OperationalLightingElementCount => _operationalLightingElementCount;
+        public int LimeZuFirstScreenSpriteElementCount => _limeZuFirstScreenSpriteElementCount;
+        public int LimeZuTaskMiniGameSetPieceSpriteElementCount => _limeZuTaskMiniGameSetPieceSpriteElementCount;
+        public int LimeZuTaskStationSpriteElementCount => _limeZuTaskStationSpriteElementCount;
+        public int LimeZuLandmarkSpriteElementCount => _limeZuLandmarkSpriteElementCount;
+        public int LimeZuTaskEventFeedbackSpriteElementCount => _limeZuTaskEventFeedbackSpriteElementCount;
+        public int LimeZuRoomPropSpriteElementCount => _limeZuRoomPropSpriteElementCount;
+        public string FloorTileResourcePath => FloorTileResourcePathInternal;
+        public string WallTileResourcePath => WallTileResourcePathInternal;
+
+        private int _operationalLightingElementCount;
+        private int _limeZuFirstScreenSpriteElementCount;
+        private int _limeZuTaskMiniGameSetPieceSpriteElementCount;
+        private int _limeZuTaskStationSpriteElementCount;
+        private int _limeZuLandmarkSpriteElementCount;
+        private int _limeZuTaskEventFeedbackSpriteElementCount;
+        private int _limeZuRoomPropSpriteElementCount;
+
+        private enum LimeZuVisualCounter
+        {
+            FirstScreen,
+            TaskMiniGameSetPiece,
+            TaskStation,
+            Landmark,
+            TaskEventFeedback,
+            RoomProp
+        }
 
         // Tiled floor/wall CC0 sprites (loaded on demand)
+        private const string LimeZuFloorTilePath = "Sprites/Tilesets/LimeZu/Exteriors/floors/asphalt-48-a";
+        private const string LimeZuWallTilePath = "Sprites/Tilesets/LimeZu/Interiors/walls/room-builder-walls-16";
+        private const string FallbackFloorTilePath = "Sprites/Tilesets/Harbour/floors/cargo-bay";
+        private const string FallbackWallTilePath = "Sprites/Tilesets/Harbour/walls/indtech_000_000";
         private Sprite _floorTileSprite;
         private Sprite _wallTileSprite;
+        private string _floorTileResourcePath;
+        private string _wallTileResourcePath;
         private Sprite FloorTileSprite => _floorTileSprite ?? (_floorTileSprite = LoadFloorTile());
         private Sprite WallTileSprite  => _wallTileSprite  ?? (_wallTileSprite  = LoadWallTile());
+        private string FloorTileResourcePathInternal => _floorTileResourcePath ?? string.Empty;
+        private string WallTileResourcePathInternal => _wallTileResourcePath ?? string.Empty;
 
         private Sprite LoadFloorTile()
         {
-            var tex = Resources.Load<Texture2D>("Sprites/Tilesets/Harbour/floors/cargo-bay");
-            if (tex != null) { tex.filterMode = FilterMode.Point; return Sprite.Create(tex, new Rect(0,0,tex.width,tex.height), new Vector2(0.5f,0.5f), 32f); }
+            var sprite = LoadRuntimeTileSprite(LimeZuFloorTilePath, 48f, out _floorTileResourcePath);
+            if (sprite != null) return sprite;
+            sprite = LoadRuntimeTileSprite(FallbackFloorTilePath, 32f, out _floorTileResourcePath);
+            if (sprite != null) return sprite;
             return _roundedRectSprite;
         }
+
         private Sprite LoadWallTile()
         {
-            var tex = Resources.Load<Texture2D>("Sprites/Tilesets/Harbour/walls/indtech_000_000");
-            if (tex != null) { tex.filterMode = FilterMode.Point; return Sprite.Create(tex, new Rect(0,0,tex.width,tex.height), new Vector2(0.5f,0.5f), 32f); }
+            var sprite = LoadRuntimeTileSprite(LimeZuWallTilePath, 16f, out _wallTileResourcePath);
+            if (sprite != null) return sprite;
+            sprite = LoadRuntimeTileSprite(FallbackWallTilePath, 32f, out _wallTileResourcePath);
+            if (sprite != null) return sprite;
             return _roundedRectSprite;
+        }
+
+        private static Sprite LoadRuntimeTileSprite(string resourcePath, float pixelsPerUnit, out string loadedResourcePath)
+        {
+            var tex = Resources.Load<Texture2D>(resourcePath);
+            if (tex == null)
+            {
+                loadedResourcePath = string.Empty;
+                return null;
+            }
+
+            tex.filterMode = FilterMode.Point;
+            loadedResourcePath = resourcePath;
+            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), pixelsPerUnit);
         }
 
         public void Initialize(GameObject worldRoot, OnlineMapService mapService,
@@ -138,20 +193,22 @@ namespace GanglandUndercover.Online
 
         private void CreateVerticalSliceGroundPlan()
         {
+            Sprite2DAssetCache.Ensure();
+
             Color asphalt = new Color(0.085f, 0.1f, 0.102f, 1f);
             Color sidewalk = new Color(0.18f, 0.19f, 0.18f, 1f);
             Color wetReflection = new Color(0.08f, 0.18f, 0.2f, 0.72f);
             Color guide = new Color(0.82f, 0.68f, 0.2f, 1f);
 
-            CreateShapeProp("VerticalSlice Ground central wet plaza", RoundedRectSprite, new Vector3(-1.25f, -0.56f, -0.31f), new Vector3(5.4f, 2.58f, 0.08f), asphalt);
-            CreateShapeProp("VerticalSlice Ground meeting ring stone apron", CircleSprite, new Vector3(-1.18f, -0.72f, -0.285f), new Vector3(1.62f, 1.18f, 0.08f), new Color(0.28f, 0.3f, 0.28f, 1f));
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu central wet plaza", Sprite2DAssetCache.CorridorTile, Sprite2DAssetCache.CorridorTileResourcePath, new Vector3(-1.25f, -0.56f, -0.31f), new Vector3(5.4f, 2.58f, 0.08f), asphalt);
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu meeting ring stone apron", Sprite2DAssetCache.FloorTileAlt, Sprite2DAssetCache.FloorTileAltResourcePath, new Vector3(-1.18f, -0.72f, -0.285f), new Vector3(1.62f, 1.18f, 0.08f), new Color(0.28f, 0.3f, 0.28f, 1f));
             CreateShapeProp("VerticalSlice Ground meeting ring wet core", CircleSprite, new Vector3(-1.18f, -0.72f, -0.27f), new Vector3(1.05f, 0.78f, 0.08f), wetReflection);
-            CreateShapeProp("VerticalSlice Ground cctv corridor", RoundedRectSprite, new Vector3(-6.6f, 0.68f, -0.3f), new Vector3(3.5f, 1.02f, 0.08f), sidewalk);
-            CreateShapeProp("VerticalSlice Ground cha chaan teng threshold", RoundedRectSprite, new Vector3(-4.42f, 1.34f, -0.29f), new Vector3(2.55f, 1.24f, 0.08f), new Color(0.26f, 0.16f, 0.08f, 1f));
-            CreateShapeProp("VerticalSlice Ground night market bend", RoundedRectSprite, new Vector3(-0.4f, 2.56f, -0.3f), new Vector3(4.4f, 1.08f, 0.08f), new Color(0.19f, 0.12f, 0.1f, 1f));
-            CreateRotatedProp("VerticalSlice Ground non-square diagonal market cut", new Vector3(1.72f, 2.05f, -0.295f), new Vector3(2.6f, 0.78f, 0.08f), new Color(0.16f, 0.12f, 0.1f, 1f), -18f);
-            CreateShapeProp("VerticalSlice Ground alley approach", RoundedRectSprite, new Vector3(3.88f, -1.25f, -0.305f), new Vector3(3.7f, 0.96f, 0.08f), new Color(0.13f, 0.11f, 0.1f, 1f));
-            CreateRotatedProp("VerticalSlice Ground service lane diagonal", new Vector3(5.45f, 0.42f, -0.302f), new Vector3(2.95f, 0.7f, 0.08f), new Color(0.11f, 0.13f, 0.13f, 1f), 22f);
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu cctv corridor", Sprite2DAssetCache.CorridorTile, Sprite2DAssetCache.CorridorTileResourcePath, new Vector3(-6.6f, 0.68f, -0.3f), new Vector3(3.5f, 1.02f, 0.08f), sidewalk);
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu cha chaan teng threshold", Sprite2DAssetCache.FloorTileAlt, Sprite2DAssetCache.FloorTileAltResourcePath, new Vector3(-4.42f, 1.34f, -0.29f), new Vector3(2.55f, 1.24f, 0.08f), new Color(0.26f, 0.16f, 0.08f, 1f));
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu night market bend", Sprite2DAssetCache.FloorTileAlt, Sprite2DAssetCache.FloorTileAltResourcePath, new Vector3(-0.4f, 2.56f, -0.3f), new Vector3(4.4f, 1.08f, 0.08f), new Color(0.19f, 0.12f, 0.1f, 1f));
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu non-square diagonal market cut", Sprite2DAssetCache.FloorTileAlt, Sprite2DAssetCache.FloorTileAltResourcePath, new Vector3(1.72f, 2.05f, -0.295f), new Vector3(2.6f, 0.78f, 0.08f), new Color(0.16f, 0.12f, 0.1f, 1f), -18f);
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu alley approach", Sprite2DAssetCache.CorridorTile, Sprite2DAssetCache.CorridorTileResourcePath, new Vector3(3.88f, -1.25f, -0.305f), new Vector3(3.7f, 0.96f, 0.08f), new Color(0.13f, 0.11f, 0.1f, 1f));
+            CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu service lane diagonal", Sprite2DAssetCache.CorridorTile, Sprite2DAssetCache.CorridorTileResourcePath, new Vector3(5.45f, 0.42f, -0.302f), new Vector3(2.95f, 0.7f, 0.08f), new Color(0.11f, 0.13f, 0.13f, 1f), 22f);
 
             RegisterWalkableArea(new Vector3(-1.25f, -0.56f, 0f), new Vector3(5.7f, 2.78f, 0.08f));
             RegisterWalkableArea(new Vector3(-6.6f, 0.68f, 0f), new Vector3(3.8f, 1.18f, 0.08f));
@@ -197,16 +254,18 @@ namespace GanglandUndercover.Online
 
         private void CreateVerticalSliceRoomShell(string id, string label, Vector3 center, Vector3 size, Color color)
         {
+            Sprite2DAssetCache.Ensure();
+
             Color wall = new Color(0.045f, 0.052f, 0.055f, 1f);
             Color trim = new Color(0.64f, 0.58f, 0.42f, 1f);
             float halfWidth = size.x * 0.5f;
             float halfHeight = size.y * 0.5f;
 
-            CreateShapeProp("VerticalSlice Room " + id + " playable shell floor", RoundedRectSprite, center + new Vector3(0f, 0f, -0.11f), size, Darken(color, 0.82f));
-            CreateMeshBoxProp("VerticalSlice Room " + id + " back wall volume", center + new Vector3(0f, halfHeight, 0.28f), new Vector3(size.x, 0.1f, size.z), wall);
-            CreateMeshBoxProp("VerticalSlice Room " + id + " left return wall", center + new Vector3(-halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y, size.z * 0.86f), wall);
-            CreateMeshBoxProp("VerticalSlice Room " + id + " right return wall", center + new Vector3(halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y * 0.72f, size.z * 0.8f), wall);
-            CreateMeshBoxProp("VerticalSlice Room " + id + " gold trim back", center + new Vector3(0f, halfHeight - 0.08f, 0.56f), new Vector3(size.x * 0.78f, 0.04f, 0.06f), trim);
+            CreateLimeZuFirstScreenProp("VerticalSlice Room " + id + " LimeZu playable shell floor", Sprite2DAssetCache.FloorTileAlt, Sprite2DAssetCache.FloorTileAltResourcePath, center + new Vector3(0f, 0f, -0.11f), size, Darken(color, 0.82f));
+            CreateLimeZuFirstScreenProp("VerticalSlice Room " + id + " LimeZu back wall volume", Sprite2DAssetCache.WallBlock, Sprite2DAssetCache.WallBlockResourcePath, center + new Vector3(0f, halfHeight, 0.28f), new Vector3(size.x, 0.1f, size.z), wall);
+            CreateLimeZuFirstScreenProp("VerticalSlice Room " + id + " LimeZu left return wall", Sprite2DAssetCache.WallBlock, Sprite2DAssetCache.WallBlockResourcePath, center + new Vector3(-halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y, size.z * 0.86f), wall);
+            CreateLimeZuFirstScreenProp("VerticalSlice Room " + id + " LimeZu right return wall", Sprite2DAssetCache.WallBlock, Sprite2DAssetCache.WallBlockResourcePath, center + new Vector3(halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y * 0.72f, size.z * 0.8f), wall);
+            CreateLimeZuFirstScreenProp("VerticalSlice Room " + id + " LimeZu gold trim back", Sprite2DAssetCache.PropCabinet, Sprite2DAssetCache.PropCabinetResourcePath, center + new Vector3(0f, halfHeight - 0.08f, 0.56f), new Vector3(size.x * 0.78f, 0.04f, 0.06f), trim);
             CreateMeshBoxProp("VerticalSlice Room " + id + " sign board " + label, center + new Vector3(0f, halfHeight - 0.15f, 0.72f), new Vector3(Mathf.Min(size.x * 0.55f, 1.2f), 0.045f, 0.18f), new Color(0.08f, 0.64f, 0.82f, 1f));
             RegisterWalkableArea(center, new Vector3(size.x * 0.82f, size.y * 0.78f, 0.08f));
             CreateWorldLabelAt(label, MapService.ScaleMapPosition(center + new Vector3(0f, halfHeight + 0.12f, -0.08f)), 0.065f);
@@ -214,22 +273,14 @@ namespace GanglandUndercover.Online
 
         private void CreateVerticalSliceTaskMiniGameLayer()
         {
+            Sprite2DAssetCache.Ensure();
+
             (string id, Vector3 position, Color accent)[] tasks =
             {
                 ("CCTV", new Vector3(-9.45f, 2.12f, 0.18f), new Color(0.08f, 0.62f, 0.86f, 1f)),
                 ("Recorder", new Vector3(-4.8f, 1.32f, 0.18f), new Color(0.92f, 0.48f, 0.12f, 1f)),
                 ("Breaker", new Vector3(8.72f, 5.18f, 0.18f), new Color(0.96f, 0.76f, 0.12f, 1f)),
                 ("Plate", new Vector3(1.74f, -3.62f, 0.18f), new Color(0.36f, 0.72f, 0.95f, 1f))
-            };
-
-            string[] propPaths =
-            {
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Screen_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Keypad_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Papers_03",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Table_01",
-                AssetStoreResourceRoot + "Synty/PolygonGeneric/Prefabs/Props/SM_Gen_Prop_Switch_01",
-                AssetStoreResourceRoot + "SimplePoly City - Low Poly Assets/Prefab/Vehicles/Vehicle with Static Wheels/Vehicle_Police Car"
             };
 
             for (int taskIndex = 0; taskIndex < tasks.Length; taskIndex++)
@@ -239,7 +290,15 @@ namespace GanglandUndercover.Online
                 for (int i = 0; i < 6; i++)
                 {
                     Vector3 offset = new Vector3(-0.52f + i * 0.21f, i % 2 == 0 ? 0.24f : -0.24f, 0.1f);
-                    CreateAssetStoreProp("VerticalSlice Task " + tasks[taskIndex].id + " physical prop " + i, propPaths[(taskIndex + i) % propPaths.Length], tasks[taskIndex].position + offset, new Vector3(0.22f, 0.18f, 0.24f), i * 14f, false);
+                    int assetIndex = taskIndex + i;
+                    CreateLimeZuTaskSetPieceChild(root.transform,
+                        "VerticalSlice Task " + tasks[taskIndex].id + " LimeZu physical prop " + i,
+                        LimeZuSetPieceSprite(assetIndex),
+                        LimeZuSetPieceResourcePath(assetIndex),
+                        offset,
+                        new Vector3(0.22f, 0.18f, 0.24f),
+                        i % 2 == 0 ? Color.white : new Color(0.82f, 0.9f, 0.92f, 1f),
+                        i * 14f);
                 }
 
                 for (int i = 0; i < 5; i++)
@@ -254,8 +313,8 @@ namespace GanglandUndercover.Online
             GameObject root = new GameObject(name);
             root.transform.SetParent(_worldRoot.transform, false);
             root.transform.position = MapService.ScaleMapPosition(position);
-            CreateMeshBoxChild(root.transform, "VerticalSlice Task physical base", new Vector3(0f, 0f, 0.12f), new Vector3(0.96f, 0.62f, 0.18f), new Color(0.055f, 0.065f, 0.07f, 1f));
-            CreateMeshBoxChild(root.transform, "VerticalSlice Task lit face", new Vector3(0f, 0.29f, 0.3f), new Vector3(0.72f, 0.035f, 0.2f), accent);
+            CreateLimeZuTaskSetPieceChild(root.transform, "VerticalSlice Task LimeZu physical base", Sprite2DAssetCache.PropDesk, Sprite2DAssetCache.PropDeskResourcePath, new Vector3(0f, 0f, 0.12f), new Vector3(0.96f, 0.62f, 0.18f), new Color(0.92f, 0.96f, 0.98f, 1f));
+            CreateLimeZuTaskSetPieceChild(root.transform, "VerticalSlice Task LimeZu lit face", Sprite2DAssetCache.PropCabinet, Sprite2DAssetCache.PropCabinetResourcePath, new Vector3(0f, 0.29f, 0.3f), new Vector3(0.72f, 0.035f, 0.2f), accent);
             CreateMeshBoxChild(root.transform, "VerticalSlice Task interaction halo", new Vector3(0f, 0f, -0.02f), new Vector3(1.08f, 0.72f, 0.035f), new Color(accent.r, accent.g, accent.b, 0.22f));
             SetSortingFromZ(root);
             return root;
@@ -263,6 +322,8 @@ namespace GanglandUndercover.Online
 
         private void CreateVerticalSliceStageOneFirstScreenLayer()
         {
+            Sprite2DAssetCache.Ensure();
+
             Color shadow = new Color(0.018f, 0.022f, 0.024f, 0.82f);
             Color wetBlue = new Color(0.05f, 0.2f, 0.24f, 0.68f);
             Color tileA = new Color(0.14f, 0.148f, 0.138f, 1f);
@@ -273,32 +334,32 @@ namespace GanglandUndercover.Online
             {
                 float x = -6.2f + i * 0.72f;
                 float y = -1.38f + Mathf.Sin(i * 0.74f) * 0.42f;
-                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen wet route reflection " + i, new Vector3(x, y, -0.17f), new Vector3(0.46f, 0.03f, 0.035f), i % 2 == 0 ? wetBlue : Darken(wetBlue, 0.78f), i % 2 == 0 ? -11f : 17f);
+                CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu wet route reflection " + i, Sprite2DAssetCache.CorridorTile, Sprite2DAssetCache.CorridorTileResourcePath, new Vector3(x, y, -0.17f), new Vector3(0.46f, 0.03f, 0.035f), i % 2 == 0 ? wetBlue : Darken(wetBlue, 0.78f), i % 2 == 0 ? -11f : 17f);
             }
 
             for (int i = 0; i < 18; i++)
             {
                 float x = -5.5f + i * 0.62f;
                 float y = i % 2 == 0 ? 0.28f : -0.52f;
-                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen brass curb marker " + i, new Vector3(x, y, -0.08f), new Vector3(0.38f, 0.026f, 0.032f), brass, i % 2 == 0 ? -9f : 12f);
+                CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu brass curb marker " + i, Sprite2DAssetCache.WallBlock, Sprite2DAssetCache.WallBlockResourcePath, new Vector3(x, y, -0.08f), new Vector3(0.38f, 0.026f, 0.032f), brass, i % 2 == 0 ? -9f : 12f);
             }
 
             for (int i = 0; i < 12; i++)
             {
                 Vector3 position = new Vector3(-6.35f + i * 1.12f, 2.22f + Mathf.Sin(i * 0.48f) * 0.42f, 0.66f);
-                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen authored awning shadow " + i, position, new Vector3(1.42f, 0.12f, 0.28f), shadow, i % 2 == 0 ? -6f : 9f);
+                CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu authored awning shadow " + i, Sprite2DAssetCache.PropCabinet, Sprite2DAssetCache.PropCabinetResourcePath, position, new Vector3(1.42f, 0.12f, 0.28f), shadow, i % 2 == 0 ? -6f : 9f);
             }
 
             for (int i = 0; i < 12; i++)
             {
                 Vector3 position = new Vector3(-4.7f + i * 0.82f, 1.92f + Mathf.Sin(i * 0.55f) * 0.28f, 0.58f);
                 Color color = i % 3 == 0 ? new Color(0.04f, 0.7f, 0.94f, 1f) : i % 3 == 1 ? new Color(0.92f, 0.18f, 0.42f, 1f) : brass;
-                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen hanging neon strip " + i, position, new Vector3(0.42f, 0.034f, 0.12f), color, i % 2 == 0 ? -5f : 7f);
+                CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu hanging neon strip " + i, Sprite2DAssetCache.PropDesk, Sprite2DAssetCache.PropDeskResourcePath, position, new Vector3(0.42f, 0.034f, 0.12f), color, i % 2 == 0 ? -5f : 7f);
             }
 
             for (int i = 0; i < 8; i++)
             {
-                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen non-square paving slab " + i, new Vector3(-3.85f + i * 1.15f, -1.02f + Mathf.Sin(i) * 0.56f, -0.245f), new Vector3(1.05f, 0.32f, 0.045f), i % 2 == 0 ? tileA : tileB, i % 2 == 0 ? -12f : 8f);
+                CreateLimeZuFirstScreenProp("VerticalSlice Stage1 FirstScreen LimeZu non-square paving slab " + i, Sprite2DAssetCache.FloorTileAlt, Sprite2DAssetCache.FloorTileAltResourcePath, new Vector3(-3.85f + i * 1.15f, -1.02f + Mathf.Sin(i) * 0.56f, -0.245f), new Vector3(1.05f, 0.32f, 0.045f), i % 2 == 0 ? tileA : tileB, i % 2 == 0 ? -12f : 8f);
             }
         }
 
@@ -383,6 +444,11 @@ namespace GanglandUndercover.Online
             CreateMeshBoxProp("VerticalSlice Stage1 Blackout repair target amber pad", blackoutCore + new Vector3(0f, -0.58f, 0.06f), new Vector3(0.92f, 0.045f, 0.06f), amber);
             CreateMeshBoxProp("VerticalSlice Stage1 Blackout visible cable A", blackoutCore + new Vector3(-0.42f, 0.05f, 0.54f), new Vector3(0.56f, 0.028f, 0.05f), cyan, -14f);
             CreateMeshBoxProp("VerticalSlice Stage1 Blackout visible cable B", blackoutCore + new Vector3(0.34f, -0.06f, 0.5f), new Vector3(0.5f, 0.028f, 0.05f), gang, 16f);
+            CreateMeshBoxProp("Blackout VFX emergency red wash", blackoutCore + new Vector3(0f, 0.08f, 1.08f), new Vector3(1.32f, 0.04f, 0.08f), new Color(1f, 0.04f, 0.02f, 0.8f));
+            CreateMeshBoxProp("Blackout VFX breaker spark left", blackoutCore + new Vector3(-0.36f, 0.3f, 0.86f), new Vector3(0.24f, 0.026f, 0.05f), amber, -22f);
+            CreateMeshBoxProp("Blackout VFX breaker spark right", blackoutCore + new Vector3(0.42f, 0.22f, 0.86f), new Vector3(0.22f, 0.026f, 0.05f), cyan, 20f);
+            CreateMeshBoxProp("Blackout VFX cable short flash", blackoutCore + new Vector3(0.02f, -0.18f, 0.64f), new Vector3(0.64f, 0.035f, 0.05f), new Color(0.86f, 0.92f, 1f, 0.92f), -4f);
+            CreateShapeProp("Blackout VFX dimmed vision pool", SoftCircleSprite, blackoutCore + new Vector3(0f, -0.18f, 0.04f), new Vector3(1.72f, 1.08f, 0.04f), new Color(0f, 0f, 0f, 0.28f));
 
             for (int i = 0; i < 8; i++)
             {
@@ -480,6 +546,126 @@ namespace GanglandUndercover.Online
             renderer.color = color;
             renderer.sortingOrder = SortingOrderForZ(spriteObject.transform.position.z);
             return spriteObject;
+        }
+
+        private void ResetLimeZuVisualCounters()
+        {
+            _limeZuFirstScreenSpriteElementCount = 0;
+            _limeZuTaskMiniGameSetPieceSpriteElementCount = 0;
+            _limeZuTaskStationSpriteElementCount = 0;
+            _limeZuLandmarkSpriteElementCount = 0;
+            _limeZuTaskEventFeedbackSpriteElementCount = 0;
+            _limeZuRoomPropSpriteElementCount = 0;
+        }
+
+        private static bool IsRuntimeLimeZuResource(string resourcePath)
+        {
+            return !string.IsNullOrEmpty(resourcePath)
+                && resourcePath.IndexOf("Sprites/Tilesets/LimeZu/", StringComparison.Ordinal) >= 0;
+        }
+
+        private void CountLimeZuSpriteUse(string resourcePath, LimeZuVisualCounter counter)
+        {
+            if (!IsRuntimeLimeZuResource(resourcePath)) return;
+
+            switch (counter)
+            {
+                case LimeZuVisualCounter.FirstScreen:
+                    _limeZuFirstScreenSpriteElementCount++;
+                    break;
+                case LimeZuVisualCounter.TaskMiniGameSetPiece:
+                    _limeZuTaskMiniGameSetPieceSpriteElementCount++;
+                    break;
+                case LimeZuVisualCounter.TaskStation:
+                    _limeZuTaskStationSpriteElementCount++;
+                    break;
+                case LimeZuVisualCounter.Landmark:
+                    _limeZuLandmarkSpriteElementCount++;
+                    break;
+                case LimeZuVisualCounter.TaskEventFeedback:
+                    _limeZuTaskEventFeedbackSpriteElementCount++;
+                    break;
+                case LimeZuVisualCounter.RoomProp:
+                    _limeZuRoomPropSpriteElementCount++;
+                    break;
+            }
+        }
+
+        private GameObject CreateLimeZuProp(string propName, Sprite sprite, string resourcePath, Vector3 position,
+            Vector3 scale, Color color, LimeZuVisualCounter counter, float rotationDegrees = 0f, bool solid = false)
+        {
+            GameObject prop = CreateShapeProp(propName, sprite, position, scale, color);
+            prop.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees);
+            SetSortingFromZ(prop);
+
+            if (solid)
+            {
+                RegisterSolidObstacle(position, scale);
+                AttachPhysicsCollider(prop, scale, false);
+            }
+
+            CountLimeZuSpriteUse(resourcePath, counter);
+            return prop;
+        }
+
+        private GameObject CreateLimeZuChild(Transform parent, string objectName, Sprite sprite, string resourcePath,
+            Vector3 localPosition, Vector3 scale, Color color, LimeZuVisualCounter counter,
+            float rotationDegrees = 0f)
+        {
+            GameObject child = CreateSpriteChild(parent, objectName, sprite, localPosition, scale, color);
+            child.transform.localRotation = Quaternion.Euler(0f, 0f, rotationDegrees);
+            SetSortingFromZ(child);
+            CountLimeZuSpriteUse(resourcePath, counter);
+            return child;
+        }
+
+        private GameObject CreateLimeZuFirstScreenProp(string propName, Sprite sprite, string resourcePath,
+            Vector3 position, Vector3 scale, Color color, float rotationDegrees = 0f, bool solid = false)
+        {
+            return CreateLimeZuProp(propName, sprite, resourcePath, position, scale, color,
+                LimeZuVisualCounter.FirstScreen, rotationDegrees, solid);
+        }
+
+        private GameObject CreateLimeZuTaskSetPieceChild(Transform parent, string objectName, Sprite sprite,
+            string resourcePath, Vector3 localPosition, Vector3 scale, Color color, float rotationDegrees = 0f)
+        {
+            return CreateLimeZuChild(parent, objectName, sprite, resourcePath, localPosition, scale, color,
+                LimeZuVisualCounter.TaskMiniGameSetPiece, rotationDegrees);
+        }
+
+        private GameObject CreateLimeZuTaskStationChild(Transform parent, string objectName, Sprite sprite,
+            string resourcePath, Vector3 localPosition, Vector3 scale, Color color, float rotationDegrees = 0f)
+        {
+            return CreateLimeZuChild(parent, objectName, sprite, resourcePath, localPosition, scale, color,
+                LimeZuVisualCounter.TaskStation, rotationDegrees);
+        }
+
+        private GameObject CreateLimeZuLandmarkProp(string propName, Sprite sprite, string resourcePath,
+            Vector3 position, Vector3 scale, Color color, float rotationDegrees = 0f)
+        {
+            return CreateLimeZuProp(propName, sprite, resourcePath, position, scale, color,
+                LimeZuVisualCounter.Landmark, rotationDegrees);
+        }
+
+        private GameObject CreateLimeZuTaskEventFeedbackChild(Transform parent, string objectName, Sprite sprite,
+            string resourcePath, Vector3 localPosition, Vector3 scale, Color color, float rotationDegrees = 0f)
+        {
+            return CreateLimeZuChild(parent, objectName, sprite, resourcePath, localPosition, scale, color,
+                LimeZuVisualCounter.TaskEventFeedback, rotationDegrees);
+        }
+
+        private GameObject CreateLimeZuRoomProp(string propName, Sprite sprite, string resourcePath,
+            Vector3 position, Vector3 scale, Color color, float rotationDegrees = 0f, bool solid = false)
+        {
+            return CreateLimeZuProp(propName, sprite, resourcePath, position, scale, color,
+                LimeZuVisualCounter.RoomProp, rotationDegrees, solid);
+        }
+
+        private GameObject CreateLimeZuRoomPropAt(string propName, Sprite sprite, string resourcePath,
+            Vector3 basePosition, Vector3 offset, Vector3 scale, float rotationDegrees = 0f, bool solid = false)
+        {
+            return CreateLimeZuRoomProp(propName, sprite, resourcePath, basePosition + offset,
+                scale, Color.white, rotationDegrees, solid);
         }
 
         public static Sprite CreateRoundedRectSprite(string spriteName, int size, int radius)
@@ -1211,6 +1397,60 @@ namespace GanglandUndercover.Online
         //  TASK VISUALS
         // ====================================================================
 
+        private static Sprite LimeZuSetPieceSprite(int index)
+        {
+            Sprite2DAssetCache.Ensure();
+            switch (Mathf.Abs(index) % 5)
+            {
+                case 0: return Sprite2DAssetCache.PropDesk;
+                case 1: return Sprite2DAssetCache.PropCabinet;
+                case 2: return Sprite2DAssetCache.PropEvidenceBox;
+                case 3: return Sprite2DAssetCache.WallBlock;
+                default: return Sprite2DAssetCache.FloorTileAlt;
+            }
+        }
+
+        private static string LimeZuSetPieceResourcePath(int index)
+        {
+            Sprite2DAssetCache.Ensure();
+            switch (Mathf.Abs(index) % 5)
+            {
+                case 0: return Sprite2DAssetCache.PropDeskResourcePath;
+                case 1: return Sprite2DAssetCache.PropCabinetResourcePath;
+                case 2: return Sprite2DAssetCache.PropEvidenceBoxResourcePath;
+                case 3: return Sprite2DAssetCache.WallBlockResourcePath;
+                default: return Sprite2DAssetCache.FloorTileAltResourcePath;
+            }
+        }
+
+        private static Sprite TaskLimeZuSpriteForMode(int mode)
+        {
+            Sprite2DAssetCache.Ensure();
+            switch (mode)
+            {
+                case 0: return Sprite2DAssetCache.PropCabinet;
+                case 1: return Sprite2DAssetCache.PropDesk;
+                case 2: return Sprite2DAssetCache.PropEvidenceBox;
+                case 3: return Sprite2DAssetCache.PropDesk;
+                case 4: return Sprite2DAssetCache.PropEvidenceBox;
+                default: return Sprite2DAssetCache.PropCabinet;
+            }
+        }
+
+        private static string TaskLimeZuResourcePathForMode(int mode)
+        {
+            Sprite2DAssetCache.Ensure();
+            switch (mode)
+            {
+                case 0: return Sprite2DAssetCache.PropCabinetResourcePath;
+                case 1: return Sprite2DAssetCache.PropDeskResourcePath;
+                case 2: return Sprite2DAssetCache.PropEvidenceBoxResourcePath;
+                case 3: return Sprite2DAssetCache.PropDeskResourcePath;
+                case 4: return Sprite2DAssetCache.PropEvidenceBoxResourcePath;
+                default: return Sprite2DAssetCache.PropCabinetResourcePath;
+            }
+        }
+
         /// <summary>RGB accent colour for each task-type template.</summary>
         public static Color TaskPanelAccent(int taskId)
         {
@@ -1241,14 +1481,17 @@ namespace GanglandUndercover.Online
             root.transform.position = pos;
             root.transform.localScale = scale;
 
-            GameObject body = CreateSpriteObject("任务底座", sprite, color);
+            string resourcePath = TaskVisualResourcePath(task.Id);
+            GameObject body = CreateSpriteObject("LimeZu TaskStation body", sprite, Color.white);
             body.transform.SetParent(root.transform, false);
             body.transform.localPosition = Vector3.zero;
             body.transform.localScale = Vector3.one;
+            CountLimeZuSpriteUse(resourcePath, LimeZuVisualCounter.TaskStation);
             SetSortingFromZ(root);
 
             CreateWorldLabel(root.transform, label, new Vector3(0f, 0.3f, 0.02f), 0.08f);
             CreateTaskEquipment(root, task);
+            CreateTaskEventFeedbackLayer(root.transform, color);
 
             // M3: Interactive highlight halo — expands when player is near
             GameObject halo = CreateSpriteObject("交互光晕", _softCircleSprite, new Color(color.r, color.g, color.b, 0.12f));
@@ -1259,6 +1502,39 @@ namespace GanglandUndercover.Online
             if (haloRenderer != null) haloRenderer.sortingOrder = -1; // Behind task body
 
             return root;
+        }
+
+        private void CreateTaskEventFeedbackLayer(Transform parent, Color accent)
+        {
+            Sprite2DAssetCache.Ensure();
+
+            GameObject damaged = new GameObject("破坏标记");
+            damaged.transform.SetParent(parent, false);
+            damaged.transform.localPosition = new Vector3(0f, 0f, 0.18f);
+            damaged.transform.localScale = Vector3.one;
+
+            CreateLimeZuTaskEventFeedbackChild(damaged.transform, "事件反馈 LimeZu 破坏设备盖板",
+                Sprite2DAssetCache.LandmarkAirDuct, Sprite2DAssetCache.LandmarkAirDuctResourcePath,
+                new Vector3(0f, 0.02f, 0.025f), new Vector3(0.42f, 0.22f, 0.035f),
+                Color.white, 7f);
+            CreateSpriteChild(damaged.transform, "事件反馈 破坏火花 A", _diamondSprite,
+                new Vector3(-0.26f, 0.18f, 0.03f), new Vector3(0.16f, 0.16f, 0.04f),
+                new Color(0.95f, 0.16f, 0.08f, 0.95f));
+            CreateSpriteChild(damaged.transform, "事件反馈 破坏火花 B", _diamondSprite,
+                new Vector3(0.24f, 0.14f, 0.04f), new Vector3(0.12f, 0.12f, 0.04f),
+                new Color(1f, 0.64f, 0.08f, 0.9f));
+            CreateSpriteChild(damaged.transform, "事件反馈 破坏烟雾", _softCircleSprite,
+                new Vector3(0f, -0.08f, 0.02f), new Vector3(0.74f, 0.36f, 0.04f),
+                new Color(0.08f, 0.08f, 0.08f, 0.46f));
+            CreateLimeZuTaskEventFeedbackChild(parent, "事件反馈 LimeZu 现场证物包",
+                Sprite2DAssetCache.LandmarkPackage, Sprite2DAssetCache.LandmarkPackageResourcePath,
+                new Vector3(-0.36f, -0.25f, 0.055f), new Vector3(0.24f, 0.2f, 0.035f),
+                Color.white, -8f);
+            CreateSpriteChild(parent, "事件反馈 现场可疑足迹", _capsuleSprite,
+                new Vector3(0.34f, -0.26f, 0.04f), new Vector3(0.22f, 0.055f, 0.03f),
+                new Color(accent.r, accent.g, accent.b, 0.52f));
+
+            damaged.SetActive(false);
         }
 
         public void SetTaskVisualState(GameObject visual, OnlineTaskState task)
@@ -1286,9 +1562,12 @@ namespace GanglandUndercover.Online
 
         public static Sprite TaskVisualSprite(int taskId)
         {
-            // Placeholder: returns null so CreateSpriteObject will use default roundedRectSprite.
-            // M3 2D rendering switch will provide real per-task sprites here.
-            return null;
+            return TaskLimeZuSpriteForMode(TaskTemplateMode(taskId));
+        }
+
+        public static string TaskVisualResourcePath(int taskId)
+        {
+            return TaskLimeZuResourcePathForMode(TaskTemplateMode(taskId));
         }
 
         private void CreateTaskEquipment(GameObject root, OnlineTaskState task)
@@ -1302,10 +1581,21 @@ namespace GanglandUndercover.Online
             if (parent == null) return;
             Color accent = TaskPanelAccent(taskId);
             int mode = taskId % 7;
+            string stationResourcePath = TaskVisualResourcePath(taskId);
+
+            CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment asset base",
+                TaskVisualSprite(taskId), stationResourcePath, new Vector3(0f, 0f, 0.035f),
+                new Vector3(0.34f, 0.22f, 0.05f), Color.white);
+            CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment asset trim",
+                Sprite2DAssetCache.WallBlock, Sprite2DAssetCache.WallBlockResourcePath, new Vector3(0f, 0.12f, 0.055f),
+                new Vector3(0.28f, 0.055f, 0.035f), new Color(accent.r, accent.g, accent.b, 0.9f));
 
             switch (mode)
             {
                 case 0: // Wire / panel
+                    CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment CCTV cabinet",
+                        Sprite2DAssetCache.PropCabinet, Sprite2DAssetCache.PropCabinetResourcePath,
+                        new Vector3(0f, 0.08f, 0.07f), new Vector3(0.2f, 0.11f, 0.035f), Color.white);
                     CreatePropChild(parent, "终端面板", new Vector3(0f, 0.06f, 0.04f),
                         new Vector3(0.28f, 0.14f, 0.08f), Darken(accent, 0.7f), PrimitiveType.Cube);
                     CreatePropChild(parent, "终端屏幕", new Vector3(0f, 0.08f, 0.06f),
@@ -1316,6 +1606,9 @@ namespace GanglandUndercover.Online
                         new Vector3(0.02f, 0.1f, 0.02f), new Color(0.22f, 0.22f, 0.82f, 1f), PrimitiveType.Cylinder);
                     break;
                 case 1: // Keypad
+                    CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment keypad desk",
+                        Sprite2DAssetCache.PropDesk, Sprite2DAssetCache.PropDeskResourcePath,
+                        new Vector3(0f, 0.02f, 0.07f), new Vector3(0.22f, 0.12f, 0.035f), Color.white);
                     CreatePropChild(parent, "键盘基座", new Vector3(0f, 0.02f, 0.04f),
                         new Vector3(0.22f, 0.12f, 0.06f), Darken(accent, 0.6f), PrimitiveType.Cube);
                     for (int r = 0; r < 3; r++)
@@ -1325,6 +1618,9 @@ namespace GanglandUndercover.Online
                             new Vector3(0.03f, 0.02f, 0.02f), accent, PrimitiveType.Cube);
                     break;
                 case 2: // Scanner
+                    CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment evidence scanner",
+                        Sprite2DAssetCache.PropEvidenceBox, Sprite2DAssetCache.PropEvidenceBoxResourcePath,
+                        new Vector3(0f, 0.03f, 0.07f), new Vector3(0.24f, 0.11f, 0.035f), Color.white);
                     CreatePropChild(parent, "扫描台", new Vector3(0f, 0.02f, 0.05f),
                         new Vector3(0.28f, 0.08f, 0.1f), Darken(accent, 0.5f), PrimitiveType.Cube);
                     CreatePropChild(parent, "扫描线", new Vector3(0f, 0.06f, 0.08f),
@@ -1332,24 +1628,36 @@ namespace GanglandUndercover.Online
                         PrimitiveType.Cylinder);
                     break;
                 case 3: // Download / screen
+                    CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment office terminal",
+                        Sprite2DAssetCache.PropDesk, Sprite2DAssetCache.PropDeskResourcePath,
+                        new Vector3(0f, 0.03f, 0.07f), new Vector3(0.22f, 0.12f, 0.035f), Color.white);
                     CreatePropChild(parent, "显示器基座", new Vector3(0f, 0f, 0.04f),
                         new Vector3(0.12f, 0.06f, 0.08f), Darken(accent, 0.5f), PrimitiveType.Cube);
                     CreatePropChild(parent, "显示器屏幕", new Vector3(0f, 0.02f, 0.08f),
                         new Vector3(0.18f, 0.1f, 0.02f), accent, PrimitiveType.Cube);
                     break;
                 case 4: // Memory / card
+                    CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment evidence tray",
+                        Sprite2DAssetCache.PropEvidenceBox, Sprite2DAssetCache.PropEvidenceBoxResourcePath,
+                        new Vector3(0f, 0.04f, 0.07f), new Vector3(0.18f, 0.12f, 0.035f), Color.white);
                     CreatePropChild(parent, "读卡器", new Vector3(0f, 0.02f, 0.05f),
                         new Vector3(0.1f, 0.06f, 0.04f), Darken(accent, 0.5f), PrimitiveType.Cube);
                     CreatePropChild(parent, "卡片", new Vector3(0f, 0.06f, 0.06f),
                         new Vector3(0.06f, 0.04f, 0.01f), accent, PrimitiveType.Cube);
                     break;
                 case 5: // Breaker / switch
+                    CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment breaker cabinet",
+                        Sprite2DAssetCache.PropCabinet, Sprite2DAssetCache.PropCabinetResourcePath,
+                        new Vector3(0f, 0.05f, 0.07f), new Vector3(0.2f, 0.13f, 0.035f), Color.white);
                     CreatePropChild(parent, "开关面板", new Vector3(0f, 0.04f, 0.04f),
                         new Vector3(0.14f, 0.08f, 0.04f), Darken(accent, 0.6f), PrimitiveType.Cube);
                     CreatePropChild(parent, "开关杆", new Vector3(0f, 0.06f, 0.06f),
                         new Vector3(0.02f, 0.08f, 0.02f), accent, PrimitiveType.Cylinder);
                     break;
                 default: // Evidence tray
+                    CreateLimeZuTaskStationChild(parent, "LimeZu TaskStation equipment archive tray",
+                        Sprite2DAssetCache.PropEvidenceBox, Sprite2DAssetCache.PropEvidenceBoxResourcePath,
+                        new Vector3(0f, 0.04f, 0.07f), new Vector3(0.18f, 0.12f, 0.035f), Color.white);
                     CreatePropChild(parent, "证物盘", new Vector3(0f, 0.02f, 0.04f),
                         new Vector3(0.16f, 0.1f, 0.06f), Darken(accent, 0.5f), PrimitiveType.Cube);
                     CreatePropChild(parent, "证物袋", new Vector3(0f, 0.04f, 0.05f),
@@ -1399,15 +1707,18 @@ namespace GanglandUndercover.Online
             return root;
         }
 
-        public GameObject CreateBodyVisual(OnlineBodyState body)
+        public GameObject CreateBodyVisual(OnlineBodyState body, Sprite characterSprite = null)
         {
             GameObject root = new GameObject("尸体 cid" + body.VictimClientId + " bid" + body.Id);
             root.transform.SetParent(_worldRoot.transform, false);
             root.transform.position = _mapService.ScaleMapPosition(body.Position);
             root.transform.localScale = new Vector3(1.04f, 0.52f, 0.08f);
 
-            CreateSpriteChild(root.transform, "尸体轮廓", _roundedRectSprite, Vector3.zero,
-                new Vector3(0.26f, 0.16f, 0.06f), new Color(0.72f, 0.08f, 0.06f, 0.8f));
+            // Body base — use character sprite if available, otherwise red rectangle
+            Sprite bodyBase = characterSprite ?? _roundedRectSprite;
+            Color bodyColor = characterSprite != null ? Color.white : new Color(0.72f, 0.08f, 0.06f, 0.8f);
+            CreateSpriteChild(root.transform, "尸体轮廓", bodyBase, Vector3.zero,
+                new Vector3(0.26f, 0.16f, 0.06f), bodyColor);
 
             CreateSpriteChild(root.transform, "尸体标记", _diamondSprite, new Vector3(0f, 0.14f, 0.02f),
                 new Vector3(0.08f, 0.08f, 0.02f), new Color(1f, 0.12f, 0.08f, 0.9f));
@@ -1430,6 +1741,18 @@ namespace GanglandUndercover.Online
             CreateSpriteChild(root.transform, "Stage2 Forensic scene boundary", _circleSprite,
                 new Vector3(0f, 0f, 0.01f), new Vector3(0.46f, 0.32f, 0.01f),
                 new Color(1f, 0.72f, 0.08f, 0.16f));
+            CreateSpriteChild(root.transform, "Stage2 Kill VFX impact slash", _diamondSprite,
+                new Vector3(-0.04f, 0.02f, 0.06f), new Vector3(0.18f, 0.05f, 0.01f),
+                new Color(1f, 0.08f, 0.04f, 0.84f));
+            CreateSpriteChild(root.transform, "Stage2 Kill VFX blood scatter", Sprite2DAssetCache.BloodSplatter,
+                new Vector3(0.08f, -0.04f, 0.055f), new Vector3(0.18f, 0.18f, 0.01f),
+                new Color(1f, 1f, 1f, 0.78f));
+            CreateSpriteChild(root.transform, "Stage2 Kill VFX evidence package", Sprite2DAssetCache.LandmarkPackage,
+                new Vector3(-0.18f, -0.02f, 0.055f), new Vector3(0.1f, 0.08f, 0.01f),
+                Color.white);
+            CreateSpriteChild(root.transform, "Stage2 Kill VFX witness light cone", _softCircleSprite,
+                new Vector3(0f, 0.04f, 0.02f), new Vector3(0.38f, 0.18f, 0.01f),
+                new Color(0.95f, 0.16f, 0.08f, 0.22f));
 
             SetSortingFromZ(root);
             return root;
@@ -2011,6 +2334,7 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void BuildDistrictMap()
         {
+            ResetLimeZuVisualCounters();
             CreateFloor();
             CreateRoadNetwork();
             CreateMapStructureLayer();
@@ -2028,8 +2352,7 @@ namespace GanglandUndercover.Online
             CreateCommercialArtAdapterLayer();
             CreateVerticalSliceProductionLayer();
 
-            // A5: 霓虹光斑装饰
-            CreateNeonDecor();
+            CreateOperationalLightingLayer();
         }
 
         /// <summary>
@@ -2038,6 +2361,7 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void BuildLegacyShipMap()
         {
+            ResetLimeZuVisualCounters();
             CreateShipFloor();
             CreateShipCorridors();
             CreateCorridorVolumeLayer();
@@ -2054,23 +2378,57 @@ namespace GanglandUndercover.Online
             CreateVerticalSliceProductionLayer();
         }
 
-        // ── A5: 霓虹光斑装饰 ──
-        private void CreateNeonDecor()
+        private void CreateOperationalLightingLayer()
         {
-            Color[] neons = { new Color(0.92f, 0.28f, 0.52f, 1f), new Color(0.18f, 0.72f, 0.92f, 1f), new Color(0.92f, 0.70f, 0.15f, 1f) };
-            Vector3[] spots =
+            _operationalLightingElementCount = 0;
+
+            Color coldWash = new Color(0.16f, 0.28f, 0.32f, 0.22f);
+            Color commandBlue = new Color(0.16f, 0.38f, 0.58f, 0.58f);
+            Color amber = new Color(0.76f, 0.58f, 0.2f, 0.68f);
+            Color restrictedRed = new Color(0.62f, 0.16f, 0.12f, 0.56f);
+            Color lowWhite = new Color(0.72f, 0.78f, 0.72f, 0.36f);
+
+            CreateOperationalLightWash("指挥车冷光洗地", new Vector3(0f, -4.58f, -0.11f), new Vector3(4.6f, 1.55f, 0.04f), commandBlue);
+            CreateOperationalLightWash("监控室屏幕反光", new Vector3(-9.22f, 1.75f, -0.1f), new Vector3(2.05f, 1.28f, 0.04f), coldWash);
+            CreateOperationalLightWash("海关查验顶灯", new Vector3(-5.02f, 5.18f, -0.1f), new Vector3(2.2f, 1.32f, 0.04f), lowWhite);
+            CreateOperationalLightWash("证物库冷链光", new Vector3(-8.58f, -5.02f, -0.1f), new Vector3(2.15f, 1.12f, 0.04f), coldWash);
+            CreateOperationalLightWash("地下诊所隔离光", new Vector3(6.12f, -5.04f, -0.1f), new Vector3(2.2f, 1.08f, 0.04f), new Color(0.22f, 0.42f, 0.34f, 0.24f));
+
+            Vector3[] perimeterLights =
             {
-                new Vector3(-4.5f, 2.1f, 0.7f), new Vector3(3.8f, 3.5f, 0.7f), new Vector3(6.5f, -1.8f, 0.7f),
-                new Vector3(-6.0f, -3.2f, 0.7f), new Vector3(-0.5f, -4.2f, 0.7f), new Vector3(4.0f, 0.5f, 0.7f),
-                new Vector3(-2.8f, -1.5f, 0.7f), new Vector3(7.0f, 2.2f, 0.7f),
+                new Vector3(-10.28f, 4.28f, -0.05f),
+                new Vector3(-8.42f, 4.28f, -0.05f),
+                new Vector3(-5.48f, 4.28f, -0.05f),
+                new Vector3(-4.48f, 4.28f, -0.05f),
+                new Vector3(8.32f, 4.16f, -0.05f),
+                new Vector3(9.42f, 4.16f, -0.05f),
+                new Vector3(-7.18f, -5.04f, -0.05f),
+                new Vector3(6.12f, -4.02f, -0.05f)
             };
-            for (int i = 0; i < spots.Length; i++)
+
+            for (int i = 0; i < perimeterLights.Length; i++)
             {
-                Color c = neons[i % neons.Length];
-                c.a = UnityEngine.Random.Range(0.25f, 0.55f);
-                CreateShapeProp("霓虹" + i, _roundedRectSprite, spots[i],
-                    new Vector3(0.25f + i * 0.02f, 0.05f, 0.04f), c);
+                Color color = i < 4 ? amber : restrictedRed;
+                CreateOperationalStrip("封控灯带 " + i, perimeterLights[i], new Vector3(0.52f, 0.035f, 0.05f), color);
             }
+
+            for (int i = 0; i < 6; i++)
+            {
+                float x = -4.9f + i * 1.95f;
+                CreateOperationalStrip("主走廊低位地灯 " + i, new Vector3(x, -0.48f, -0.04f), new Vector3(0.48f, 0.028f, 0.05f), lowWhite);
+            }
+        }
+
+        private void CreateOperationalLightWash(string name, Vector3 position, Vector3 scale, Color color)
+        {
+            CreateShapeProp("行动照明 " + name, _softCircleSprite, position, scale, color);
+            _operationalLightingElementCount++;
+        }
+
+        private void CreateOperationalStrip(string name, Vector3 position, Vector3 scale, Color color)
+        {
+            CreateShapeProp("行动照明 " + name, _roundedRectSprite, position, scale, color);
+            _operationalLightingElementCount++;
         }
 
         // ── Private implementation ──
@@ -2640,6 +2998,15 @@ namespace GanglandUndercover.Online
             CreateProp("行李 X 光带", new Vector3(-4.38f, 4.92f, 0.08f), new Vector3(0.9f, 0.18f, 0.12f), new Color(0.08f, 0.08f, 0.09f, 1f));
             CreatePrimitiveProp("X 光滚轮 A", PrimitiveType.Cylinder, new Vector3(-4.72f, 4.92f, 0.11f), new Vector3(0.05f, 0.05f, 0.05f), new Color(0.5f, 0.5f, 0.46f, 1f));
             CreatePrimitiveProp("X 光滚轮 B", PrimitiveType.Cylinder, new Vector3(-4.08f, 4.92f, 0.11f), new Vector3(0.05f, 0.05f, 0.05f), new Color(0.5f, 0.5f, 0.46f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 海关票据机", Sprite2DAssetCache.InteriorRoomPropTicketMachine,
+                Sprite2DAssetCache.InteriorRoomPropTicketMachineResourcePath, new Vector3(-5.16f, 4.82f, 0.3f),
+                new Vector3(0.42f, 0.5f, 0.08f), Color.white, -2f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 海关 X 光检查台", Sprite2DAssetCache.InteriorRoomPropGroceryCheckoutRoller,
+                Sprite2DAssetCache.InteriorRoomPropGroceryCheckoutRollerResourcePath, new Vector3(-4.36f, 4.9f, 0.3f),
+                new Vector3(0.62f, 0.5f, 0.08f), Color.white, 1f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 海关储物柜", Sprite2DAssetCache.InteriorRoomPropJailLockerFull,
+                Sprite2DAssetCache.InteriorRoomPropJailLockerFullResourcePath, new Vector3(-5.78f, 5.88f, 0.32f),
+                new Vector3(0.42f, 0.58f, 0.08f), Color.white, 3f, true);
         }
 
         private void CreateCctvRoomDressing()
@@ -2659,6 +3026,15 @@ namespace GanglandUndercover.Online
             CreateProp("咖啡杯", new Vector3(-9.9f, 1.22f, 0.19f), new Vector3(0.1f, 0.1f, 0.1f), new Color(0.74f, 0.68f, 0.54f, 1f));
             CreateProp("硬盘阵列 A", new Vector3(-8.28f, 1.44f, 0.24f), new Vector3(0.28f, 0.05f, 0.05f), new Color(0.08f, 0.62f, 0.18f, 1f));
             CreateProp("硬盘阵列 B", new Vector3(-8.28f, 1.22f, 0.24f), new Vector3(0.28f, 0.05f, 0.05f), new Color(0.08f, 0.62f, 0.18f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 监控室双屏工作站", Sprite2DAssetCache.OfficeRoomPropDualMonitorDesk,
+                Sprite2DAssetCache.OfficeRoomPropDualMonitorDeskResourcePath, new Vector3(-9.34f, 1.3f, 0.32f),
+                new Vector3(0.72f, 0.8f, 0.08f), Color.white, -2f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 监控室服务器柜", Sprite2DAssetCache.OfficeRoomPropServerRack,
+                Sprite2DAssetCache.OfficeRoomPropServerRackResourcePath, new Vector3(-8.32f, 1.72f, 0.34f),
+                new Vector3(0.46f, 0.7f, 0.08f), Color.white, 1f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 监控室摄像机工作台", Sprite2DAssetCache.OfficeRoomPropCctvCameraRig,
+                Sprite2DAssetCache.OfficeRoomPropCctvCameraRigResourcePath, new Vector3(-9.96f, 1.92f, 0.3f),
+                new Vector3(0.48f, 0.66f, 0.08f), Color.white, 5f);
         }
 
         private void CreateTeaCafeDressing()
@@ -2680,6 +3056,18 @@ namespace GanglandUndercover.Online
             CreateProp("餐牌灯箱", new Vector3(-4.68f, 2.45f, 0.14f), new Vector3(0.72f, 0.07f, 0.18f), new Color(0.92f, 0.72f, 0.26f, 1f));
             CreateProp("厨房炉火", new Vector3(-3.98f, 2.02f, 0.16f), new Vector3(0.16f, 0.07f, 0.08f), new Color(1f, 0.32f, 0.08f, 1f));
             CreateProp("餐具架", new Vector3(-5.58f, 1.42f, 0.18f), new Vector3(0.08f, 0.42f, 0.12f), new Color(0.82f, 0.82f, 0.74f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 茶餐厅蛋糕冰柜", Sprite2DAssetCache.InteriorRoomPropCanteenCakeFridge,
+                Sprite2DAssetCache.InteriorRoomPropCanteenCakeFridgeResourcePath, new Vector3(-3.78f, 1.18f, 0.32f),
+                new Vector3(0.58f, 0.68f, 0.08f), Color.white, -2f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 茶餐厅四眼炉", Sprite2DAssetCache.InteriorRoomPropKitchenOven4Cookers,
+                Sprite2DAssetCache.InteriorRoomPropKitchenOven4CookersResourcePath, new Vector3(-3.96f, 2.08f, 0.3f),
+                new Vector3(0.5f, 0.44f, 0.08f), Color.white, 3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 茶餐厅水槽", Sprite2DAssetCache.InteriorRoomPropKitchenSink,
+                Sprite2DAssetCache.InteriorRoomPropKitchenSinkResourcePath, new Vector3(-5.56f, 1.62f, 0.28f),
+                new Vector3(0.42f, 0.42f, 0.08f), Color.white, -4f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 茶餐厅旧电视", Sprite2DAssetCache.InteriorRoomPropOldTv,
+                Sprite2DAssetCache.InteriorRoomPropOldTvResourcePath, new Vector3(-4.54f, 2.62f, 0.3f),
+                new Vector3(0.38f, 0.4f, 0.08f), Color.white, 6f);
         }
 
         private void CreateNightMarketDressing()
@@ -2708,6 +3096,24 @@ namespace GanglandUndercover.Online
             CreateProp("摊档油桶 B", new Vector3(1.52f, 3.04f, 0.08f), new Vector3(0.16f, 0.16f, 0.18f), new Color(0.1f, 0.18f, 0.22f, 1f));
             CreateProp("夜市布帘", new Vector3(-0.12f, 3.56f, 0.18f), new Vector3(0.52f, 0.08f, 0.1f), new Color(0.2f, 0.34f, 0.68f, 1f));
             CreateProp("霓虹小箭头", new Vector3(0.98f, 3.72f, 0.14f), new Vector3(0.22f, 0.14f, 0.08f), new Color(0.08f, 0.86f, 0.9f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 夜市野餐长桌", Sprite2DAssetCache.RoomPropBenchedTable,
+                Sprite2DAssetCache.RoomPropBenchedTableResourcePath, new Vector3(-1.02f, 2.18f, 0.24f),
+                new Vector3(0.64f, 0.54f, 0.08f), Color.white, -6f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 夜市露营椅 A", Sprite2DAssetCache.RoomPropChair,
+                Sprite2DAssetCache.RoomPropChairResourcePath, new Vector3(-1.78f, 2.36f, 0.24f),
+                new Vector3(0.34f, 0.36f, 0.08f), Color.white, 8f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 夜市露营椅 B", Sprite2DAssetCache.RoomPropChair,
+                Sprite2DAssetCache.RoomPropChairResourcePath, new Vector3(-0.38f, 2.28f, 0.24f),
+                new Vector3(0.34f, 0.36f, 0.08f), Color.white, -10f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 夜市鱼档水槽", Sprite2DAssetCache.InteriorRoomPropFishCuttingSink,
+                Sprite2DAssetCache.InteriorRoomPropFishCuttingSinkResourcePath, new Vector3(-2.08f, 2.46f, 0.3f),
+                new Vector3(0.48f, 0.54f, 0.08f), Color.white, -3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 夜市烧烤炉", Sprite2DAssetCache.InteriorRoomPropKitchenBbq,
+                Sprite2DAssetCache.InteriorRoomPropKitchenBbqResourcePath, new Vector3(1.28f, 3.24f, 0.3f),
+                new Vector3(0.54f, 0.58f, 0.08f), Color.white, 5f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 夜市购物车", Sprite2DAssetCache.InteriorRoomPropShoppingCartBlueFull,
+                Sprite2DAssetCache.InteriorRoomPropShoppingCartBlueFullResourcePath, new Vector3(0.78f, 2.52f, 0.28f),
+                new Vector3(0.38f, 0.44f, 0.08f), Color.white, -8f);
         }
 
         private void CreateFinanceDressing()
@@ -2727,6 +3133,21 @@ namespace GanglandUndercover.Online
             CreateProp("保险柜转盘", new Vector3(5.95f, 2.28f, 0.26f), new Vector3(0.08f, 0.04f, 0.08f), new Color(0.78f, 0.72f, 0.54f, 1f));
             CreateProp("碎纸机", new Vector3(3.35f, 3.15f, 0.06f), new Vector3(0.28f, 0.26f, 0.18f), new Color(0.12f, 0.12f, 0.14f, 1f));
             CreateProp("碎纸袋", new Vector3(3.18f, 3.35f, 0.04f), new Vector3(0.18f, 0.16f, 0.1f), new Color(0.68f, 0.68f, 0.62f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 金融行情监控屏", Sprite2DAssetCache.RoomPropMonitor,
+                Sprite2DAssetCache.RoomPropMonitorResourcePath, new Vector3(4.48f, 2.92f, 0.28f),
+                new Vector3(0.5f, 0.44f, 0.08f), Color.white);
+            CreateLimeZuRoomProp("房间实物 LimeZu 金融主控大屏", Sprite2DAssetCache.RoomPropControlBigMonitor,
+                Sprite2DAssetCache.RoomPropControlBigMonitorResourcePath, new Vector3(5.22f, 2.96f, 0.3f),
+                new Vector3(0.62f, 0.5f, 0.08f), Color.white, 2f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 金融金库现金保险柜", Sprite2DAssetCache.InteriorRoomPropSafeBucks,
+                Sprite2DAssetCache.InteriorRoomPropSafeBucksResourcePath, new Vector3(5.92f, 2.08f, 0.34f),
+                new Vector3(0.48f, 0.48f, 0.08f), Color.white, -2f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 金融金条保险柜", Sprite2DAssetCache.InteriorRoomPropSafeGold,
+                Sprite2DAssetCache.InteriorRoomPropSafeGoldResourcePath, new Vector3(6.42f, 2.28f, 0.32f),
+                new Vector3(0.42f, 0.42f, 0.08f), Color.white, 4f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 金融安防摄像头", Sprite2DAssetCache.InteriorRoomPropSecurityCameraWallRight,
+                Sprite2DAssetCache.InteriorRoomPropSecurityCameraWallRightResourcePath, new Vector3(3.62f, 3.42f, 0.34f),
+                new Vector3(0.32f, 0.34f, 0.08f), Color.white, 12f);
         }
 
         private void CreatePowerRoomDressing()
@@ -2744,6 +3165,21 @@ namespace GanglandUndercover.Online
             CreateProp("红色急停钮", new Vector3(9.72f, 5.36f, 0.25f), new Vector3(0.08f, 0.04f, 0.06f), new Color(0.9f, 0.06f, 0.04f, 1f));
             CreateProp("地面电缆 A", new Vector3(8.68f, 5.05f, 0.01f), new Vector3(1.15f, 0.04f, 0.04f), new Color(0.02f, 0.02f, 0.025f, 1f));
             CreateProp("地面电缆 B", new Vector3(9.15f, 5.35f, 0.01f), new Vector3(0.04f, 0.72f, 0.04f), new Color(0.02f, 0.02f, 0.025f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 电房备用发电机", Sprite2DAssetCache.RoomPropGenerator,
+                Sprite2DAssetCache.RoomPropGeneratorResourcePath, new Vector3(8.22f, 4.92f, 0.28f),
+                new Vector3(0.7f, 0.62f, 0.08f), Color.white, -2f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 电房维修灯塔", Sprite2DAssetCache.RoomPropLightTower,
+                Sprite2DAssetCache.RoomPropLightTowerResourcePath, new Vector3(9.38f, 4.72f, 0.34f),
+                new Vector3(0.52f, 0.76f, 0.08f), Color.white, 3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 电房工具箱", Sprite2DAssetCache.RoomPropToolBox,
+                Sprite2DAssetCache.RoomPropToolBoxResourcePath, new Vector3(9.68f, 4.58f, 0.22f),
+                new Vector3(0.34f, 0.32f, 0.08f), Color.white, -6f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 电房检修陷门", Sprite2DAssetCache.InteriorRoomPropTrapdoor,
+                Sprite2DAssetCache.InteriorRoomPropTrapdoorResourcePath, new Vector3(8.82f, 4.46f, 0.2f),
+                new Vector3(0.46f, 0.42f, 0.08f), Color.white, 1f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 电房安全摄像头", Sprite2DAssetCache.InteriorRoomPropSecurityCameraWallRight,
+                Sprite2DAssetCache.InteriorRoomPropSecurityCameraWallRightResourcePath, new Vector3(9.84f, 5.82f, 0.34f),
+                new Vector3(0.3f, 0.32f, 0.08f), Color.white, -12f);
         }
 
         private void CreateRooftopDressing()
@@ -2758,6 +3194,12 @@ namespace GanglandUndercover.Online
             CreateProp("晾衣绳", new Vector3(9.05f, 1.36f, 0.2f), new Vector3(0.72f, 0.03f, 0.04f), new Color(0.82f, 0.82f, 0.72f, 1f));
             CreateProp("晾晒布 A", new Vector3(8.85f, 1.28f, 0.18f), new Vector3(0.18f, 0.1f, 0.06f), new Color(0.62f, 0.18f, 0.32f, 1f));
             CreateProp("晾晒布 B", new Vector3(9.18f, 1.28f, 0.18f), new Vector3(0.18f, 0.1f, 0.06f), new Color(0.22f, 0.42f, 0.7f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 天台旧电视监控", Sprite2DAssetCache.InteriorRoomPropOldTv,
+                Sprite2DAssetCache.InteriorRoomPropOldTvResourcePath, new Vector3(8.32f, 1.3f, 0.3f),
+                new Vector3(0.34f, 0.38f, 0.08f), Color.white, -8f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 天台暗门", Sprite2DAssetCache.InteriorRoomPropTrapdoor,
+                Sprite2DAssetCache.InteriorRoomPropTrapdoorResourcePath, new Vector3(9.62f, 2.3f, 0.18f),
+                new Vector3(0.42f, 0.4f, 0.08f), Color.white, 2f, true);
         }
 
         private void CreateCommandPostDressing()
@@ -2780,6 +3222,12 @@ namespace GanglandUndercover.Online
             CreateProp("无人机机臂 A", new Vector3(0.96f, -4.62f, 0.18f), new Vector3(0.5f, 0.05f, 0.06f), new Color(0.08f, 0.62f, 0.8f, 1f));
             CreateProp("无人机机臂 B", new Vector3(0.96f, -4.62f, 0.19f), new Vector3(0.05f, 0.34f, 0.06f), new Color(0.08f, 0.62f, 0.8f, 1f));
             CreateProp("警用电池箱", new Vector3(1.62f, -5.72f, 0.06f), new Vector3(0.32f, 0.22f, 0.16f), new Color(0.18f, 0.26f, 0.28f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 指挥行动白板", Sprite2DAssetCache.OfficeRoomPropWhiteboard,
+                Sprite2DAssetCache.OfficeRoomPropWhiteboardResourcePath, new Vector3(-1.18f, -4.82f, 0.32f),
+                new Vector3(0.68f, 0.7f, 0.08f), Color.white, -3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 指挥打印机", Sprite2DAssetCache.OfficeRoomPropPrinter,
+                Sprite2DAssetCache.OfficeRoomPropPrinterResourcePath, new Vector3(-0.52f, -5.64f, 0.28f),
+                new Vector3(0.38f, 0.48f, 0.08f), Color.white, 4f);
         }
 
         private void CreateEvidenceRoomDressing()
@@ -2798,6 +3246,18 @@ namespace GanglandUndercover.Online
             CreateProp("血样冷藏盒", new Vector3(-8.82f, -5.1f, 0.2f), new Vector3(0.2f, 0.12f, 0.06f), new Color(0.68f, 0.08f, 0.08f, 1f));
             CreateProp("证物相片板", new Vector3(-7.72f, -4.58f, 0.16f), new Vector3(0.36f, 0.08f, 0.18f), new Color(0.82f, 0.82f, 0.74f, 1f));
             CreateProp("紫外灯条", new Vector3(-7.52f, -5.02f, 0.22f), new Vector3(0.34f, 0.04f, 0.06f), new Color(0.42f, 0.24f, 0.86f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 证物库封存大包", Sprite2DAssetCache.LandmarkPackage,
+                Sprite2DAssetCache.LandmarkPackageResourcePath, new Vector3(-8.24f, -5.74f, 0.22f),
+                new Vector3(0.42f, 0.36f, 0.08f), Color.white, -4f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 证物库临时投递箱", Sprite2DAssetCache.LandmarkMailbox,
+                Sprite2DAssetCache.LandmarkMailboxResourcePath, new Vector3(-7.66f, -5.76f, 0.22f),
+                new Vector3(0.54f, 0.44f, 0.08f), Color.white, 3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 证物库案件图表板", Sprite2DAssetCache.OfficeRoomPropChartBoard,
+                Sprite2DAssetCache.OfficeRoomPropChartBoardResourcePath, new Vector3(-7.58f, -4.76f, 0.32f),
+                new Vector3(0.62f, 0.66f, 0.08f), Color.white, 2f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 证物库办公打印台", Sprite2DAssetCache.OfficeRoomPropPrinter,
+                Sprite2DAssetCache.OfficeRoomPropPrinterResourcePath, new Vector3(-8.92f, -4.8f, 0.3f),
+                new Vector3(0.4f, 0.48f, 0.08f), Color.white, -5f);
         }
 
         private void CreateBackLaneDressing()
@@ -2817,6 +3277,21 @@ namespace GanglandUndercover.Online
             CreateProp("后巷油污", new Vector3(6.22f, -2.42f, 0.01f), new Vector3(0.54f, 0.14f, 0.04f), new Color(0.02f, 0.025f, 0.02f, 1f));
             CreateProp("外卖箱", new Vector3(4.62f, -2.42f, 0.06f), new Vector3(0.34f, 0.24f, 0.18f), new Color(0.86f, 0.36f, 0.1f, 1f));
             CreateProp("后门铁闩", new Vector3(4.0f, -1.18f, 0.12f), new Vector3(0.08f, 0.52f, 0.08f), new Color(0.5f, 0.5f, 0.46f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 后巷黑色垃圾桶", Sprite2DAssetCache.RoomPropTrashCan,
+                Sprite2DAssetCache.RoomPropTrashCanResourcePath, new Vector3(6.62f, -0.66f, 0.22f),
+                new Vector3(0.42f, 0.4f, 0.08f), Color.white, -4f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 后巷垃圾堆", Sprite2DAssetCache.RoomPropTrashPile,
+                Sprite2DAssetCache.RoomPropTrashPileResourcePath, new Vector3(6.9f, -1.28f, 0.18f),
+                new Vector3(0.48f, 0.38f, 0.08f), Color.white, 7f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 后巷屠宰挂肉", Sprite2DAssetCache.InteriorRoomPropButcherCarcass,
+                Sprite2DAssetCache.InteriorRoomPropButcherCarcassResourcePath, new Vector3(5.08f, -1.02f, 0.32f),
+                new Vector3(0.4f, 0.48f, 0.08f), Color.white, -3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 后巷店铺冰柜", Sprite2DAssetCache.InteriorRoomPropGroceryGlassFridge,
+                Sprite2DAssetCache.InteriorRoomPropGroceryGlassFridgeResourcePath, new Vector3(4.44f, -1.82f, 0.32f),
+                new Vector3(0.42f, 0.58f, 0.08f), Color.white, 5f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 后巷收银滚台", Sprite2DAssetCache.InteriorRoomPropGroceryCheckoutRoller,
+                Sprite2DAssetCache.InteriorRoomPropGroceryCheckoutRollerResourcePath, new Vector3(5.76f, -2.22f, 0.28f),
+                new Vector3(0.52f, 0.42f, 0.08f), Color.white, -7f);
         }
 
         private void CreateClinicDressing()
@@ -2832,6 +3307,36 @@ namespace GanglandUndercover.Online
             CreateProp("药瓶 A", new Vector3(5.08f, -4.3f, 0.25f), new Vector3(0.06f, 0.06f, 0.12f), new Color(0.72f, 0.82f, 0.86f, 1f));
             CreateProp("药瓶 B", new Vector3(5.28f, -4.3f, 0.25f), new Vector3(0.06f, 0.06f, 0.12f), new Color(0.82f, 0.36f, 0.36f, 1f));
             CreateProp("隐蔽病历箱", new Vector3(7.22f, -4.48f, 0.06f), new Vector3(0.34f, 0.24f, 0.18f), new Color(0.42f, 0.28f, 0.18f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所急救 SOS 箱", Sprite2DAssetCache.RoomPropSosBox,
+                Sprite2DAssetCache.RoomPropSosBoxResourcePath, new Vector3(5.52f, -4.34f, 0.28f),
+                new Vector3(0.46f, 0.42f, 0.08f), Color.white);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所监护屏", Sprite2DAssetCache.RoomPropMonitor,
+                Sprite2DAssetCache.RoomPropMonitorResourcePath, new Vector3(6.54f, -4.76f, 0.28f),
+                new Vector3(0.44f, 0.4f, 0.08f), Color.white, 4f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所等候椅", Sprite2DAssetCache.RoomPropChair,
+                Sprite2DAssetCache.RoomPropChairResourcePath, new Vector3(7.18f, -5.76f, 0.2f),
+                new Vector3(0.34f, 0.34f, 0.08f), Color.white, -8f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所医疗推车", Sprite2DAssetCache.OfficeRoomPropMedicalCart,
+                Sprite2DAssetCache.OfficeRoomPropMedicalCartResourcePath, new Vector3(5.94f, -5.12f, 0.34f),
+                new Vector3(0.52f, 0.64f, 0.08f), Color.white, 1f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所角落电脑台", Sprite2DAssetCache.OfficeRoomPropCornerDesk,
+                Sprite2DAssetCache.OfficeRoomPropCornerDeskResourcePath, new Vector3(7.0f, -4.62f, 0.3f),
+                new Vector3(0.52f, 0.62f, 0.08f), Color.white, -4f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所核磁设备", Sprite2DAssetCache.InteriorRoomPropHospitalResonanceMachine,
+                Sprite2DAssetCache.InteriorRoomPropHospitalResonanceMachineResourcePath, new Vector3(5.48f, -5.52f, 0.36f),
+                new Vector3(0.64f, 0.7f, 0.08f), Color.white, -2f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所彩色监护屏", Sprite2DAssetCache.InteriorRoomPropHospitalScreenColor,
+                Sprite2DAssetCache.InteriorRoomPropHospitalScreenColorResourcePath, new Vector3(6.52f, -4.5f, 0.34f),
+                new Vector3(0.42f, 0.44f, 0.08f), Color.white, 3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所 X 光机", Sprite2DAssetCache.InteriorRoomPropHospitalXrayMachine,
+                Sprite2DAssetCache.InteriorRoomPropHospitalXrayMachineResourcePath, new Vector3(6.68f, -5.44f, 0.36f),
+                new Vector3(0.56f, 0.64f, 0.08f), Color.white, 4f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所医用水槽", Sprite2DAssetCache.InteriorRoomPropHospitalSink,
+                Sprite2DAssetCache.InteriorRoomPropHospitalSinkResourcePath, new Vector3(5.16f, -4.74f, 0.34f),
+                new Vector3(0.42f, 0.48f, 0.08f), Color.white, -4f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 诊所太平柜门", Sprite2DAssetCache.InteriorRoomPropMorgueFreezerCorpseDoor,
+                Sprite2DAssetCache.InteriorRoomPropMorgueFreezerCorpseDoorResourcePath, new Vector3(7.42f, -4.98f, 0.32f),
+                new Vector3(0.42f, 0.56f, 0.08f), Color.white, 2f, true);
         }
 
         private void CreateShipFloor()
@@ -3150,12 +3655,21 @@ namespace GanglandUndercover.Online
                     CreateSolidProp("货柜舱封锁箱", room.Center + new Vector3(0.4f, 0.56f, 0.06f), new Vector3(0.62f, 0.28f, 0.2f), new Color(0.78f, 0.55f, 0.08f, 1f));
                     CreateSolidProp("货柜舱吊臂基座", room.Center + new Vector3(1.55f, 0.42f, 0.08f), new Vector3(0.28f, 0.74f, 0.22f), warning);
                     CreateProp("货柜舱吊臂横梁", room.Center + new Vector3(1.2f, 0.72f, 0.2f), new Vector3(0.92f, 0.08f, 0.08f), warning);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 货柜舱购物车", Sprite2DAssetCache.InteriorRoomPropShoppingCartBlueFull,
+                        Sprite2DAssetCache.InteriorRoomPropShoppingCartBlueFullResourcePath, room.Center, new Vector3(-1.22f, -0.44f, 0.28f),
+                        new Vector3(0.34f, 0.42f, 0.08f), -6f);
                     break;
                 case "海关查验区":
                     CreateWallConsoleSet(room, 1);
                     CreateSolidProp("查验舱扫描门", room.Center + new Vector3(0.82f, 0.15f, 0.1f), new Vector3(0.14f, 0.82f, 0.28f), metal);
                     CreateSolidProp("查验舱检查桌", room.Center + new Vector3(-0.46f, 0.12f, 0.07f), new Vector3(0.8f, 0.34f, 0.18f), new Color(0.24f, 0.26f, 0.2f, 1f));
                     CreateProp("查验舱屏幕", room.Center + new Vector3(-0.46f, 0.38f, 0.2f), new Vector3(0.46f, 0.06f, 0.08f), screen);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 查验舱票据机", Sprite2DAssetCache.InteriorRoomPropTicketMachine,
+                        Sprite2DAssetCache.InteriorRoomPropTicketMachineResourcePath, room.Center, new Vector3(-0.92f, -0.42f, 0.28f),
+                        new Vector3(0.34f, 0.42f, 0.08f), -2f);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 查验舱滚台", Sprite2DAssetCache.InteriorRoomPropGroceryCheckoutRoller,
+                        Sprite2DAssetCache.InteriorRoomPropGroceryCheckoutRollerResourcePath, room.Center, new Vector3(0.32f, -0.34f, 0.28f),
+                        new Vector3(0.48f, 0.38f, 0.08f), 2f);
                     break;
                 case "监控室":
                     CreateWallConsoleSet(room, 2);
@@ -3165,12 +3679,27 @@ namespace GanglandUndercover.Online
                     }
 
                     CreateSolidProp("监控操控台", room.Center + new Vector3(-0.15f, -0.18f, 0.07f), new Vector3(0.92f, 0.28f, 0.18f), metal);
+                    CreateLimeZuRoomProp("房间实物 LimeZu 舰内监控双屏工作站", Sprite2DAssetCache.OfficeRoomPropDualMonitorDesk,
+                        Sprite2DAssetCache.OfficeRoomPropDualMonitorDeskResourcePath, room.Center + new Vector3(-0.18f, -0.14f, 0.3f),
+                        new Vector3(0.5f, 0.58f, 0.08f), Color.white, -1f);
+                    CreateLimeZuRoomProp("房间实物 LimeZu 舰内监控服务器柜", Sprite2DAssetCache.OfficeRoomPropServerRack,
+                        Sprite2DAssetCache.OfficeRoomPropServerRackResourcePath, room.Center + new Vector3(0.82f, 0.18f, 0.32f),
+                        new Vector3(0.36f, 0.56f, 0.08f), Color.white, 2f);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内监控安防摄像头", Sprite2DAssetCache.InteriorRoomPropSecurityCameraWallRight,
+                        Sprite2DAssetCache.InteriorRoomPropSecurityCameraWallRightResourcePath, room.Center, new Vector3(-1.0f, 0.56f, 0.34f),
+                        new Vector3(0.26f, 0.3f, 0.08f), 8f);
                     break;
                 case "茶餐厅":
                     CreateWallConsoleSet(room, 3);
                     CreateSolidProp("休息舱吧台", room.Center + new Vector3(-0.78f, 0.08f, 0.07f), new Vector3(0.28f, 1.0f, 0.18f), new Color(0.46f, 0.25f, 0.12f, 1f));
                     CreateBoothSet(room.Center + new Vector3(0.34f, 0.38f, 0.06f), "上");
                     CreateBoothSet(room.Center + new Vector3(0.34f, -0.34f, 0.06f), "下");
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内茶餐厅冰柜", Sprite2DAssetCache.InteriorRoomPropCanteenCakeFridge,
+                        Sprite2DAssetCache.InteriorRoomPropCanteenCakeFridgeResourcePath, room.Center, new Vector3(-1.0f, -0.44f, 0.28f),
+                        new Vector3(0.42f, 0.54f, 0.08f), 2f);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内茶餐厅水槽", Sprite2DAssetCache.InteriorRoomPropKitchenSink,
+                        Sprite2DAssetCache.InteriorRoomPropKitchenSinkResourcePath, room.Center, new Vector3(-0.7f, 0.58f, 0.28f),
+                        new Vector3(0.32f, 0.36f, 0.08f), -4f);
                     break;
                 case "夜市主街":
                     CreateWallConsoleSet(room, 4);
@@ -3179,12 +3708,24 @@ namespace GanglandUndercover.Online
                         CreateSolidProp("情报摊台 " + i, room.Center + new Vector3(-1.15f + i * 1.05f, 0.34f, 0.07f), new Vector3(0.62f, 0.26f, 0.18f), i % 2 == 0 ? new Color(0.62f, 0.12f, 0.1f, 1f) : new Color(0.12f, 0.36f, 0.4f, 1f));
                         CreateProp("情报霓虹牌 " + i, room.Center + new Vector3(-1.15f + i * 1.05f, 0.56f, 0.2f), new Vector3(0.5f, 0.05f, 0.08f), i % 2 == 0 ? new Color(0.96f, 0.22f, 0.52f, 1f) : screen);
                     }
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内夜市烧烤炉", Sprite2DAssetCache.InteriorRoomPropKitchenBbq,
+                        Sprite2DAssetCache.InteriorRoomPropKitchenBbqResourcePath, room.Center, new Vector3(0.96f, -0.32f, 0.28f),
+                        new Vector3(0.42f, 0.48f, 0.08f), 4f);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内夜市鱼档", Sprite2DAssetCache.InteriorRoomPropFishCuttingSink,
+                        Sprite2DAssetCache.InteriorRoomPropFishCuttingSinkResourcePath, room.Center, new Vector3(-1.1f, -0.32f, 0.28f),
+                        new Vector3(0.38f, 0.42f, 0.08f), -5f);
                     break;
                 case "金融楼":
                     CreateWallConsoleSet(room, 5);
                     CreateSolidProp("账房保险柜", room.Center + new Vector3(0.92f, -0.24f, 0.09f), new Vector3(0.48f, 0.46f, 0.28f), new Color(0.18f, 0.18f, 0.22f, 1f));
                     CreateSolidProp("账房桌", room.Center + new Vector3(-0.34f, 0.12f, 0.07f), new Vector3(0.86f, 0.3f, 0.18f), new Color(0.26f, 0.22f, 0.18f, 1f));
                     CreateProp("账房现金条", room.Center + new Vector3(-0.08f, 0.34f, 0.2f), new Vector3(0.52f, 0.05f, 0.06f), new Color(0.18f, 0.58f, 0.25f, 1f));
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内账房现金保险柜", Sprite2DAssetCache.InteriorRoomPropSafeBucks,
+                        Sprite2DAssetCache.InteriorRoomPropSafeBucksResourcePath, room.Center, new Vector3(0.82f, -0.18f, 0.3f),
+                        new Vector3(0.4f, 0.4f, 0.08f), 2f, true);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内账房金条柜", Sprite2DAssetCache.InteriorRoomPropSafeGold,
+                        Sprite2DAssetCache.InteriorRoomPropSafeGoldResourcePath, room.Center, new Vector3(1.18f, 0.34f, 0.3f),
+                        new Vector3(0.34f, 0.36f, 0.08f), -4f);
                     break;
                 case "电房":
                     CreateWallConsoleSet(room, 6);
@@ -3195,18 +3736,33 @@ namespace GanglandUndercover.Online
                     }
 
                     CreateProp("电力舱黄黑警戒线", room.Center + new Vector3(0f, -0.46f, 0.1f), new Vector3(1.45f, 0.08f, 0.08f), warning);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内电力检修陷门", Sprite2DAssetCache.InteriorRoomPropTrapdoor,
+                        Sprite2DAssetCache.InteriorRoomPropTrapdoorResourcePath, room.Center, new Vector3(0.72f, -0.48f, 0.22f),
+                        new Vector3(0.34f, 0.34f, 0.08f), 1f);
                     break;
                 case "天台通道":
                     CreateWallConsoleSet(room, 7);
                     CreateSolidProp("观测舱望远镜座", room.Center + new Vector3(-0.28f, 0f, 0.08f), new Vector3(0.5f, 0.22f, 0.18f), metal);
                     CreateProp("观测舱镜筒", room.Center + new Vector3(0.08f, 0.02f, 0.2f), new Vector3(0.42f, 0.08f, 0.08f), screen);
                     CreateProp("观测舱气象屏", room.Center + new Vector3(0.82f, 0.38f, 0.18f), new Vector3(0.44f, 0.06f, 0.14f), screen);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内天台旧电视", Sprite2DAssetCache.InteriorRoomPropOldTv,
+                        Sprite2DAssetCache.InteriorRoomPropOldTvResourcePath, room.Center, new Vector3(0.76f, -0.32f, 0.28f),
+                        new Vector3(0.3f, 0.32f, 0.08f), -5f);
                     break;
                 case "指挥车广场":
                     CreateWallConsoleSet(room, 8);
                     CreateShapeProp("指挥舱圆桌", CircleSprite, room.Center + new Vector3(0f, -0.02f, 0.08f), new Vector3(1.0f, 0.62f, 0.12f), new Color(0.5f, 0.52f, 0.48f, 1f));
                     CreateSolidProp("行动白板", room.Center + new Vector3(-1.42f, 0.18f, 0.08f), new Vector3(0.54f, 0.16f, 0.22f), new Color(0.82f, 0.86f, 0.82f, 1f));
                     CreateProp("指挥警灯条", room.Center + new Vector3(1.35f, 0.18f, 0.14f), new Vector3(0.82f, 0.08f, 0.08f), new Color(0.12f, 0.32f, 0.96f, 1f));
+                    CreateLimeZuRoomProp("房间实物 LimeZu 舰内指挥白板", Sprite2DAssetCache.OfficeRoomPropWhiteboard,
+                        Sprite2DAssetCache.OfficeRoomPropWhiteboardResourcePath, room.Center + new Vector3(-1.22f, 0.3f, 0.3f),
+                        new Vector3(0.48f, 0.52f, 0.08f), Color.white, -4f);
+                    CreateLimeZuRoomProp("房间实物 LimeZu 舰内指挥图表板", Sprite2DAssetCache.OfficeRoomPropChartBoard,
+                        Sprite2DAssetCache.OfficeRoomPropChartBoardResourcePath, room.Center + new Vector3(0.92f, 0.32f, 0.3f),
+                        new Vector3(0.44f, 0.5f, 0.08f), Color.white, 3f);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内指挥激光防线", Sprite2DAssetCache.InteriorRoomPropMuseumLaserHorizontal,
+                        Sprite2DAssetCache.InteriorRoomPropMuseumLaserHorizontalResourcePath, room.Center, new Vector3(0.0f, -0.46f, 0.28f),
+                        new Vector3(0.44f, 0.2f, 0.08f), 0f);
                     break;
                 case "证物库":
                     CreateWallConsoleSet(room, 9);
@@ -3216,6 +3772,12 @@ namespace GanglandUndercover.Online
                     }
 
                     CreateSolidProp("证物舱冷柜", room.Center + new Vector3(0.62f, -0.3f, 0.07f), new Vector3(0.62f, 0.34f, 0.24f), new Color(0.16f, 0.34f, 0.38f, 1f));
+                    CreateLimeZuRoomProp("房间实物 LimeZu 舰内证物打印机", Sprite2DAssetCache.OfficeRoomPropPrinter,
+                        Sprite2DAssetCache.OfficeRoomPropPrinterResourcePath, room.Center + new Vector3(-0.92f, -0.32f, 0.28f),
+                        new Vector3(0.32f, 0.4f, 0.08f), Color.white, -3f);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内证物太平柜", Sprite2DAssetCache.InteriorRoomPropMorgueFreezerCorpseDoor,
+                        Sprite2DAssetCache.InteriorRoomPropMorgueFreezerCorpseDoorResourcePath, room.Center, new Vector3(0.68f, -0.28f, 0.3f),
+                        new Vector3(0.34f, 0.46f, 0.08f), 3f, true);
                     break;
                 case "后巷排档":
                     CreateWallConsoleSet(room, 10);
@@ -3223,6 +3785,12 @@ namespace GanglandUndercover.Online
                     CreatePrimitiveProp("维修舱煤气瓶 A", PrimitiveType.Cylinder, room.Center + new Vector3(0.28f, 0.34f, 0.08f), new Vector3(0.11f, 0.16f, 0.11f), new Color(0.18f, 0.42f, 0.42f, 1f));
                     CreateSolidProp("维修舱摩托", room.Center + new Vector3(0.82f, -0.34f, 0.06f), new Vector3(0.66f, 0.18f, 0.16f), new Color(0.08f, 0.08f, 0.1f, 1f));
                     CreateProp("维修舱火苗", room.Center + new Vector3(-0.48f, 0.42f, 0.2f), new Vector3(0.16f, 0.08f, 0.08f), new Color(1f, 0.28f, 0.06f, 1f));
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内后巷冰柜", Sprite2DAssetCache.InteriorRoomPropGroceryGlassFridge,
+                        Sprite2DAssetCache.InteriorRoomPropGroceryGlassFridgeResourcePath, room.Center, new Vector3(-0.96f, -0.36f, 0.28f),
+                        new Vector3(0.34f, 0.46f, 0.08f), -2f, true);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内后巷挂肉", Sprite2DAssetCache.InteriorRoomPropButcherCarcass,
+                        Sprite2DAssetCache.InteriorRoomPropButcherCarcassResourcePath, room.Center, new Vector3(0.14f, 0.56f, 0.3f),
+                        new Vector3(0.3f, 0.38f, 0.08f), 4f);
                     break;
                 case "地下诊所":
                     CreateWallConsoleSet(room, 11);
@@ -3230,6 +3798,15 @@ namespace GanglandUndercover.Online
                     CreateSolidProp("诊疗舱病床 B", room.Center + new Vector3(0.52f, -0.22f, 0.07f), new Vector3(0.7f, 0.34f, 0.18f), new Color(0.72f, 0.72f, 0.66f, 1f));
                     CreateSolidProp("诊疗舱药柜", room.Center + new Vector3(-1.18f, 0.32f, 0.09f), new Vector3(0.34f, 0.3f, 0.24f), new Color(0.2f, 0.34f, 0.28f, 1f));
                     CreateProp("诊疗舱手术灯", room.Center + new Vector3(0.05f, 0.46f, 0.22f), new Vector3(0.34f, 0.06f, 0.08f), new Color(0.9f, 0.86f, 0.68f, 1f));
+                    CreateLimeZuRoomProp("房间实物 LimeZu 舰内诊疗推车", Sprite2DAssetCache.OfficeRoomPropMedicalCart,
+                        Sprite2DAssetCache.OfficeRoomPropMedicalCartResourcePath, room.Center + new Vector3(1.12f, 0.14f, 0.3f),
+                        new Vector3(0.42f, 0.54f, 0.08f), Color.white, 2f);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内诊疗核磁", Sprite2DAssetCache.InteriorRoomPropHospitalResonanceMachine,
+                        Sprite2DAssetCache.InteriorRoomPropHospitalResonanceMachineResourcePath, room.Center, new Vector3(-0.52f, -0.2f, 0.32f),
+                        new Vector3(0.46f, 0.52f, 0.08f), -2f, true);
+                    CreateLimeZuRoomPropAt("房间实物 LimeZu 舰内诊疗 X 光屏", Sprite2DAssetCache.InteriorRoomPropHospitalXrayScreen,
+                        Sprite2DAssetCache.InteriorRoomPropHospitalXrayScreenResourcePath, room.Center, new Vector3(0.42f, 0.38f, 0.32f),
+                        new Vector3(0.36f, 0.42f, 0.08f), 3f);
                     break;
             }
         }
@@ -3245,6 +3822,12 @@ namespace GanglandUndercover.Online
             CreateProp("舱室边柜屏 " + room.Name + " A", room.Center + new Vector3(-halfWidth * 0.58f, halfHeight * 0.42f, 0.22f), new Vector3(0.2f, 0.045f, 0.06f), screen);
             CreateSolidProp("舱室边柜 " + room.Name + " B", room.Center + new Vector3(halfWidth * 0.58f, -halfHeight * 0.2f, 0.08f), new Vector3(0.28f, 0.34f, 0.22f), body);
             CreateProp("舱室边柜屏 " + room.Name + " B", room.Center + new Vector3(halfWidth * 0.58f, 0f, 0.22f), new Vector3(0.2f, 0.045f, 0.06f), screen);
+            CreateLimeZuRoomProp("房间实物 LimeZu 舱室通用边柜 " + room.Name + " A", Sprite2DAssetCache.InteriorRoomPropJailLockerFull,
+                Sprite2DAssetCache.InteriorRoomPropJailLockerFullResourcePath, room.Center + new Vector3(-halfWidth * 0.58f, halfHeight * 0.22f, 0.3f),
+                new Vector3(0.28f, 0.38f, 0.08f), Color.white, -2f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 舱室通用监控屏 " + room.Name + " B", Sprite2DAssetCache.InteriorRoomPropHospitalScreenColor,
+                Sprite2DAssetCache.InteriorRoomPropHospitalScreenColorResourcePath, room.Center + new Vector3(halfWidth * 0.58f, -halfHeight * 0.2f, 0.3f),
+                new Vector3(0.28f, 0.34f, 0.08f), Color.white, 2f);
             CreateProp("屋顶 " + room.Name + " 线缆槽 A", room.Center + new Vector3(0f, halfHeight * 0.34f, 0.12f), new Vector3(room.Size.x * 0.32f, 0.035f, 0.06f), new Color(0.04f, 0.055f, 0.06f, 1f));
             CreateProp("屋顶 " + room.Name + " 线缆槽 B", room.Center + new Vector3(0f, -halfHeight * 0.34f, 0.12f), new Vector3(room.Size.x * 0.3f, 0.035f, 0.06f), new Color(0.04f, 0.055f, 0.06f, 1f));
         }
@@ -3270,6 +3853,12 @@ namespace GanglandUndercover.Online
             CreateSolidProp("休息舱餐桌 " + suffix, center, new Vector3(0.44f, 0.2f, 0.14f), new Color(0.58f, 0.36f, 0.18f, 1f));
             CreateProp("休息舱座椅 L " + suffix, center + new Vector3(-0.34f, 0f, 0.05f), new Vector3(0.18f, 0.18f, 0.08f), new Color(0.22f, 0.16f, 0.28f, 1f));
             CreateProp("休息舱座椅 R " + suffix, center + new Vector3(0.34f, 0f, 0.05f), new Vector3(0.18f, 0.18f, 0.08f), new Color(0.22f, 0.16f, 0.28f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 休息舱餐桌 " + suffix, Sprite2DAssetCache.RoomPropBenchedTable,
+                Sprite2DAssetCache.RoomPropBenchedTableResourcePath, center + new Vector3(0f, 0f, 0.24f),
+                new Vector3(0.42f, 0.38f, 0.08f), Color.white, suffix == "上" ? 3f : -3f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 休息舱旧电视 " + suffix, Sprite2DAssetCache.InteriorRoomPropOldTv,
+                Sprite2DAssetCache.InteriorRoomPropOldTvResourcePath, center + new Vector3(0f, 0.24f, 0.28f),
+                new Vector3(0.28f, 0.3f, 0.08f), Color.white);
         }
 
         private void CreateShipRoomFrames()
@@ -3308,6 +3897,18 @@ namespace GanglandUndercover.Online
             CreateProp("会议座位弧 L", new Vector3(-0.92f, -0.35f, 0.1f), new Vector3(0.34f, 0.18f, 0.08f), new Color(0.1f, 0.18f, 0.22f, 1f));
             CreateProp("会议座位弧 R", new Vector3(0.92f, -0.35f, 0.1f), new Vector3(0.34f, 0.18f, 0.08f), new Color(0.1f, 0.18f, 0.22f, 1f));
             CreateProp("屋顶 舰桥指挥铭牌", new Vector3(0f, 0.92f, 0.18f), new Vector3(1.2f, 0.08f, 0.08f), new Color(0.42f, 0.72f, 0.84f, 1f));
+            CreateLimeZuRoomProp("房间实物 LimeZu 舰桥会议旧电视", Sprite2DAssetCache.InteriorRoomPropOldTv,
+                Sprite2DAssetCache.InteriorRoomPropOldTvResourcePath, new Vector3(-0.62f, 0.18f, 0.3f),
+                new Vector3(0.32f, 0.34f, 0.08f), Color.white, -6f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 舰桥案件图表板", Sprite2DAssetCache.OfficeRoomPropChartBoard,
+                Sprite2DAssetCache.OfficeRoomPropChartBoardResourcePath, new Vector3(0.62f, 0.18f, 0.3f),
+                new Vector3(0.34f, 0.4f, 0.08f), Color.white, 5f);
+            CreateLimeZuRoomProp("房间实物 LimeZu 舰桥储物柜", Sprite2DAssetCache.InteriorRoomPropJailLockerFull,
+                Sprite2DAssetCache.InteriorRoomPropJailLockerFullResourcePath, new Vector3(-1.92f, 0.82f, 0.3f),
+                new Vector3(0.34f, 0.46f, 0.08f), Color.white, -2f, true);
+            CreateLimeZuRoomProp("房间实物 LimeZu 舰桥暗线陷门", Sprite2DAssetCache.InteriorRoomPropTrapdoor,
+                Sprite2DAssetCache.InteriorRoomPropTrapdoorResourcePath, new Vector3(1.8f, -0.78f, 0.2f),
+                new Vector3(0.36f, 0.34f, 0.08f), Color.white, 2f);
 
             for (int i = 0; i < 10; i++)
             {
@@ -4872,12 +5473,66 @@ namespace GanglandUndercover.Online
             CreateMeshBoxProp("地下诊所唐楼外墙牌", new Vector3(7.62f, -5.02f, 0.54f), new Vector3(0.08f, 0.88f, 0.3f), new Color(0.08f, 0.16f, 0.12f, 1f));
             CreateMeshBoxProp("地下诊所十字灯", new Vector3(7.66f, -5.02f, 0.72f), new Vector3(0.04f, 0.46f, 0.04f), new Color(0.52f, 0.92f, 0.78f, 1f));
             CreateMeshBoxProp("地下诊所十字灯横", new Vector3(7.66f, -5.02f, 0.72f), new Vector3(0.04f, 0.08f, 0.24f), new Color(0.52f, 0.92f, 0.78f, 1f));
+            CreateKeyLandmarkVisuals(neonPink, neonBlue, amber);
 
             for (int i = 0; i < 6; i++)
             {
                 CreateMeshBoxProp("货柜区编号灯 " + i, new Vector3(-10.78f + i * 0.58f, 6.08f, 0.32f), new Vector3(0.26f, 0.035f, 0.06f), i % 2 == 0 ? amber : neonBlue);
                 CreateMeshBoxProp("电房高压警示灯 " + i, new Vector3(8.0f + i * 0.34f, 6.1f, 0.36f), new Vector3(0.16f, 0.035f, 0.06f), i % 2 == 0 ? Color.red : amber);
             }
+        }
+
+        private void CreateKeyLandmarkVisuals(Color neonPink, Color neonBlue, Color amber)
+        {
+            Sprite2DAssetCache.Ensure();
+
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 茶餐厅主招牌", Sprite2DAssetCache.LandmarkOfficeSign1,
+                Sprite2DAssetCache.LandmarkOfficeSign1ResourcePath, new Vector3(-4.82f, 2.22f, 0.52f),
+                new Vector3(1.62f, 1.72f, 0.08f), Color.white, -4f);
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 茶餐厅开门", Sprite2DAssetCache.LandmarkDoorOpen,
+                Sprite2DAssetCache.LandmarkDoorOpenResourcePath, new Vector3(-5.58f, 1.9f, 0.36f),
+                new Vector3(0.46f, 0.58f, 0.08f), Color.white, -4f);
+            CreateMeshBoxProp("关键地标 茶餐厅霓虹灯带", new Vector3(-4.82f, 2.42f, 0.68f), new Vector3(1.08f, 0.035f, 0.05f), neonPink, -4f);
+
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 夜市遮阳棚", Sprite2DAssetCache.LandmarkUmbrella,
+                Sprite2DAssetCache.LandmarkUmbrellaResourcePath, new Vector3(-1.18f, 3.36f, 0.5f),
+                new Vector3(0.64f, 0.62f, 0.08f), Color.white, 4f);
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 夜市桌饮", Sprite2DAssetCache.LandmarkTinyTable,
+                Sprite2DAssetCache.LandmarkTinyTableResourcePath, new Vector3(-0.38f, 3.26f, 0.36f),
+                new Vector3(0.42f, 0.42f, 0.08f), Color.white, 4f);
+            CreateMeshBoxProp("关键地标 夜市拱门粉灯", new Vector3(-0.92f, 3.62f, 0.74f), new Vector3(1.68f, 0.035f, 0.05f), neonPink, 4f);
+
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 证物库封存箱", Sprite2DAssetCache.LandmarkPackage,
+                Sprite2DAssetCache.LandmarkPackageResourcePath, new Vector3(-7.72f, -4.82f, 0.4f),
+                new Vector3(0.42f, 0.38f, 0.08f), Color.white, -3f);
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 证物库投递箱", Sprite2DAssetCache.LandmarkMailbox,
+                Sprite2DAssetCache.LandmarkMailboxResourcePath, new Vector3(-7.3f, -5.24f, 0.4f),
+                new Vector3(0.72f, 0.54f, 0.08f), Color.white);
+            CreateMeshBoxProp("关键地标 证物库温控蓝灯", new Vector3(-7.36f, -4.98f, 0.64f), new Vector3(0.04f, 0.56f, 0.05f), neonBlue);
+
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 金融楼招牌", Sprite2DAssetCache.LandmarkOfficeSign2,
+                Sprite2DAssetCache.LandmarkOfficeSign2ResourcePath, new Vector3(4.82f, 3.7f, 0.58f),
+                new Vector3(1.52f, 1.62f, 0.08f), Color.white);
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 金融楼金库通风", Sprite2DAssetCache.LandmarkAirDuct,
+                Sprite2DAssetCache.LandmarkAirDuctResourcePath, new Vector3(5.52f, 3.22f, 0.38f),
+                new Vector3(0.48f, 0.48f, 0.08f), Color.white);
+            CreateMeshBoxProp("关键地标 金融楼金库警戒线", new Vector3(4.94f, 3.28f, 0.58f), new Vector3(0.68f, 0.035f, 0.05f), amber);
+
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 电房高压门", Sprite2DAssetCache.LandmarkDoorOpen,
+                Sprite2DAssetCache.LandmarkDoorOpenResourcePath, new Vector3(8.12f, 5.64f, 0.42f),
+                new Vector3(0.5f, 0.56f, 0.08f), Color.white);
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 电房屋顶设备", Sprite2DAssetCache.LandmarkAirDuct,
+                Sprite2DAssetCache.LandmarkAirDuctResourcePath, new Vector3(8.84f, 5.92f, 0.58f),
+                new Vector3(0.58f, 0.52f, 0.08f), Color.white);
+            CreateMeshBoxProp("关键地标 电房红色警报条", new Vector3(8.45f, 5.9f, 0.66f), new Vector3(0.86f, 0.035f, 0.05f), Color.red);
+
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 码头冷链车", Sprite2DAssetCache.LandmarkTruckFront,
+                Sprite2DAssetCache.LandmarkTruckFrontResourcePath, new Vector3(-10.38f, 5.5f, 0.5f),
+                new Vector3(1.18f, 0.96f, 0.08f), Color.white, -2f);
+            CreateLimeZuLandmarkProp("关键地标 LimeZu 码头绿植路障", Sprite2DAssetCache.LandmarkPottedPlant,
+                Sprite2DAssetCache.LandmarkPottedPlantResourcePath, new Vector3(-9.52f, 5.96f, 0.36f),
+                new Vector3(0.38f, 0.42f, 0.08f), Color.white);
+            CreateMeshBoxProp("关键地标 码头吊机钢缆", new Vector3(-10.08f, 5.88f, 0.66f), new Vector3(0.04f, 0.42f, 0.04f), new Color(0.02f, 0.025f, 0.028f, 1f));
         }
 
         private void CreateShipLikeSightlineWalls()

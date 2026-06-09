@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using Unity.Netcode;
 using Unity.Collections;
@@ -20,6 +21,12 @@ namespace GanglandUndercover.SocialDeduction
         private const float BaseSpeed = 2.5f;
         private const float HeightSpeedMin = 2.0f;
         private const float HeightSpeedMax = 3.2f;
+        private const int MaxCustomJsonBytes = 2048;
+        private const int CustomMessageCapacityBytes = MaxCustomJsonBytes + 16;
+
+        private static readonly Dictionary<ulong, CharacterCustomizer> SpawnedCustomizersByObjectId = new Dictionary<ulong, CharacterCustomizer>();
+        private static NetworkManager registeredMessageNetworkManager;
+        private static bool customMessageRegistered;
 
         [Header("Data")]
         [Tooltip("装扮数据库 ScriptableObject 引用")]
@@ -41,6 +48,7 @@ namespace GanglandUndercover.SocialDeduction
         private SocialCharacter socialChar;
         private readonly Dictionary<WardrobePart, string> currentSelection = new Dictionary<WardrobePart, string>();
         private readonly List<GameObject> spawnedAttachments = new List<GameObject>();
+        private bool customMessageInstanceRegistered;
 
         // ── 公开属性 ──
 
@@ -81,25 +89,18 @@ namespace GanglandUndercover.SocialDeduction
                 ApplyAllVisuals();
             }
 
-            if (NetworkManager.Singleton != null && NetworkManager.Singleton.CustomMessagingManager != null)
-            {
-                NetworkManager.Singleton.CustomMessagingManager.RegisterNamedMessageHandler(
-                    CustomMessageName, OnCustomMessageReceived);
-            }
+            RegisterCustomMessageInstance();
         }
 
         public override void OnNetworkDespawn()
         {
-            if (NetworkManager.Singleton != null && NetworkManager.Singleton.CustomMessagingManager != null)
-            {
-                NetworkManager.Singleton.CustomMessagingManager.UnregisterNamedMessageHandler(CustomMessageName);
-            }
-
+            UnregisterCustomMessageInstance();
             base.OnNetworkDespawn();
         }
 
         public override void OnDestroy()
         {
+            UnregisterCustomMessageInstance();
             ClearAttachments();
             base.OnDestroy();
         }
@@ -521,50 +522,194 @@ namespace GanglandUndercover.SocialDeduction
             if (manager == null)
                 return;
 
+            if (!NetworkManager.Singleton.IsServer && !IsOwner)
+                return;
+
             string json = SerializeCurrentSelection();
-            byte[] jsonBytes = System.Text.Encoding.UTF8.GetBytes(json);
 
-            int totalSize = 8 + jsonBytes.Length;
-            using var writer = new FastBufferWriter(totalSize, Allocator.Temp);
-            writer.WriteValueSafe(NetworkObjectId);
-            for (int i = 0; i < jsonBytes.Length; i++)
-                writer.WriteByteSafe(jsonBytes[i]);
+            if (NetworkManager.Singleton.IsServer)
+            {
+                SendCustomDataToClients(json, NetworkManager.ServerClientId);
+                return;
+            }
 
-            manager.SendNamedMessage(CustomMessageName, NetworkManager.ServerClientId, writer,
-                NetworkDelivery.ReliableSequenced);
+            FastBufferWriter writer = new FastBufferWriter(CustomMessageCapacityBytes, Allocator.Temp);
+            try
+            {
+                if (!TryWriteCustomMessagePayload(ref writer, NetworkObjectId, json))
+                    return;
+
+                manager.SendNamedMessage(CustomMessageName, NetworkManager.ServerClientId, writer,
+                    NetworkDelivery.ReliableSequenced);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
         }
 
         /// <summary>
         /// 接收远程自定义数据并应用。
         /// </summary>
-        private void OnCustomMessageReceived(ulong senderId, FastBufferReader reader)
+        private static void OnCustomMessageReceived(ulong senderId, FastBufferReader reader)
         {
-            reader.ReadValueSafe(out ulong objectId);
-            if (objectId != NetworkObjectId)
-                return; // 不属于本对象，忽略
-
-            int remainingBytes = reader.Length - (int)reader.Position;
-            if (remainingBytes <= 0)
+            if (!TryReadCustomMessagePayload(ref reader, out ulong objectId, out string json))
                 return;
 
-            byte[] jsonBytes = new byte[remainingBytes];
-            reader.ReadBytesSafe(ref jsonBytes, remainingBytes);
-
-            string json = System.Text.Encoding.UTF8.GetString(jsonBytes);
-            if (string.IsNullOrEmpty(json))
+            if (!SpawnedCustomizersByObjectId.TryGetValue(objectId, out CharacterCustomizer customizer) || customizer == null)
                 return;
+
+            customizer.HandleCustomMessage(senderId, json);
+        }
+
+        private void HandleCustomMessage(ulong senderId, string json)
+        {
+            NetworkManager manager = NetworkManager.Singleton;
+            if (manager == null)
+                return;
+
+            if (manager.IsServer)
+            {
+                if (!CanAcceptCustomDataFrom(senderId))
+                    return;
+
+                ApplyCustomDataJson(json);
+                SendCustomDataToClients(json, senderId);
+                return;
+            }
+
+            ApplyCustomDataJson(json);
+        }
+
+        private bool CanAcceptCustomDataFrom(ulong senderId)
+        {
+            return IsSpawned && senderId == OwnerClientId;
+        }
+
+        private void SendCustomDataToClients(string json, ulong senderId)
+        {
+            NetworkManager manager = NetworkManager.Singleton;
+            if (manager == null || !manager.IsServer || manager.CustomMessagingManager == null)
+                return;
+
+            List<ulong> targets = new List<ulong>();
+            foreach (ulong clientId in manager.ConnectedClientsIds)
+            {
+                if (clientId == NetworkManager.ServerClientId)
+                    continue;
+
+                targets.Add(clientId);
+            }
+
+            if (targets.Count == 0)
+                return;
+
+            FastBufferWriter writer = new FastBufferWriter(CustomMessageCapacityBytes, Allocator.Temp);
+            try
+            {
+                if (!TryWriteCustomMessagePayload(ref writer, NetworkObjectId, json))
+                    return;
+
+                manager.CustomMessagingManager.SendNamedMessage(
+                    CustomMessageName,
+                    targets,
+                    writer,
+                    NetworkDelivery.ReliableSequenced);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+        }
+
+        private void RegisterCustomMessageInstance()
+        {
+            NetworkManager manager = NetworkManager.Singleton;
+            if (!IsSpawned || manager == null || manager.CustomMessagingManager == null)
+                return;
+
+            if (registeredMessageNetworkManager != manager)
+            {
+                UnregisterStaticMessageHandler();
+                SpawnedCustomizersByObjectId.Clear();
+                registeredMessageNetworkManager = manager;
+            }
+
+            if (!customMessageRegistered)
+            {
+                manager.CustomMessagingManager.RegisterNamedMessageHandler(CustomMessageName, OnCustomMessageReceived);
+                customMessageRegistered = true;
+            }
+
+            SpawnedCustomizersByObjectId[NetworkObjectId] = this;
+            customMessageInstanceRegistered = true;
+        }
+
+        private void UnregisterCustomMessageInstance()
+        {
+            if (customMessageInstanceRegistered)
+            {
+                if (SpawnedCustomizersByObjectId.TryGetValue(NetworkObjectId, out CharacterCustomizer registered) && registered == this)
+                {
+                    SpawnedCustomizersByObjectId.Remove(NetworkObjectId);
+                }
+
+                customMessageInstanceRegistered = false;
+            }
+
+            if (SpawnedCustomizersByObjectId.Count == 0)
+            {
+                UnregisterStaticMessageHandler();
+            }
+        }
+
+        private static void UnregisterStaticMessageHandler()
+        {
+            if (customMessageRegistered
+                && registeredMessageNetworkManager != null
+                && registeredMessageNetworkManager.CustomMessagingManager != null)
+            {
+                registeredMessageNetworkManager.CustomMessagingManager.UnregisterNamedMessageHandler(CustomMessageName);
+            }
+
+            customMessageRegistered = false;
+            registeredMessageNetworkManager = null;
+        }
+
+        private static bool TryWriteCustomMessagePayload(ref FastBufferWriter writer, ulong objectId, string json)
+        {
+            byte[] jsonBytes = Encoding.UTF8.GetBytes(json ?? string.Empty);
+            if (jsonBytes.Length <= 0 || jsonBytes.Length > MaxCustomJsonBytes)
+                return false;
+
+            writer.WriteValueSafe(objectId);
+            writer.WriteValueSafe(jsonBytes.Length);
+            writer.WriteBytesSafe(jsonBytes, jsonBytes.Length);
+            return true;
+        }
+
+        private static bool TryReadCustomMessagePayload(ref FastBufferReader reader, out ulong objectId, out string json)
+        {
+            objectId = 0UL;
+            json = string.Empty;
 
             try
             {
-                var data = JsonUtility.FromJson<CharacterCustomData>(json);
-                if (data != null)
-                {
-                    ApplyFromData(data);
-                }
+                reader.ReadValueSafe(out objectId);
+                reader.ReadValueSafe(out int jsonLength);
+                if (jsonLength <= 0 || jsonLength > MaxCustomJsonBytes)
+                    return false;
+
+                byte[] jsonBytes = new byte[jsonLength];
+                reader.ReadBytesSafe(ref jsonBytes, jsonLength);
+                json = Encoding.UTF8.GetString(jsonBytes);
+                return !string.IsNullOrWhiteSpace(json);
             }
-            catch (Exception ex)
+            catch
             {
-                Debug.LogWarning($"[CharacterCustomizer] 网络数据解析失败: {ex.Message}");
+                objectId = 0UL;
+                json = string.Empty;
+                return false;
             }
         }
 

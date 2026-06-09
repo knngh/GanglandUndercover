@@ -315,7 +315,8 @@ namespace GanglandUndercover.Online
         {
             if (controller == null || controller.WorldBuilder == null) return;
 
-            GameObject visual = controller.WorldBuilder.CreateBodyVisual(body);
+            Sprite bodySprite = controller.GetBodySpriteForClient(body.VictimClientId);
+            GameObject visual = controller.WorldBuilder.CreateBodyVisual(body, bodySprite);
             if (visual != null)
             {
                 bodyVisuals[body.Id] = visual;
