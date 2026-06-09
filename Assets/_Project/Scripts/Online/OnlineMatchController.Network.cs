@@ -1521,6 +1521,11 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            if (!CanSendChatMessageNow())
+            {
+                return;
+            }
+
             // 限流检查
             if (!chatSystem.CanSendNow())
             {
@@ -1718,6 +1723,7 @@ namespace GanglandUndercover.Online
                     out Faction faction,
                     out ChatChannel channel))
             {
+                EnsureChatSystem();
                 chatSystem.ReceiveMessage(senderId, senderName, content, isDead, faction, channel);
             }
         }

@@ -65,11 +65,14 @@ namespace GanglandUndercover.Online
         private GameObject centerDockGroup;
         private GameObject rightDockGroup;
         private GameObject footerGroup;
+        private GameObject notebookTabsGroup;
+        private GameObject notebookBodyGroup;
         private GameObject meetingOverlay;
         private GameObject resultOverlay;
         private GameObject taskOverlay;
         private GameObject mapOverlay;
         private GameObject compactActionHud;
+        private GameObject chatGroup;
 
         private Text titleText;
         private Text phaseText;
@@ -98,6 +101,9 @@ namespace GanglandUndercover.Online
         private Text compactPromptText;
         private Text compactAbilityText;
         private Text compactActionBarText;
+        private Text chatTitleText;
+        private Text chatFeedText;
+        private Text chatInputStatusText;
         private Text minPlayersText;
         private Text maxPlayersText;
         private Text evidenceTargetText;
@@ -117,6 +123,7 @@ namespace GanglandUndercover.Online
         private InputField roomNameInput;
         private InputField joinAddressInput;
         private InputField relayJoinInput;
+        private InputField chatInput;
         private Slider minPlayersSlider;
         private Slider maxPlayersSlider;
         private Slider evidenceTargetSlider;
@@ -145,6 +152,7 @@ namespace GanglandUndercover.Online
         private Button ventButton;
         private Button chatReportButton;
         private Button chatBlockButton;
+        private Button chatSendButton;
 
         private Transform voteButtonRoot;
 
@@ -157,6 +165,7 @@ namespace GanglandUndercover.Online
         public int MeetingOverlay2DAssetElementCount => meetingOverlay == null ? 0 : CountImagesWithSprites(meetingOverlay.transform);
         public int CompactActionHudVisualElementCount => compactActionHud == null ? 0 : CountNamedChildren(compactActionHud.transform, "Compact Visual");
         public int ButtonSfxFeedbackCount => canvas == null ? 0 : canvas.GetComponentsInChildren<UiButtonSfx>(true).Length;
+        public int ChatPanelCanvasElementCount => chatGroup == null ? 0 : CountNamedChildren(chatGroup.transform, "Chat Canvas");
         public int ChatSafetyCanvasActionCount => CountChatSafetyCanvasActions();
         public bool HasCompleteLayout => HasRequiredLayoutReferences();
 
@@ -271,11 +280,14 @@ namespace GanglandUndercover.Online
                 && centerDockGroup != null
                 && rightDockGroup != null
                 && footerGroup != null
+                && notebookTabsGroup != null
+                && notebookBodyGroup != null
                 && meetingOverlay != null
                 && resultOverlay != null
                 && taskOverlay != null
                 && mapOverlay != null
                 && compactActionHud != null
+                && chatGroup != null
                 && titleText != null
                 && phaseText != null
                 && voiceText != null
@@ -303,6 +315,9 @@ namespace GanglandUndercover.Online
                 && compactPromptText != null
                 && compactAbilityText != null
                 && compactActionBarText != null
+                && chatTitleText != null
+                && chatFeedText != null
+                && chatInputStatusText != null
                 && minPlayersText != null
                 && maxPlayersText != null
                 && evidenceTargetText != null
@@ -320,6 +335,7 @@ namespace GanglandUndercover.Online
                 && roomNameInput != null
                 && joinAddressInput != null
                 && relayJoinInput != null
+                && chatInput != null
                 && minPlayersSlider != null
                 && maxPlayersSlider != null
                 && evidenceTargetSlider != null
@@ -345,6 +361,7 @@ namespace GanglandUndercover.Online
                 && abilityButton != null
                 && chatReportButton != null
                 && chatBlockButton != null
+                && chatSendButton != null
                 && voteButtonRoot != null;
         }
 
@@ -387,11 +404,14 @@ namespace GanglandUndercover.Online
             centerDockGroup = null;
             rightDockGroup = null;
             footerGroup = null;
+            notebookTabsGroup = null;
+            notebookBodyGroup = null;
             meetingOverlay = null;
             resultOverlay = null;
             taskOverlay = null;
             mapOverlay = null;
             compactActionHud = null;
+            chatGroup = null;
             titleText = null;
             phaseText = null;
             voiceText = null;
@@ -419,6 +439,9 @@ namespace GanglandUndercover.Online
             compactPromptText = null;
             compactAbilityText = null;
             compactActionBarText = null;
+            chatTitleText = null;
+            chatFeedText = null;
+            chatInputStatusText = null;
             minPlayersText = null;
             maxPlayersText = null;
             evidenceTargetText = null;
@@ -436,6 +459,7 @@ namespace GanglandUndercover.Online
             roomNameInput = null;
             joinAddressInput = null;
             relayJoinInput = null;
+            chatInput = null;
             minPlayersSlider = null;
             maxPlayersSlider = null;
             evidenceTargetSlider = null;
@@ -461,6 +485,7 @@ namespace GanglandUndercover.Online
             abilityButton = null;
             chatReportButton = null;
             chatBlockButton = null;
+            chatSendButton = null;
             voteButtonRoot = null;
         }
 
@@ -615,7 +640,7 @@ namespace GanglandUndercover.Online
             startButton = CreateButton("开始", lobbyRow, 42f, () => controller.RequestStartMatch());
             fillBotsButton = CreateButton("补 AI 开局", lobby, 42f, () => controller.RequestFillBotsAndStart());
 
-            Transform action = CreateSection("行动快捷", leftDock, 282f);
+            Transform action = CreateSection("行动快捷", leftDock, 232f);
             actionGroup = action.gameObject;
             actionStatusText = CreateText("Action Status", action, 14, TextAnchor.UpperLeft, TextColor);
             AddLayout(actionStatusText.gameObject, 96f, 0f, 0f);
@@ -629,9 +654,6 @@ namespace GanglandUndercover.Online
             ventButton = CreateButton("V 通风管", actionRowC, 42f, () => controller.RequestAction(OnlineActionType.Vent));
             mapButton = CreateButton("M 大地图", actionRowC, 42f, () => controller.ToggleTacticalMap());
             intelButton = CreateButton("I 案情板", actionRowC, 42f, () => controller.ToggleIntelBoard());
-            Transform chatSafetyRow = CreateButtonRow(action, 42f);
-            chatReportButton = CreateButton("举报最近", chatSafetyRow, 42f, () => controller.RequestReportLatestChatMessage());
-            chatBlockButton = CreateButton("屏蔽最近", chatSafetyRow, 42f, () => controller.RequestBlockLatestChatSender());
 
             Transform result = CreateSection("结算控制", leftDock, 130f);
             resultGroup = result.gameObject;
@@ -662,16 +684,48 @@ namespace GanglandUndercover.Online
         private void BuildRightDock(Transform rightDock)
         {
             Transform tabsSection = CreateSection("情报板", rightDock, 72f);
+            notebookTabsGroup = tabsSection.gameObject;
             Transform tabs = CreateButtonRow(tabsSection, 38f);
             CreateButton("人员", tabs, 38f, () => SelectNotebook(NotebookTab.Roster));
             CreateButton("案情", tabs, 38f, () => SelectNotebook(NotebookTab.Intel));
             CreateButton("日志", tabs, 38f, () => SelectNotebook(NotebookTab.Log));
             CreateButton("服务", tabs, 38f, () => SelectNotebook(NotebookTab.Services));
 
-            Transform body = CreateSection("情报内容", rightDock, 554f);
+            Transform body = CreateSection("情报内容", rightDock, 300f);
+            notebookBodyGroup = body.gameObject;
             notebookTitleText = CreateText("Notebook Title", body, 17, TextAnchor.UpperLeft, TextColor);
             AddLayout(notebookTitleText.gameObject, 28f, 0f, 0f);
-            notebookBodyText = CreateScrollText("Notebook Body", body, 500f);
+            notebookBodyText = CreateScrollText("Notebook Body", body, 238f);
+
+            BuildChatSection(rightDock);
+        }
+
+        private void BuildChatSection(Transform rightDock)
+        {
+            Transform chat = CreateSection("文本聊天", rightDock, 300f);
+            chat.name = "Chat Canvas Panel";
+            chatGroup = chat.gameObject;
+
+            chatTitleText = CreateText("Chat Canvas Title", chat, 15, TextAnchor.UpperLeft, AmberAccent);
+            AddLayout(chatTitleText.gameObject, 22f, 0f, 0f);
+
+            chatFeedText = CreateScrollText("Chat Canvas Feed", chat, 104f);
+
+            chatInput = CreateInputRow(chat, "发言", "输入消息", _ => { });
+            chatInput.characterLimit = 256;
+            chatInput.onValueChanged.AddListener(_ =>
+            {
+                RefreshButtons();
+                RefreshTexts();
+            });
+
+            chatInputStatusText = CreateText("Chat Canvas Input Status", chat, 12, TextAnchor.UpperLeft, MutedTextColor);
+            AddLayout(chatInputStatusText.gameObject, 18f, 0f, 0f);
+
+            Transform chatRow = CreateButtonRow(chat, 34f);
+            chatSendButton = CreateButton("发送", chatRow, 34f, SendChatInput);
+            chatReportButton = CreateButton("举报最近", chatRow, 34f, () => controller.RequestReportLatestChatMessage());
+            chatBlockButton = CreateButton("屏蔽最近", chatRow, 34f, () => controller.RequestBlockLatestChatSender());
         }
 
         private void BuildMeetingOverlay()
@@ -1038,12 +1092,15 @@ namespace GanglandUndercover.Online
             headerGroup.SetActive(!compactAction);
             leftDockGroup.SetActive(!compactAction);
             centerDockGroup.SetActive(!compactAction);
-            rightDockGroup.SetActive(!compactAction);
+            rightDockGroup.SetActive(!compactAction || online && phase == OnlineMatchPhase.Action);
             footerGroup.SetActive(!compactAction);
+            notebookTabsGroup.SetActive(!compactAction);
+            notebookBodyGroup.SetActive(!compactAction);
             settingsGroup.SetActive(!online || phase == OnlineMatchPhase.Lobby);
             lobbyGroup.SetActive(online && phase == OnlineMatchPhase.Lobby);
             actionGroup.SetActive(online && phase != OnlineMatchPhase.Lobby && phase != OnlineMatchPhase.Result && !compactAction);
             resultGroup.SetActive(online && phase == OnlineMatchPhase.Result);
+            chatGroup.SetActive(online && phase != OnlineMatchPhase.Result);
             compactActionHud.SetActive(compactAction);
             meetingOverlay.SetActive(online && (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting));
             resultOverlay.SetActive(online && phase == OnlineMatchPhase.Result);
@@ -1134,6 +1191,9 @@ namespace GanglandUndercover.Online
             abilityButton.interactable = actionPlayable;
             mapButton.interactable = controller.IsOnline;
             intelButton.interactable = controller.IsOnline;
+            chatSendButton.interactable = controller.CanSendChatNow
+                && chatInput != null
+                && !string.IsNullOrWhiteSpace(chatInput.text);
             chatReportButton.interactable = controller.HasChatSafetyTarget;
             chatBlockButton.interactable = controller.HasChatSafetyTarget;
 
@@ -1170,6 +1230,11 @@ namespace GanglandUndercover.Online
             centerBodyText.text = BuildCenterBody();
             notebookTitleText.text = NotebookTitle();
             notebookBodyText.text = NotebookBody();
+            chatTitleText.text = controller.ChatChannelDisplayName
+                + " | " + controller.ChatMessageCount + " 条"
+                + " | 安全 " + (controller.HasChatSafetyTarget ? "可处理" : "无目标");
+            chatFeedText.text = controller.ChatFeedText;
+            chatInputStatusText.text = controller.ChatInputStatusLine;
             compactTopText.text = controller.RoomName
                 + "\n行动态势 | " + controller.PhaseDisplayName
                 + " | " + controller.MatchTimeText + "/20:00"
@@ -1231,6 +1296,9 @@ namespace GanglandUndercover.Online
             UIStyle.StylizeText(centerBodyText);
             UIStyle.StylizeText(notebookTitleText);
             UIStyle.StylizeText(notebookBodyText);
+            UIStyle.StylizeText(chatTitleText);
+            UIStyle.StylizeText(chatFeedText);
+            UIStyle.StylizeText(chatInputStatusText);
             UIStyle.StylizeText(compactTopText);
             UIStyle.StylizeText(compactActionBarText);
             UIStyle.StylizeText(compactPromptText);
@@ -1389,6 +1457,23 @@ namespace GanglandUndercover.Online
             }
 
             Refresh(true);
+        }
+
+        private void SendChatInput()
+        {
+            if (chatInput == null || controller == null)
+            {
+                return;
+            }
+
+            string content = chatInput.text;
+            if (controller.RequestSendChatMessage(content))
+            {
+                chatInput.SetTextWithoutNotify(string.Empty);
+                chatInput.DeactivateInputField();
+            }
+
+            Refresh(false);
         }
 
         private void RebuildVoteButtons()

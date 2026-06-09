@@ -26,13 +26,13 @@ namespace GanglandUndercover.Online
         public string MatchTimeText => FormatMatchTime(matchElapsedSeconds);
         public string HazardSummary => BuildHazardSummary();
         public string LocalActionHint => BuildLocalActionHint();
-        public string VoiceHudLine => chatSystem != null
-            ? "聊天: " + chatSystem.CurrentChannel
-                + " | " + chatSystem.MessageCount + "条消息"
-                + " | 屏蔽 " + chatSystem.BlockedSenderCount
-                + " | 举报 " + chatSystem.ReportCount
-            : "聊天未连接";
+        public string VoiceHudLine => CurrentVoiceHudLine();
         public bool HasChatSafetyTarget => chatSystem != null && chatSystem.MessageCount > 0;
+        public int ChatMessageCount => chatSystem != null ? chatSystem.MessageCount : 0;
+        public string ChatChannelDisplayName => CurrentChatChannelDisplayName();
+        public string ChatFeedText => CurrentChatFeedText();
+        public bool CanSendChatNow => CanSendChatMessageNow();
+        public string ChatInputStatusLine => BuildChatInputStatusLine();
         public string ChatSafetyStatusLine => chatSystem != null
             ? "聊天安全: 最近消息可举报/屏蔽 | 屏蔽 " + chatSystem.BlockedSenderCount + " | 举报 " + chatSystem.ReportCount
             : "聊天安全未连接";
@@ -103,6 +103,134 @@ namespace GanglandUndercover.Online
             {
                 status = "暂无可屏蔽的聊天发送者。";
             }
+        }
+
+        public bool RequestSendChatMessage(string content)
+        {
+            EnsureChatSystem();
+            SyncChatRuntimeState();
+
+            string safeContent = (ChatSystem.Sanitize(content) ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(safeContent))
+            {
+                status = "聊天内容为空。";
+                return false;
+            }
+
+            if (!IsChatPhase(phase))
+            {
+                status = "当前阶段暂不能发言。";
+                return false;
+            }
+
+            if (!chatSystem.CanSendNow())
+            {
+                status = "发言冷却中。";
+                return false;
+            }
+
+            SendChatMessage(safeContent);
+            return true;
+        }
+
+        private bool CanSendChatMessageNow()
+        {
+            EnsureChatSystem();
+
+            if (chatSystem == null)
+            {
+                return false;
+            }
+
+            SyncChatRuntimeState();
+            return IsChatPhase(phase) && chatSystem.CanSendNow();
+        }
+
+        private string CurrentVoiceHudLine()
+        {
+            EnsureChatSystem();
+
+            if (chatSystem == null)
+            {
+                return "聊天未连接";
+            }
+
+            SyncChatRuntimeState();
+            return "聊天: " + ChatSystem.ChannelDisplayName(chatSystem.CurrentChannel)
+                + " | " + chatSystem.MessageCount + "条消息"
+                + " | 屏蔽 " + chatSystem.BlockedSenderCount
+                + " | 举报 " + chatSystem.ReportCount;
+        }
+
+        private string BuildChatInputStatusLine()
+        {
+            EnsureChatSystem();
+
+            if (chatSystem == null)
+            {
+                return "聊天未连接。";
+            }
+
+            SyncChatRuntimeState();
+            if (!IsChatPhase(phase))
+            {
+                return "当前阶段暂不能发言。";
+            }
+
+            string channel = ChatSystem.ChannelDisplayName(chatSystem.CurrentChannel);
+            if (!chatSystem.CanSendNow())
+            {
+                return channel + " | 发言冷却中。";
+            }
+
+            return channel + " | 输入后发送。";
+        }
+
+        private string CurrentChatChannelDisplayName()
+        {
+            EnsureChatSystem();
+
+            if (chatSystem == null)
+            {
+                return "聊天未连接";
+            }
+
+            SyncChatRuntimeState();
+            return ChatSystem.ChannelDisplayName(chatSystem.CurrentChannel);
+        }
+
+        private string CurrentChatFeedText()
+        {
+            EnsureChatSystem();
+
+            if (chatSystem == null)
+            {
+                return "聊天未连接。";
+            }
+
+            SyncChatRuntimeState();
+            return chatSystem.BuildMessageFeedText(12);
+        }
+
+        private void SyncChatRuntimeState()
+        {
+            if (chatSystem == null)
+            {
+                return;
+            }
+
+            bool alive = IsLocalAlive();
+            chatSystem.CurrentPhase = phase;
+            chatSystem.CanSend = IsChatPhase(phase);
+            chatSystem.IsAlive = alive;
+            chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
+        }
+
+        private static bool IsChatPhase(OnlineMatchPhase matchPhase)
+        {
+            return matchPhase == OnlineMatchPhase.Action
+                || matchPhase == OnlineMatchPhase.Meeting
+                || matchPhase == OnlineMatchPhase.Voting;
         }
 
 #if UNITY_EDITOR
@@ -1509,10 +1637,7 @@ namespace GanglandUndercover.Online
             float chatHeight = Mathf.Clamp(Screen.height * 0.35f, 220f, 360f);
             Rect chatArea = new Rect(Screen.width - chatWidth - 18f, Screen.height - chatHeight - 18f, chatWidth, chatHeight);
 
-            chatSystem.CurrentPhase = OnlineMatchPhase.Action;
-            chatSystem.CanSend = IsLocalAlive();
-            chatSystem.IsAlive = IsLocalAlive();
-            chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
+            SyncChatRuntimeState();
             chatSystem.ProcessInputKeys();
             chatSystem.DrawChatPanel(chatArea, null);
         }
@@ -1554,10 +1679,7 @@ namespace GanglandUndercover.Online
             {
                 float chatHeight = boardHeight * 0.42f;
                 Rect chatArea = GUILayoutUtility.GetRect(rightWidth, chatHeight);
-                chatSystem.CurrentPhase = phase;
-                chatSystem.CanSend = IsLocalAlive();
-                chatSystem.IsAlive = IsLocalAlive();
-                chatSystem.LocalFaction = ChatSystem.RoleToFaction(LocalEffectiveRole());
+                SyncChatRuntimeState();
                 chatSystem.ProcessInputKeys();
                 chatSystem.DrawChatPanel(chatArea, null);
             }

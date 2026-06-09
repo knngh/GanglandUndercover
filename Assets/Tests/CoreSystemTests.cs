@@ -233,6 +233,19 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ChatSystem_BuildsCanvasMessageFeed()
+        {
+            object chat = CreateChatSystem();
+            ReceiveChatMessage(chat, "7", "警员甲", "码头安全", channelName: "Meeting");
+            ReceiveChatMessage(chat, "8", "线人乙", "后巷有人", channelName: "Proximity");
+
+            string feed = (string)Invoke(chat, "BuildMessageFeedText", 4);
+
+            StringAssert.Contains("[会] 警员甲: 码头安全", feed);
+            StringAssert.Contains("[近] 线人乙: 后巷有人", feed);
+        }
+
+        [Test]
         public void MainMenuLoginStatus_NoServiceExplainsAnonymousInitialization()
         {
             string status = BuildMainMenuLoginStatus(null);
@@ -1406,6 +1419,7 @@ namespace GanglandUndercover.Tests
 
                 Assert.IsTrue((bool)Invoke(controller, "EditorForceActionPreviewForSmokeTest"));
                 Assert.GreaterOrEqual(PropertyInt(controller, "ChatSafetyCanvasActionCount"), 2);
+                Assert.GreaterOrEqual(PropertyInt(controller, "ChatPanelCanvasElementCount"), 3);
                 Assert.IsTrue((bool)Invoke(controller, "EditorSeedChatSafetyMessageForSmokeTest"));
 
                 Invoke(controller, "RequestReportLatestChatMessage");
@@ -1413,6 +1427,70 @@ namespace GanglandUndercover.Tests
 
                 Invoke(controller, "RequestBlockLatestChatSender");
                 StringAssert.Contains("屏蔽 1", PropertyString(controller, "VoiceHudLine"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+            }
+        }
+
+        [Test]
+        public void OnlineMatchHud_KeepsCanvasChatPanelInActionPreview()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            GameObject host = new GameObject("OnlineHudChatPanelRegression_OnlineMatchController");
+
+            try
+            {
+                object controller = host.AddComponent(controllerType);
+
+                Assert.IsTrue((bool)Invoke(controller, "EditorForceActionPreviewForSmokeTest"));
+                Assert.IsTrue(PropertyBool(controller, "CanvasHudLayoutComplete"));
+                Assert.GreaterOrEqual(PropertyInt(controller, "ChatPanelCanvasElementCount"), 3);
+                StringAssert.Contains("近距离聊天", PropertyString(controller, "ChatChannelDisplayName"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+            }
+        }
+
+        [Test]
+        public void OnlineMatchController_RequestSendChatMessageFeedsCanvasChat()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            GameObject host = new GameObject("OnlineHudChatSendRegression_OnlineMatchController");
+
+            try
+            {
+                object controller = host.AddComponent(controllerType);
+
+                Assert.IsTrue((bool)Invoke(controller, "EditorForceActionPreviewForSmokeTest"));
+                Assert.IsTrue((bool)Invoke(controller, "RequestSendChatMessage", " <b>码头集合</b> "));
+                StringAssert.Contains("码头集合", PropertyString(controller, "ChatFeedText"));
+                StringAssert.Contains("近距离聊天", PropertyString(controller, "ChatInputStatusLine"));
+                Assert.AreEqual(1, PropertyInt(controller, "ChatMessageCount"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+            }
+        }
+
+        [Test]
+        public void OnlineMatchController_RequestSendChatMessageRejectsBlankInput()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            GameObject host = new GameObject("OnlineHudChatBlankRegression_OnlineMatchController");
+
+            try
+            {
+                object controller = host.AddComponent(controllerType);
+
+                Assert.IsTrue((bool)Invoke(controller, "EditorForceActionPreviewForSmokeTest"));
+                Assert.IsFalse((bool)Invoke(controller, "RequestSendChatMessage", "   "));
+                StringAssert.Contains("内容为空", PropertyString(controller, "Status"));
+                Assert.AreEqual(0, PropertyInt(controller, "ChatMessageCount"));
             }
             finally
             {

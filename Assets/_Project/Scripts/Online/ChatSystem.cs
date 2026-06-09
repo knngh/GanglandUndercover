@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using GanglandUndercover.Core;
 using UnityEngine;
 
@@ -55,7 +56,7 @@ namespace GanglandUndercover.Online
         private string inputBuffer = string.Empty;
         private bool isInputActive;
         private Vector2 scrollPosition;
-        private float lastSendTime;
+        private float lastSendTime = -SendCooldown;
 
         /// <summary>当前是否允许发送消息。</summary>
         public bool CanSend { get; set; }
@@ -100,6 +101,23 @@ namespace GanglandUndercover.Online
                     return "鬼魂频道";
                 default:
                     return "聊天";
+            }
+        }
+
+        public static string ChannelShortTag(ChatChannel channel)
+        {
+            switch (channel)
+            {
+                case ChatChannel.Meeting:
+                    return "[会]";
+                case ChatChannel.Global:
+                    return "[全]";
+                case ChatChannel.Proximity:
+                    return "[近]";
+                case ChatChannel.Ghost:
+                    return "[鬼]";
+                default:
+                    return "[聊]";
             }
         }
 
@@ -199,6 +217,44 @@ namespace GanglandUndercover.Online
 
         /// <summary>获取本地举报快照列表（后续可接后台上报）。</summary>
         public IReadOnlyList<ChatReport> Reports => reports;
+
+        public string BuildMessageFeedText(int maxLines)
+        {
+            if (messages.Count == 0)
+            {
+                return "暂无聊天消息。";
+            }
+
+            int lineCount = Mathf.Clamp(maxLines, 1, MaxMessages);
+            int start = Mathf.Max(0, messages.Count - lineCount);
+            StringBuilder builder = new StringBuilder();
+
+            for (int i = start; i < messages.Count; i++)
+            {
+                if (builder.Length > 0)
+                {
+                    builder.AppendLine();
+                }
+
+                builder.Append(FormatMessageLine(messages[i]));
+            }
+
+            return builder.ToString();
+        }
+
+        public static string FormatMessageLine(ChatMessage message)
+        {
+            string senderName = Sanitize(message.SenderName) ?? string.Empty;
+            string content = Sanitize(message.Content) ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(senderName))
+            {
+                senderName = "匿名";
+            }
+
+            string deadSuffix = message.IsDead ? " [亡]" : string.Empty;
+            return ChannelShortTag(message.Channel) + " " + senderName + deadSuffix + ": " + content;
+        }
 
         public void BlockSender(string senderId)
         {
