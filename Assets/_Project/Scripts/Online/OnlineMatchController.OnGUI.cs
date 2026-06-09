@@ -26,7 +26,12 @@ namespace GanglandUndercover.Online
         public string MatchTimeText => FormatMatchTime(matchElapsedSeconds);
         public string HazardSummary => BuildHazardSummary();
         public string LocalActionHint => BuildLocalActionHint();
-        public string VoiceHudLine => chatSystem != null ? "聊天: " + chatSystem.CurrentChannel + " | " + chatSystem.MessageCount + "条消息" : "聊天未连接";
+        public string VoiceHudLine => chatSystem != null
+            ? "聊天: " + chatSystem.CurrentChannel
+                + " | " + chatSystem.MessageCount + "条消息"
+                + " | 屏蔽 " + chatSystem.BlockedSenderCount
+                + " | 举报 " + chatSystem.ReportCount
+            : "聊天未连接";
         public string FocusedIntelText => BuildFocusedIntel();
         public string TaskListText => BuildTaskList();
         public string CaseLogText => BuildCaseLog();

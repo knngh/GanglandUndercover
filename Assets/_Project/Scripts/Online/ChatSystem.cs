@@ -229,6 +229,23 @@ namespace GanglandUndercover.Online
             return ReportMessage(messages[messages.Count - 1], reason);
         }
 
+        public bool BlockLatestSender()
+        {
+            if (messages.Count == 0)
+            {
+                return false;
+            }
+
+            string senderId = NormalizeSenderId(messages[messages.Count - 1].SenderId);
+            if (string.IsNullOrEmpty(senderId) || senderId == "system")
+            {
+                return false;
+            }
+
+            BlockSender(senderId);
+            return true;
+        }
+
         public bool ReportMessage(ChatMessage message, string reason)
         {
             if (string.IsNullOrWhiteSpace(message.SenderId) || string.IsNullOrWhiteSpace(message.Content))
@@ -337,8 +354,32 @@ namespace GanglandUndercover.Online
 
             // 输入区域
             DrawInputArea(skin);
+            DrawSafetyActions(skin);
 
             GUILayout.EndArea();
+        }
+
+        private void DrawSafetyActions(GUISkin skin)
+        {
+            GUILayout.BeginHorizontal();
+
+            GUI.enabled = messages.Count > 0;
+            if (GUILayout.Button("举报最近", GUILayout.Width(76f)))
+            {
+                ReportLatestMessage("玩家举报");
+            }
+
+            if (GUILayout.Button("屏蔽最近", GUILayout.Width(76f)))
+            {
+                BlockLatestSender();
+            }
+
+            GUI.enabled = true;
+
+            GUIStyle statusStyle = new GUIStyle(skin?.label ?? GUI.skin.label);
+            statusStyle.normal.textColor = MutedColor;
+            GUILayout.Label("已屏蔽 " + blockedSenderIds.Count + " | 举报 " + reports.Count, statusStyle, GUILayout.ExpandWidth(true));
+            GUILayout.EndHorizontal();
         }
 
         private void DrawHeader(string title, GUISkin skin)

@@ -1178,7 +1178,7 @@ namespace GanglandUndercover.Online
             meetingBodyText.text = Localization.T("meeting.reason") + controller.LastMeetingReason
                 + "\n" + Localization.T("meeting.evidence") + controller.MeetingEvidenceDossier
                 + "\n" + Localization.T("meeting.tally") + controller.VoteTallySummary
-                + "\n" + Localization.T("meeting.voice") + controller.VoiceHudLine
+                + "\n聊天：" + controller.VoiceHudLine
                 + "\n" + Localization.T("meeting.outcome") + controller.LastVoteOutcome;
 
             resultTitleText.text = Localization.T("result.title");
@@ -1322,7 +1322,7 @@ namespace GanglandUndercover.Online
                     return "会议原因: " + controller.LastMeetingReason
                         + "\n证据墙: " + controller.MeetingEvidenceDossier
                         + "\n票型: " + controller.VoteTallySummary
-                        + "\n语音: " + controller.VoiceHudLine;
+                        + "\n聊天: " + controller.VoiceHudLine;
                 case OnlineMatchPhase.Result:
                     return controller.ResultSummary + "\n\n" + controller.ResultRosterLine;
                 default:

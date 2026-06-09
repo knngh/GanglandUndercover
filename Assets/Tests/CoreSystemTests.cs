@@ -201,6 +201,20 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ChatSystem_BlockLatestSenderBlocksFollowUpMessages()
+        {
+            object chat = CreateChatSystem();
+            ReceiveChatMessage(chat, "7", "可疑玩家", "第一条");
+
+            bool blocked = (bool)Invoke(chat, "BlockLatestSender");
+            ReceiveChatMessage(chat, "7", "可疑玩家", "第二条");
+
+            Assert.IsTrue(blocked);
+            Assert.AreEqual(1, PropertyInt(chat, "MessageCount"));
+            Assert.AreEqual(1, PropertyInt(chat, "BlockedSenderCount"));
+        }
+
+        [Test]
         public void ChatSystem_ReportLatestMessageStoresSanitizedSnapshot()
         {
             object chat = CreateChatSystem();
