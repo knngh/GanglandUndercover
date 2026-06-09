@@ -764,12 +764,22 @@ namespace GanglandUndercover.Online
 
             reader.ReadValueSafe(out int actionValue);
             reader.ReadValueSafe(out ulong targetClientId);
+            if (!IsDefinedOnlineAction(actionValue))
+            {
+                return;
+            }
+
             ApplyClientAction(senderClientId, (OnlineActionType)actionValue, targetClientId);
         }
 
         // --- ApplyClientAction ---
         private void ApplyClientAction(ulong senderClientId, OnlineActionType actionType, ulong targetClientId)
         {
+            if (!IsDefinedOnlineAction((int)actionType))
+            {
+                return;
+            }
+
             if ((!localPreviewMode && (networkManager == null || !networkManager.IsServer)) || !players.TryGetValue(senderClientId, out OnlinePlayerState player))
             {
                 return;
@@ -824,18 +834,59 @@ namespace GanglandUndercover.Online
         // --- ApplyClientState ---
         private void ApplyClientState(ulong senderClientId, Vector3 position, Vector2 input, bool ready)
         {
-            OnlinePlayerState state = players.TryGetValue(senderClientId, out OnlinePlayerState existing)
+            if (!IsFinite(position) || !IsFinite(input))
+            {
+                return;
+            }
+
+            bool knownPlayer = players.TryGetValue(senderClientId, out OnlinePlayerState existing);
+            if (!knownPlayer && matchStarted && phase != OnlineMatchPhase.Lobby)
+            {
+                return;
+            }
+
+            OnlinePlayerState state = knownPlayer
                 ? existing
                 : new OnlinePlayerState(senderClientId, "玩家" + senderClientId, position, ready, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
 
             if (!matchStarted || phase == OnlineMatchPhase.Lobby)
             {
                 state.Position = mapService.ClampToOnlineMap(position);
+                state.Ready = ready;
             }
 
-            state.Input = state.Alive && phase == OnlineMatchPhase.Action ? input : Vector2.zero;
-            state.Ready = ready;
+            state.Input = state.Alive && phase == OnlineMatchPhase.Action ? ClampClientInput(input) : Vector2.zero;
             players[senderClientId] = state;
+        }
+
+        // --- IsDefinedOnlineAction ---
+        private static bool IsDefinedOnlineAction(int actionValue)
+        {
+            return Enum.IsDefined(typeof(OnlineActionType), actionValue);
+        }
+
+        // --- ClampClientInput ---
+        private static Vector2 ClampClientInput(Vector2 input)
+        {
+            return input.sqrMagnitude > 1f ? input.normalized : input;
+        }
+
+        // --- IsFinite ---
+        private static bool IsFinite(Vector2 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y);
+        }
+
+        // --- IsFinite ---
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        }
+
+        // --- IsFinite ---
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         // --- ApplyClientProfile ---

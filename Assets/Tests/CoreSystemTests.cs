@@ -456,6 +456,68 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ClientState_RejectsNonFinitePositionAndInput()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Lobby");
+                fixture.SetPlayer(7UL, new Vector3(2f, 3f, 0f), alive: true);
+
+                fixture.ApplyClientState(
+                    7UL,
+                    new Vector3(float.NaN, 9f, 0f),
+                    new Vector2(float.PositiveInfinity, 1f),
+                    false);
+
+                Assert.AreEqual(new Vector3(2f, 3f, 0f), fixture.PlayerPosition(7UL));
+                Assert.AreEqual(Vector2.zero, fixture.PlayerInput(7UL));
+                Assert.IsTrue(fixture.PlayerReady(7UL));
+            }
+        }
+
+        [Test]
+        public void ClientState_ClampsActionInputAndIgnoresReadyChangesDuringMatch()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(7UL, new Vector3(2f, 3f, 0f), alive: true);
+                fixture.SetPlayerReady(7UL, false);
+
+                fixture.ApplyClientState(7UL, new Vector3(50f, 50f, 0f), new Vector2(12f, 0f), true);
+
+                Assert.AreEqual(new Vector3(2f, 3f, 0f), fixture.PlayerPosition(7UL));
+                Assert.AreEqual(new Vector2(1f, 0f), fixture.PlayerInput(7UL));
+                Assert.IsFalse(fixture.PlayerReady(7UL));
+            }
+        }
+
+        [Test]
+        public void ClientState_DoesNotSpawnUnknownPlayersAfterActionStarts()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Action");
+
+                fixture.ApplyClientState(99UL, new Vector3(4f, 5f, 0f), Vector2.right, true);
+
+                Assert.IsFalse(fixture.HasPlayer(99UL));
+            }
+        }
+
+        [Test]
+        public void ClientAction_RejectsUndefinedActionValues()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            MethodInfo method = StaticNonPublic(controllerType, "IsDefinedOnlineAction");
+
+            Assert.IsTrue((bool)method.Invoke(null, new object[] { 0 }));
+            Assert.IsTrue((bool)method.Invoke(null, new object[] { 6 }));
+            Assert.IsFalse((bool)method.Invoke(null, new object[] { -1 }));
+            Assert.IsFalse((bool)method.Invoke(null, new object[] { 1000 }));
+        }
+
+        [Test]
         public void OnboardingGuidance_LobbyShowsIdentityObjectiveAndActionPrompt()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -1196,6 +1258,41 @@ namespace GanglandUndercover.Tests
                 privateRoles.GetType().GetMethod("Add").Invoke(privateRoles, new[] { (object)clientId, role });
             }
 
+            public void SetPlayerReady(ulong clientId, bool ready)
+            {
+                object state = GetPlayerState(clientId);
+                playerStateType.GetField("Ready").SetValue(state, ready);
+                SetPlayerState(clientId, state);
+            }
+
+            public bool HasPlayer(ulong clientId)
+            {
+                object players = GetField("players");
+                return (bool)players.GetType().GetMethod("ContainsKey").Invoke(players, new object[] { clientId });
+            }
+
+            public Vector3 PlayerPosition(ulong clientId)
+            {
+                return (Vector3)playerStateType.GetField("Position").GetValue(GetPlayerState(clientId));
+            }
+
+            public Vector2 PlayerInput(ulong clientId)
+            {
+                return (Vector2)playerStateType.GetField("Input").GetValue(GetPlayerState(clientId));
+            }
+
+            public bool PlayerReady(ulong clientId)
+            {
+                return (bool)playerStateType.GetField("Ready").GetValue(GetPlayerState(clientId));
+            }
+
+            public void ApplyClientState(ulong clientId, Vector3 position, Vector2 input, bool ready)
+            {
+                controllerType
+                    .GetMethod("ApplyClientState", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new object[] { clientId, position, input, ready });
+            }
+
             public string PropertyString(string propertyName)
             {
                 return (string)controllerType.GetProperty(propertyName).GetValue(controller);
@@ -1240,6 +1337,18 @@ namespace GanglandUndercover.Tests
             {
                 return controllerType.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .GetValue(controller);
+            }
+
+            private object GetPlayerState(ulong clientId)
+            {
+                object players = GetField("players");
+                return players.GetType().GetProperty("Item").GetValue(players, new object[] { clientId });
+            }
+
+            private void SetPlayerState(ulong clientId, object state)
+            {
+                object players = GetField("players");
+                players.GetType().GetProperty("Item").SetValue(players, state, new object[] { clientId });
             }
 
             private void SetField(string fieldName, object value)
