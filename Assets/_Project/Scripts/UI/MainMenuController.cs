@@ -1,5 +1,6 @@
 using GanglandUndercover.Audio;
 using GanglandUndercover.Gameplay;
+using GanglandUndercover.Online;
 using GanglandUndercover.SocialDeduction;
 using GanglandUndercover.Tutorial;
 using UnityEngine;
@@ -65,12 +66,16 @@ namespace GanglandUndercover.UI
         private Image _selectionHighlight;
         private Image _mapHighlight;
         private Text _mapDescText; // 地图描述文本引用
+        private Text _loginStatusText;
+        private Text _settingsStatusText;
+        private string _onlinePlayerName = "港区玩家";
 
         public bool IsVisible => _visible;
 
         public void Initialize(PrototypeBootstrap bootstrap)
         {
             _bootstrap = bootstrap;
+            EnsureSettingsManager();
             BuildUI();
             if (_visible) Show(); else Hide();
         }
@@ -193,26 +198,54 @@ namespace GanglandUndercover.UI
             var onlinePanel = CreateBorderedPanel("OnlinePanel", _rootPanel.transform, PanelBg);
             Center(onlinePanel, 470f, 0f, 720f, 530f);
 
-            PanelHeader(onlinePanel.transform, "联 机 模 式", "多人对战 · Unity Netcode + Relay", -22f);
+            PanelHeader(onlinePanel.transform, "登 录 / 联 机", "匿名登录 · Lobby / Relay / Sessions", -22f);
             Divider(onlinePanel.transform, -54f, 500f);
 
             var infoT = MakeText("OnlineInfo", onlinePanel.transform,
-                "通过房间码加入同一对局\n支持 4 人联机推理对战\n语音/文字交流（需自行组队）",
+                "使用 Unity 匿名登录进入大厅\n房间列表、Relay 房间码和文本聊天会沿用这个玩家代号",
                 ThemeManager.FontSizeSmall, TextMuted, FontStyle.Normal, TextAnchor.MiddleCenter);
-            Center(infoT.gameObject, 0f, -150f, 480f, 110f);
+            Center(infoT.gameObject, 0f, -104f, 540f, 64f);
+
+            var nameT = MakeText("OnlineNameLabel", onlinePanel.transform,
+                "玩家代号", ThemeManager.FontSizeSmall, TextMuted, FontStyle.Bold, TextAnchor.MiddleLeft);
+            Center(nameT.gameObject, -158f, -160f, 120f, 26f);
+
+            var nameInput = BuildInput("OnlinePlayerNameInput", onlinePanel.transform, _onlinePlayerName, 320f, 42f);
+            Center(nameInput, 42f, -160f, 320f, 42f);
+            InputField nameField = nameInput.GetComponent<InputField>();
+            nameField.onEndEdit.AddListener(value => OnOnlinePlayerNameChanged(value));
+
+            _loginStatusText = MakeText("LoginStatus", onlinePanel.transform,
+                BuildLoginStatusLine(null), ThemeManager.FontSizeFooter, TextMuted, FontStyle.Normal, TextAnchor.UpperLeft);
+            Center(_loginStatusText.gameObject, 0f, -216f, 520f, 54f);
 
             var enterBtn = BuildButton("EnterLobbyButton", onlinePanel.transform,
                 "进  入  大  厅", 280f, ThemeManager.ButtonHeight + 4f,
                 BtnPrimary, Color.white, ThemeManager.FontSizeButton);
-            Center(enterBtn, 0f, -250f, 280f, ThemeManager.ButtonHeight + 4f);
+            Center(enterBtn, 0f, -286f, 280f, ThemeManager.ButtonHeight + 4f);
             enterBtn.GetComponent<Button>().onClick.AddListener(OnEnterLobby);
 
             // F1: 重看教程按钮
             var tutorialBtn = BuildButton("ReplayTutorialButton", onlinePanel.transform,
                 "教  程  回  顾", 280f, ThemeManager.ButtonHeight + 4f,
                 MoleTeal, Color.white, ThemeManager.FontSizeButton);
-            Center(tutorialBtn, 0f, -320f, 280f, ThemeManager.ButtonHeight + 4f);
+            Center(tutorialBtn, 0f, -354f, 280f, ThemeManager.ButtonHeight + 4f);
             tutorialBtn.GetComponent<Button>().onClick.AddListener(OnReplayTutorial);
+
+            // ── 设置中心 ──────────────────────────────────
+            SubHeader(onlinePanel.transform, "—  设 置 中 心  —", -416f);
+            _settingsStatusText = MakeText("SettingsStatus", onlinePanel.transform,
+                BuildSettingsStatusLine(CurrentSettings()), ThemeManager.FontSizeFooter, TextMuted, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Center(_settingsStatusText.gameObject, 0f, -440f, 560f, 24f);
+
+            const float settingBtnW = 112f;
+            const float settingBtnH = 34f;
+            const float settingGap = 14f;
+            float settingStart = -((settingBtnW + settingGap) * 4f - settingGap) * 0.5f + settingBtnW * 0.5f;
+            BuildSettingsButton(onlinePanel.transform, "音量", settingStart, -478f, settingBtnW, settingBtnH, OnCycleMasterVolume);
+            BuildSettingsButton(onlinePanel.transform, "画质", settingStart + (settingBtnW + settingGap), -478f, settingBtnW, settingBtnH, OnCycleQuality);
+            BuildSettingsButton(onlinePanel.transform, "窗口", settingStart + (settingBtnW + settingGap) * 2f, -478f, settingBtnW, settingBtnH, OnCycleWindowMode);
+            BuildSettingsButton(onlinePanel.transform, "色盲", settingStart + (settingBtnW + settingGap) * 3f, -478f, settingBtnW, settingBtnH, OnCycleColorBlindMode);
 
             // ── 底部版本号 ──────────────────────────────────
             var verT = MakeText("Version", _rootPanel.transform,
@@ -297,6 +330,7 @@ namespace GanglandUndercover.UI
 
         private void OnEnterLobby()
         {
+            _bootstrap?.SetOnlinePlayerName(_onlinePlayerName);
             Hide();
             _bootstrap?.StartOnlineGame();
         }
@@ -473,6 +507,35 @@ namespace GanglandUndercover.UI
             return o;
         }
 
+        private static GameObject BuildInput(string n, Transform p, string value, float w, float h)
+        {
+            var o = new GameObject(n, typeof(RectTransform), typeof(Image), typeof(InputField));
+            o.transform.SetParent(p, false);
+            o.GetComponent<Image>().color = ThemeManager.InputBackground;
+
+            var field = o.GetComponent<InputField>();
+            field.characterLimit = 16;
+            field.lineType = InputField.LineType.SingleLine;
+
+            var text = MakeText("Text", o.transform, value, ThemeManager.FontSizeSmall, TextPrimary, FontStyle.Normal, TextAnchor.MiddleLeft);
+            Stretch(text.gameObject, Vector2.zero, Vector2.one, new Vector2(12f, 0f), new Vector2(-12f, 0f));
+            field.textComponent = text;
+            field.text = value;
+
+            var placeholder = MakeText("Placeholder", o.transform, "港区玩家", ThemeManager.FontSizeSmall, TextMuted, FontStyle.Normal, TextAnchor.MiddleLeft);
+            Stretch(placeholder.gameObject, Vector2.zero, Vector2.one, new Vector2(12f, 0f), new Vector2(-12f, 0f));
+            field.placeholder = placeholder;
+            return o;
+        }
+
+        private static GameObject BuildSettingsButton(Transform parent, string label, float x, float y, float w, float h, System.Action onClick)
+        {
+            GameObject button = BuildButton("Settings_" + label, parent, label, w, h, ThemeManager.WithAlpha(MoleTeal, 0.58f), Color.white, ThemeManager.FontSizeFooter);
+            Center(button, x, y, w, h);
+            button.GetComponent<Button>().onClick.AddListener(() => onClick());
+            return button;
+        }
+
         private static Text MakeText(string n, Transform p, string content, int fs, Color c, FontStyle s, TextAnchor a)
         {
             var o = new GameObject(n, typeof(RectTransform), typeof(Text));
@@ -560,6 +623,111 @@ namespace GanglandUndercover.UI
                 int.Parse(h.Substring(2, 2), System.Globalization.NumberStyles.HexNumber) / 255f,
                 int.Parse(h.Substring(4, 2), System.Globalization.NumberStyles.HexNumber) / 255f,
                 1f);
+        }
+
+        private void OnOnlinePlayerNameChanged(string value)
+        {
+            _onlinePlayerName = LimitText(value, 16, "港区玩家");
+            _bootstrap?.SetOnlinePlayerName(_onlinePlayerName);
+            RefreshLoginStatus();
+        }
+
+        private void OnCycleMasterVolume()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            float current = settings.Current.MasterVolume;
+            float next = current >= 0.99f ? 0.4f : Mathf.Clamp01(current + 0.2f);
+            settings.SetMasterVolume(next);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnCycleQuality()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetQualityPreset((settings.Current.QualityPreset + 1) % SettingsManager.QualityPresetNames.Length);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnCycleWindowMode()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetWindowMode((settings.Current.WindowMode + 1) % SettingsData.WindowModeNames.Length);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnCycleColorBlindMode()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetColorBlindMode((settings.Current.ColorBlindMode + 1) % 4);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void RefreshLoginStatus()
+        {
+            if (_loginStatusText != null)
+            {
+                _loginStatusText.text = BuildLoginStatusLine(FindAnyObjectByType<UnityServiceBootstrap>());
+            }
+        }
+
+        private void RefreshSettingsStatus()
+        {
+            if (_settingsStatusText != null)
+            {
+                _settingsStatusText.text = BuildSettingsStatusLine(CurrentSettings());
+            }
+        }
+
+        private static SettingsData CurrentSettings()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            return settings != null ? settings.Current : SettingsData.CreateDefault();
+        }
+
+        private static SettingsManager EnsureSettingsManager()
+        {
+            if (SettingsManager.Instance != null)
+            {
+                return SettingsManager.Instance;
+            }
+
+            GameObject settingsObject = new GameObject("Settings Manager");
+            SettingsManager manager = settingsObject.AddComponent<SettingsManager>();
+            return manager;
+        }
+
+        private static string BuildLoginStatusLine(UnityServiceBootstrap service)
+        {
+            if (service == null)
+            {
+                return "登录: 匿名账号将在进入大厅后初始化\nCloud/Auth/Lobby/Relay 状态会在联机 HUD 中继续显示";
+            }
+
+            string player = string.IsNullOrWhiteSpace(service.PlayerId) ? "未分配" : service.PlayerId;
+            return "登录: " + (service.AuthenticationReady ? "匿名账号已就绪" : "等待匿名登录")
+                + " | PlayerId " + player
+                + "\n" + service.ServiceReadinessSummary;
+        }
+
+        private static string BuildSettingsStatusLine(SettingsData data)
+        {
+            SettingsData safe = data ?? SettingsData.CreateDefault();
+            string quality = SettingsManager.QualityPresetNames[Mathf.Clamp(safe.QualityPreset, 0, SettingsManager.QualityPresetNames.Length - 1)];
+            string window = SettingsData.WindowModeNames[Mathf.Clamp(safe.WindowMode, 0, SettingsData.WindowModeNames.Length - 1)];
+            return "音量 " + Mathf.RoundToInt(safe.MasterVolume * 100f)
+                + "% | 画质 " + quality
+                + " | " + window
+                + " | 色盲 " + safe.ColorBlindMode;
+        }
+
+        private static string LimitText(string value, int maxLength, string fallback)
+        {
+            string safe = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+            return safe.Length <= maxLength ? safe : safe.Substring(0, maxLength);
         }
     }
 }

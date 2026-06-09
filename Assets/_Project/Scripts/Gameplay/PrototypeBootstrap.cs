@@ -30,6 +30,7 @@ namespace GanglandUndercover.Gameplay
         private MainMenuController _mainMenuController;
         private GameOverController _gameOverController;
         private LobbyController _lobbyController;
+        private string _onlinePlayerName = "港区玩家";
 
         private void Awake()
         {
@@ -98,6 +99,11 @@ namespace GanglandUndercover.Gameplay
             BuildOnlinePrototype();
             CreateGameOverController();
             CreateLobbyController();
+        }
+
+        public void SetOnlinePlayerName(string playerName)
+        {
+            _onlinePlayerName = LimitOnlinePlayerName(playerName);
         }
 
         /// <summary>
@@ -210,8 +216,15 @@ namespace GanglandUndercover.Gameplay
 
             GameObject onlineObject = new GameObject("Port Undercover Online");
             onlineObject.AddComponent<UnityServiceBootstrap>();
-            onlineObject.AddComponent<OnlineMatchController>();
+            OnlineMatchController controller = onlineObject.AddComponent<OnlineMatchController>();
+            controller.SetLocalPlayerName(_onlinePlayerName);
             onlineObject.AddComponent<OnlineSyncManager>();
+        }
+
+        private static string LimitOnlinePlayerName(string value)
+        {
+            string safe = string.IsNullOrWhiteSpace(value) ? "港区玩家" : value.Trim();
+            return safe.Length <= 16 ? safe : safe.Substring(0, 16);
         }
 
         private void CreateGameOverController()

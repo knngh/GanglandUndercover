@@ -233,6 +233,44 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void MainMenuLoginStatus_NoServiceExplainsAnonymousInitialization()
+        {
+            string status = BuildMainMenuLoginStatus(null);
+
+            StringAssert.Contains("匿名账号", status);
+            StringAssert.Contains("进入大厅", status);
+            StringAssert.Contains("Cloud/Auth/Lobby/Relay", status);
+        }
+
+        [Test]
+        public void MainMenuSettingsStatus_UsesCurrentSettingsValues()
+        {
+            object settings = InvokeStatic(RuntimeType("GanglandUndercover.UI.SettingsData"), "CreateDefault");
+            settings.GetType().GetProperty("MasterVolume").SetValue(settings, 0.6f);
+            settings.GetType().GetProperty("QualityPreset").SetValue(settings, 3);
+            settings.GetType().GetProperty("WindowMode").SetValue(settings, 2);
+            settings.GetType().GetProperty("ColorBlindMode").SetValue(settings, 1);
+
+            string status = BuildMainMenuSettingsStatus(settings);
+
+            StringAssert.Contains("音量 60%", status);
+            StringAssert.Contains("画质 极致", status);
+            StringAssert.Contains("无边框", status);
+            StringAssert.Contains("色盲 1", status);
+        }
+
+        [Test]
+        public void MainMenuPlayerNameInput_TrimsFallbackAndCapsLength()
+        {
+            Type menuType = RuntimeType("GanglandUndercover.UI.MainMenuController");
+            MethodInfo limitText = StaticNonPublic(menuType, "LimitText");
+
+            Assert.AreEqual("港区玩家", limitText.Invoke(null, new object[] { "   ", 16, "港区玩家" }));
+            Assert.AreEqual("九龙玩家", limitText.Invoke(null, new object[] { "  九龙玩家  ", 16, "港区玩家" }));
+            Assert.AreEqual("abcdefghijklmnop", limitText.Invoke(null, new object[] { "abcdefghijklmnopq", 16, "港区玩家" }));
+        }
+
+        [Test]
         public void RelayLobbySummary_EmptyStateGuidesCreateOrJoin()
         {
             string summary = BuildRelayLobbySummary(
@@ -1442,6 +1480,18 @@ namespace GanglandUndercover.Tests
             object faction = Enum.Parse(RuntimeType("GanglandUndercover.Core.Faction"), "Police");
             object channel = Enum.Parse(RuntimeType("GanglandUndercover.Online.ChatChannel"), channelName);
             Invoke(chat, "ReceiveMessage", senderId, senderName, content, false, faction, channel);
+        }
+
+        private static string BuildMainMenuLoginStatus(object service)
+        {
+            Type menuType = RuntimeType("GanglandUndercover.UI.MainMenuController");
+            return (string)StaticNonPublic(menuType, "BuildLoginStatusLine").Invoke(null, new[] { service });
+        }
+
+        private static string BuildMainMenuSettingsStatus(object settings)
+        {
+            Type menuType = RuntimeType("GanglandUndercover.UI.MainMenuController");
+            return (string)StaticNonPublic(menuType, "BuildSettingsStatusLine").Invoke(null, new[] { settings });
         }
 
         private static string BuildRelayLobbySummary(
