@@ -39,6 +39,9 @@ namespace GanglandUndercover.PlayTests
             _controllerType = Type.GetType($"{ControllerTypeName}, {RuntimeAssemblyName}");
             Assert.IsNotNull(_controllerType, $"找不到运行时类型 {ControllerTypeName}。");
 
+            DestroyObjectsOfType(typeof(NetworkManager));
+            DestroyObjectsOfType(_controllerType);
+
             _port = AllocateUdpPort();
             _serverNetworkManager = CreateNetworkManager("CustomMessageTest_ServerNetworkManager", _port, true);
 
@@ -67,7 +70,7 @@ namespace GanglandUndercover.PlayTests
             {
                 if (_ownedObjects[i] != null)
                 {
-                    UnityEngine.Object.Destroy(_ownedObjects[i]);
+                    UnityEngine.Object.DestroyImmediate(_ownedObjects[i]);
                 }
             }
         }
@@ -152,10 +155,22 @@ namespace GanglandUndercover.PlayTests
             yield return RunFrames(8);
             Assert.AreEqual(0, GetServerChatMessageCount(), "Client 伪造 ChatBroadcast 不应污染 Host/Server 本地聊天。");
 
+            SetPhase("Lobby");
+            SendChatSendFromClient("大厅阶段|不应显示");
+            yield return RunFrames(8);
+            Assert.AreEqual(0, GetServerChatMessageCount(), "Lobby 阶段的 ChatSend 不应进入服务器聊天。");
+
+            SetPhase("Action");
             SendChatSendFromClient("<b>码头|安全</b>");
             yield return WaitUntilOrFail(
                 () => ServerChatContainsContent("码头|安全"),
                 "合法 ChatSend 应通过真实 named-message 路径到达服务器并完成清洗。");
+
+            int chatCountAfterFirstAccepted = GetServerChatMessageCount();
+            SendChatSendFromClient("刷屏|不应显示");
+            yield return RunFrames(8);
+            Assert.AreEqual(chatCountAfterFirstAccepted, GetServerChatMessageCount(), "连续 ChatSend 应被服务器限流拒绝。");
+            Assert.IsFalse(ServerChatContainsContent("刷屏|不应显示"), "被限流的 ChatSend 不应进入服务器聊天。");
         }
 
         private NetworkManager CreateNetworkManager(string name, ushort port, bool server)
@@ -204,7 +219,24 @@ namespace GanglandUndercover.PlayTests
 
             if (template != null && template.scene.IsValid())
             {
-                UnityEngine.Object.Destroy(template);
+                UnityEngine.Object.DestroyImmediate(template);
+            }
+        }
+
+        private static void DestroyObjectsOfType(Type type)
+        {
+            if (type == null)
+            {
+                return;
+            }
+
+            UnityEngine.Object[] objects = UnityEngine.Object.FindObjectsByType(type);
+            for (int i = objects.Length - 1; i >= 0; i--)
+            {
+                if (objects[i] is Component component && component.gameObject != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(component.gameObject);
+                }
             }
         }
 

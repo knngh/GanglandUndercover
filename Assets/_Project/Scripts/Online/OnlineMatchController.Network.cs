@@ -20,6 +20,7 @@ namespace GanglandUndercover.Online
         private const int ChatMaxNameBytes = 256;
         private const int ChatMaxIdBytes = 64;
         private const int ChatWriterCapacityBytes = ChatMaxContentBytes + 1024;
+        private const float ServerChatSendCooldownSeconds = 5f;
         private const int MaxSnapshotPlayers = 64;
         private const int MaxSnapshotTasks = 256;
         private const int MaxSnapshotBodies = 128;
@@ -535,6 +536,7 @@ namespace GanglandUndercover.Online
             privateRoles.Clear();
             killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
+            serverChatLastSendTimes.Clear();
             _botController?.Clear();
             localRole = OnlineRole.Unassigned;
             phase = OnlineMatchPhase.Lobby;
@@ -660,6 +662,7 @@ namespace GanglandUndercover.Online
             privateRoles.Remove(clientId);
             killSystem.killCooldowns.Remove(clientId);
             abilityCooldowns.Remove(clientId);
+            serverChatLastSendTimes.Remove(clientId);
             _botController?.RemoveBot(clientId);
 
             if (networkManager != null && networkManager.IsServer)
@@ -1578,6 +1581,11 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            if (!CanAcceptServerChatSend(senderClientId))
+            {
+                return;
+            }
+
             OnlineRole role = GetPrivateRole(senderClientId);
             ChatChannel channel = ChatSystem.DetermineChannel(phase, senderState.Alive);
             Vector3 senderPos = senderState.Position;
@@ -1659,6 +1667,26 @@ namespace GanglandUndercover.Online
             {
                 writer.Dispose();
             }
+        }
+
+        // --- CanAcceptServerChatSend ---
+        private bool CanAcceptServerChatSend(ulong senderClientId)
+        {
+            if (phase != OnlineMatchPhase.Action
+                && phase != OnlineMatchPhase.Meeting
+                && phase != OnlineMatchPhase.Voting)
+            {
+                return false;
+            }
+
+            if (serverChatLastSendTimes.TryGetValue(senderClientId, out float lastSentAt)
+                && Time.time - lastSentAt < ServerChatSendCooldownSeconds)
+            {
+                return false;
+            }
+
+            serverChatLastSendTimes[senderClientId] = Time.time;
+            return true;
         }
 
         // --- ReceiveChatBroadcast ---

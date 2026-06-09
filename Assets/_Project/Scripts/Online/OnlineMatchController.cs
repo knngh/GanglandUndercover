@@ -140,6 +140,7 @@ namespace GanglandUndercover.Online
         private OnlineRole localRole = OnlineRole.Unassigned;
         private OnlineMatchPhase phase = OnlineMatchPhase.Lobby;
         private ChatSystem chatSystem;
+        private readonly Dictionary<ulong, float> serverChatLastSendTimes = new Dictionary<ulong, float>();
         private bool localReady;
         private bool roomAutoFillAi;
         private bool revealRoleOnEject;
@@ -945,6 +946,7 @@ namespace GanglandUndercover.Online
             privateRoles.Clear();
             killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
+            serverChatLastSendTimes.Clear();
             _botController?.ClearVoteTimers();
             killSystem.nextBodyId = 0;
             activeTaskId = -1;
@@ -3433,6 +3435,7 @@ namespace GanglandUndercover.Online
             killSystem.bodies.Clear();
             killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
+            serverChatLastSendTimes.Clear();
             _botController?.Clear();
             migrationManager?.ResetState();
             BuildDefaultTasks();
