@@ -1669,6 +1669,11 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            if (!IsServerSender(senderClientId))
+            {
+                return;
+            }
+
             if (TryReadChatBroadcastPayload(
                     ref reader,
                     out string senderId,

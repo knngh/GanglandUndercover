@@ -22,6 +22,8 @@ namespace GanglandUndercover.PlayTests
         private const string ClientActionMessage = "GanglandClientAction";
         private const string ServerSnapshotMessage = "GanglandServerSnapshot";
         private const string RoleAssignMessage = "GanglandRoleAssign";
+        private const string ChatSendMessage = "GanglandChatSend";
+        private const string ChatBroadcastMessage = "GanglandChatBroadcast";
         private const string MapSelectMessage = "GanglandMapSelect";
 
         private readonly List<GameObject> _ownedObjects = new List<GameObject>();
@@ -143,6 +145,17 @@ namespace GanglandUndercover.PlayTests
             yield return RunFrames(8);
             Assert.IsFalse((bool)GetProp("MatchStarted"), "Client 伪造 ServerSnapshot 不应改变服务器对局启动状态。");
             Assert.AreEqual("Lobby", GetProp("Phase").ToString(), "Client 伪造 ServerSnapshot 不应改变服务器阶段。");
+
+            ClearServerChat();
+            SetPhase("Action");
+            SendChatBroadcastFromClient("伪造广播|不应显示");
+            yield return RunFrames(8);
+            Assert.AreEqual(0, GetServerChatMessageCount(), "Client 伪造 ChatBroadcast 不应污染 Host/Server 本地聊天。");
+
+            SendChatSendFromClient("<b>码头|安全</b>");
+            yield return WaitUntilOrFail(
+                () => ServerChatContainsContent("码头|安全"),
+                "合法 ChatSend 应通过真实 named-message 路径到达服务器并完成清洗。");
         }
 
         private NetworkManager CreateNetworkManager(string name, ushort port, bool server)
@@ -261,6 +274,40 @@ namespace GanglandUndercover.PlayTests
             _clientNetworkManager.CustomMessagingManager.SendNamedMessage(ServerSnapshotMessage, NetworkManager.ServerClientId, writer);
         }
 
+        private void SendChatSendFromClient(string content)
+        {
+            FastBufferWriter writer = new FastBufferWriter(8192, Allocator.Temp);
+            try
+            {
+                object[] args = { writer, content };
+                StaticPrivate("WriteChatSendPayload").Invoke(null, args);
+                writer = (FastBufferWriter)args[0];
+                _clientNetworkManager.CustomMessagingManager.SendNamedMessage(ChatSendMessage, NetworkManager.ServerClientId, writer);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+        }
+
+        private void SendChatBroadcastFromClient(string content)
+        {
+            FastBufferWriter writer = new FastBufferWriter(8192, Allocator.Temp);
+            try
+            {
+                object faction = Enum.Parse(RuntimeType("GanglandUndercover.Core.Faction"), "Gang");
+                object channel = Enum.Parse(RuntimeType("GanglandUndercover.Online.ChatChannel"), "Ghost");
+                object[] args = { writer, "999", "伪造者", content, true, faction, channel };
+                StaticPrivate("WriteChatBroadcastPayload").Invoke(null, args);
+                writer = (FastBufferWriter)args[0];
+                _clientNetworkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, NetworkManager.ServerClientId, writer);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+        }
+
         private IEnumerator WaitUntilOrFail(Func<bool> condition, string message, float timeoutSeconds = 4f)
         {
             float startedAt = Time.realtimeSinceStartup;
@@ -319,6 +366,13 @@ namespace GanglandUndercover.PlayTests
             mi.Invoke(_serverController, null);
         }
 
+        private MethodInfo StaticPrivate(string method)
+        {
+            MethodInfo mi = _controllerType.GetMethod(method, BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.IsNotNull(mi, $"找不到静态私有方法 {method}");
+            return mi;
+        }
+
         private object GetPlayerState(ulong clientId)
         {
             object players = GetField("players");
@@ -351,6 +405,42 @@ namespace GanglandUndercover.PlayTests
         {
             object votes = GetField("votes");
             votes.GetType().GetMethod("Clear").Invoke(votes, null);
+        }
+
+        private void ClearServerChat()
+        {
+            object chatSystem = GetServerChatSystem();
+            chatSystem.GetType().GetMethod("Clear").Invoke(chatSystem, null);
+        }
+
+        private int GetServerChatMessageCount()
+        {
+            object chatSystem = GetServerChatSystem();
+            return Convert.ToInt32(chatSystem.GetType().GetProperty("MessageCount").GetValue(chatSystem));
+        }
+
+        private bool ServerChatContainsContent(string expectedContent)
+        {
+            object chatSystem = GetServerChatSystem();
+            object messages = chatSystem.GetType().GetProperty("Messages").GetValue(chatSystem);
+
+            foreach (object message in (IEnumerable)messages)
+            {
+                string content = (string)message.GetType().GetField("Content").GetValue(message);
+                if (content == expectedContent)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private object GetServerChatSystem()
+        {
+            object chatSystem = GetField("chatSystem");
+            Assert.IsNotNull(chatSystem, "服务器 ChatSystem 应已初始化。");
+            return chatSystem;
         }
 
         private static bool DictionaryContainsKey(object dictionary, ulong key)
