@@ -30,7 +30,17 @@ namespace GanglandUndercover.Online
         // --- EnsureNetworkStack ---
         private void EnsureNetworkStack()
         {
-            networkManager = FindAnyObjectByType<NetworkManager>();
+            networkManager = GetComponent<NetworkManager>();
+
+            if (networkManager == null)
+            {
+                networkManager = GetComponentInChildren<NetworkManager>(true);
+            }
+
+            if (networkManager == null)
+            {
+                networkManager = FindAnyObjectByType<NetworkManager>();
+            }
 
             if (networkManager == null)
             {

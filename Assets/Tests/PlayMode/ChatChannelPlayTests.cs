@@ -11,6 +11,7 @@ using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 namespace GanglandUndercover.PlayTests
 {
@@ -160,6 +161,49 @@ namespace GanglandUndercover.PlayTests
                 "鬼魂频道不应发给存活玩家。");
         }
 
+        [UnityTest]
+        public IEnumerator ChatBroadcast_UpdatesRecipientCanvasHudFeedOverNetcode()
+        {
+            yield return null;
+
+            InvokePrivate("RegisterMessages");
+            Assert.IsTrue(_serverNetworkManager.StartHost(), "Host NetworkManager 应能启动。");
+            InvokePrivate("RegisterMessages");
+
+            NetworkManager sender = StartClient("ChatHud_SenderClientNetworkManager");
+            yield return WaitForClient(sender, "发送者 Client 应连接到 Host。");
+
+            MonoBehaviour recipientController = CreateClientController("ChatHud_RecipientController");
+            NetworkManager recipient = (NetworkManager)GetControllerField(recipientController, "networkManager");
+            _clientNetworkManagers.Add(recipient);
+            CopyServerNetworkPrefabs(recipient);
+            Assert.IsTrue(recipient.StartClient(), "带 HUD 的接收者 Client 应能启动。");
+            InvokePrivate(recipientController, "RegisterMessages");
+
+            yield return WaitForClient(recipient, "带 HUD 的接收者 Client 应连接到 Host。");
+
+            ulong senderId = sender.LocalClientId;
+            ulong recipientId = recipient.LocalClientId;
+            SetPhase("Meeting");
+            SetPlayer(senderId, "HudSender", Vector3.zero, alive: true);
+            SetPlayer(recipientId, "HudRecipient", new Vector3(4f, 0f, 0f), alive: true);
+            ConfigureClientControllerForChat(recipientController, recipientId, "HudRecipient", alive: true, phaseName: "Meeting");
+            ClearServerChatCooldown();
+
+            const string hudContent = "hud-network-feed";
+            SendChatFromClient(sender, hudContent);
+
+            yield return WaitUntilOrFail(
+                () => ControllerChatFeedContains(recipientController, hudContent),
+                "客户端控制器应通过 ReceiveChatBroadcast 更新 ChatFeedText。");
+            yield return WaitUntilOrFail(
+                () => HudFeedContains(recipientController, hudContent),
+                "正式 Canvas HUD 的 Chat Canvas Feed 应显示网络广播消息。");
+
+            StringAssert.Contains("会议聊天", ControllerPropertyString(recipientController, "ChatChannelDisplayName"));
+            Assert.GreaterOrEqual(ControllerPropertyInt(recipientController, "ChatPanelCanvasElementCount"), 3);
+        }
+
         private NetworkManager StartClient(string name)
         {
             NetworkManager client = CreateNetworkManager(name, _port, false);
@@ -202,12 +246,58 @@ namespace GanglandUndercover.PlayTests
             return manager;
         }
 
+        private MonoBehaviour CreateClientController(string name)
+        {
+            GameObject go = new GameObject(name);
+            _ownedObjects.Add(go);
+
+            NetworkManager manager = go.AddComponent<NetworkManager>();
+            UnityTransport transport = go.AddComponent<UnityTransport>();
+            transport.MaxPayloadSize = 256000;
+            transport.MaxSendQueueSize = 1024 * 1024;
+            transport.MaxConnectAttempts = 4;
+            transport.ConnectTimeoutMS = 500;
+            transport.SetConnectionData("127.0.0.1", _port);
+
+            manager.NetworkConfig = new NetworkConfig
+            {
+                NetworkTransport = transport,
+                EnableSceneManagement = false,
+                TickRate = 30,
+                PlayerPrefab = null
+            };
+
+            MonoBehaviour controller = (MonoBehaviour)go.AddComponent(_controllerType);
+            Assert.IsNotNull(controller, "无法挂载带 HUD 的客户端 OnlineMatchController。");
+            return controller;
+        }
+
         private void CopyServerNetworkPrefabs(NetworkManager client)
         {
             foreach (NetworkPrefab prefab in _serverNetworkManager.NetworkConfig.Prefabs.Prefabs)
             {
+                if (HasNetworkPrefab(client, prefab))
+                {
+                    continue;
+                }
+
                 client.NetworkConfig.Prefabs.Add(prefab);
             }
+        }
+
+        private static bool HasNetworkPrefab(NetworkManager manager, NetworkPrefab expected)
+        {
+            GameObject expectedPrefab = expected?.Prefab != null ? expected.Prefab : expected?.OverridingTargetPrefab;
+            foreach (NetworkPrefab prefab in manager.NetworkConfig.Prefabs.Prefabs)
+            {
+                GameObject candidate = prefab?.Prefab != null ? prefab.Prefab : prefab?.OverridingTargetPrefab;
+                if (candidate == expectedPrefab)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void RegisterBroadcastCapture(NetworkManager client)
@@ -327,6 +417,35 @@ namespace GanglandUndercover.PlayTests
             privateRoles[clientId] = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineRole"), "Police");
         }
 
+        private void ConfigureClientControllerForChat(MonoBehaviour controller, ulong clientId, string displayName, bool alive, string phaseName)
+        {
+            Type phaseType = RuntimeType("GanglandUndercover.Online.OnlineMatchPhase");
+            SetControllerField(controller, "phase", Enum.Parse(phaseType, phaseName));
+
+            Type playerType = RuntimeType("GanglandUndercover.Online.OnlinePlayerState");
+            object player = Activator.CreateInstance(
+                playerType,
+                clientId,
+                displayName,
+                new Vector3(4f, 0f, 0f),
+                true,
+                alive,
+                Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineRole"), "Police"),
+                Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineProfession"), "Inspector"),
+                0,
+                false);
+
+            IDictionary players = (IDictionary)GetControllerField(controller, "players");
+            players[clientId] = player;
+
+            IDictionary privateRoles = (IDictionary)GetControllerField(controller, "privateRoles");
+            privateRoles[clientId] = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineRole"), "Police");
+
+            object hud = GetControllerField(controller, "onlineHud");
+            Assert.IsNotNull(hud, "客户端控制器应创建正式 Canvas HUD。");
+            hud.GetType().GetMethod("EditorRefreshForSmokeTest").Invoke(hud, null);
+        }
+
         private void ClearServerChatCooldown()
         {
             object cooldowns = GetField("serverChatLastSendTimes");
@@ -444,6 +563,13 @@ namespace GanglandUndercover.PlayTests
             return fi.GetValue(_serverController);
         }
 
+        private object GetControllerField(MonoBehaviour controller, string name)
+        {
+            FieldInfo fi = _controllerType.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(fi, $"找不到字段 {name}");
+            return fi.GetValue(controller);
+        }
+
         private void SetField(string name, object value)
         {
             FieldInfo fi = _controllerType.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
@@ -451,11 +577,25 @@ namespace GanglandUndercover.PlayTests
             fi.SetValue(_serverController, value);
         }
 
+        private void SetControllerField(MonoBehaviour controller, string name, object value)
+        {
+            FieldInfo fi = _controllerType.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(fi, $"找不到字段 {name}");
+            fi.SetValue(controller, value);
+        }
+
         private void InvokePrivate(string method)
         {
             MethodInfo mi = _controllerType.GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(mi, $"找不到私有方法 {method}");
             mi.Invoke(_serverController, null);
+        }
+
+        private void InvokePrivate(MonoBehaviour controller, string method)
+        {
+            MethodInfo mi = _controllerType.GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(mi, $"找不到私有方法 {method}");
+            mi.Invoke(controller, null);
         }
 
         private MethodInfo StaticPrivate(string method)
@@ -468,6 +608,45 @@ namespace GanglandUndercover.PlayTests
         private int ChannelValue(string channelName)
         {
             return Convert.ToInt32(Enum.Parse(_chatChannelType, channelName));
+        }
+
+        private bool ControllerChatFeedContains(MonoBehaviour controller, string expectedContent)
+        {
+            return ControllerPropertyString(controller, "ChatFeedText").Contains(expectedContent);
+        }
+
+        private bool HudFeedContains(MonoBehaviour controller, string expectedContent)
+        {
+            Text feed = FindChildText(controller.transform, "Chat Canvas Feed Content");
+            return feed != null && feed.text.Contains(expectedContent);
+        }
+
+        private string ControllerPropertyString(MonoBehaviour controller, string propertyName)
+        {
+            PropertyInfo pi = _controllerType.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(pi, $"找不到属性 {propertyName}");
+            return (string)pi.GetValue(controller);
+        }
+
+        private int ControllerPropertyInt(MonoBehaviour controller, string propertyName)
+        {
+            PropertyInfo pi = _controllerType.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(pi, $"找不到属性 {propertyName}");
+            return Convert.ToInt32(pi.GetValue(controller));
+        }
+
+        private static Text FindChildText(Transform root, string objectName)
+        {
+            Text[] texts = root.GetComponentsInChildren<Text>(true);
+            for (int i = 0; i < texts.Length; i++)
+            {
+                if (texts[i].gameObject.name == objectName)
+                {
+                    return texts[i];
+                }
+            }
+
+            return null;
         }
 
         private static bool DictionaryContainsKey(object dictionary, ulong key)
