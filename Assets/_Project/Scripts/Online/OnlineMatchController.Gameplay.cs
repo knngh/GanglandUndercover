@@ -144,6 +144,12 @@ namespace GanglandUndercover.Online
             ConfigureMainCamera();
             return Camera.main != null && Camera.main.orthographic;    // M3: camera is always orthographic now
         }
+        public bool EditorSeedChatSafetyMessageForSmokeTest()
+        {
+            EnsureChatSystem();
+            chatSystem.ReceiveMessage("qa-player", "质检玩家", "这是一条待处理聊天", false, Faction.Police, ChatChannel.Meeting);
+            return chatSystem.MessageCount > 0;
+        }
         public bool EditorForceStageOneOpeningShotForSmokeTest()
         {
             if (players.Count == 0)

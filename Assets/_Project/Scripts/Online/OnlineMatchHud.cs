@@ -143,6 +143,8 @@ namespace GanglandUndercover.Online
         private Button killButton;
         private Button abilityButton;
         private Button ventButton;
+        private Button chatReportButton;
+        private Button chatBlockButton;
 
         private Transform voteButtonRoot;
 
@@ -155,6 +157,7 @@ namespace GanglandUndercover.Online
         public int MeetingOverlay2DAssetElementCount => meetingOverlay == null ? 0 : CountImagesWithSprites(meetingOverlay.transform);
         public int CompactActionHudVisualElementCount => compactActionHud == null ? 0 : CountNamedChildren(compactActionHud.transform, "Compact Visual");
         public int ButtonSfxFeedbackCount => canvas == null ? 0 : canvas.GetComponentsInChildren<UiButtonSfx>(true).Length;
+        public int ChatSafetyCanvasActionCount => CountChatSafetyCanvasActions();
         public bool HasCompleteLayout => HasRequiredLayoutReferences();
 
         private void Awake()
@@ -340,6 +343,8 @@ namespace GanglandUndercover.Online
                 && reportButton != null
                 && killButton != null
                 && abilityButton != null
+                && chatReportButton != null
+                && chatBlockButton != null
                 && voteButtonRoot != null;
         }
 
@@ -454,6 +459,8 @@ namespace GanglandUndercover.Online
             reportButton = null;
             killButton = null;
             abilityButton = null;
+            chatReportButton = null;
+            chatBlockButton = null;
             voteButtonRoot = null;
         }
 
@@ -608,10 +615,10 @@ namespace GanglandUndercover.Online
             startButton = CreateButton("开始", lobbyRow, 42f, () => controller.RequestStartMatch());
             fillBotsButton = CreateButton("补 AI 开局", lobby, 42f, () => controller.RequestFillBotsAndStart());
 
-            Transform action = CreateSection("行动快捷", leftDock, 252f);
+            Transform action = CreateSection("行动快捷", leftDock, 282f);
             actionGroup = action.gameObject;
             actionStatusText = CreateText("Action Status", action, 14, TextAnchor.UpperLeft, TextColor);
-            AddLayout(actionStatusText.gameObject, 86f, 0f, 0f);
+            AddLayout(actionStatusText.gameObject, 96f, 0f, 0f);
             Transform actionRowA = CreateButtonRow(action, 42f);
             interactButton = CreateButton("E 互动", actionRowA, 42f, () => controller.RequestAction(OnlineActionType.Interact));
             reportButton = CreateButton("R 报案", actionRowA, 42f, () => controller.RequestAction(OnlineActionType.Report));
@@ -622,6 +629,9 @@ namespace GanglandUndercover.Online
             ventButton = CreateButton("V 通风管", actionRowC, 42f, () => controller.RequestAction(OnlineActionType.Vent));
             mapButton = CreateButton("M 大地图", actionRowC, 42f, () => controller.ToggleTacticalMap());
             intelButton = CreateButton("I 案情板", actionRowC, 42f, () => controller.ToggleIntelBoard());
+            Transform chatSafetyRow = CreateButtonRow(action, 42f);
+            chatReportButton = CreateButton("举报最近", chatSafetyRow, 42f, () => controller.RequestReportLatestChatMessage());
+            chatBlockButton = CreateButton("屏蔽最近", chatSafetyRow, 42f, () => controller.RequestBlockLatestChatSender());
 
             Transform result = CreateSection("结算控制", leftDock, 130f);
             resultGroup = result.gameObject;
@@ -1124,6 +1134,8 @@ namespace GanglandUndercover.Online
             abilityButton.interactable = actionPlayable;
             mapButton.interactable = controller.IsOnline;
             intelButton.interactable = controller.IsOnline;
+            chatReportButton.interactable = controller.HasChatSafetyTarget;
+            chatBlockButton.interactable = controller.HasChatSafetyTarget;
 
             restartButton.interactable = controller.IsHost && controller.Phase == OnlineMatchPhase.Result;
             returnLobbyButton.interactable = controller.IsOnline && controller.Phase == OnlineMatchPhase.Result;
@@ -1150,7 +1162,8 @@ namespace GanglandUndercover.Online
             actionStatusText.text = controller.OnboardingBriefingTitle
                 + "\n" + controller.LocalObjectiveSummary
                 + "\n" + controller.OnboardingActionPrompt
-                + "\n技能冷却 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s | 击倒冷却 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s";
+                + "\n技能冷却 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s | 击倒冷却 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s"
+                + "\n" + controller.ChatSafetyStatusLine;
 
             resultStatusText.text = controller.ResultSummary;
             centerTitleText.text = BuildCenterTitle();
@@ -2542,6 +2555,23 @@ namespace GanglandUndercover.Online
                 {
                     count++;
                 }
+            }
+
+            return count;
+        }
+
+        private int CountChatSafetyCanvasActions()
+        {
+            int count = 0;
+
+            if (chatReportButton != null)
+            {
+                count++;
+            }
+
+            if (chatBlockButton != null)
+            {
+                count++;
             }
 
             return count;

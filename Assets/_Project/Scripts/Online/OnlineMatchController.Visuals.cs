@@ -33,6 +33,7 @@ namespace GanglandUndercover.Online
         public int MeetingOverlayVisualElementCount => onlineHud == null ? 0 : onlineHud.MeetingOverlayVisualElementCount;
         public int MeetingOverlay2DAssetElementCount => onlineHud == null ? 0 : onlineHud.MeetingOverlay2DAssetElementCount;
         public int HudButtonSfxFeedbackCount => onlineHud == null ? 0 : onlineHud.ButtonSfxFeedbackCount;
+        public int ChatSafetyCanvasActionCount => onlineHud == null ? 0 : onlineHud.ChatSafetyCanvasActionCount;
         public bool CanvasHudLayoutComplete => onlineHud != null && onlineHud.HasCompleteLayout;
         public int LargePortVistaCount => CountNamedWorldObjects("大场景港区层");
         public int UnderworldPassageNodeCount => worldRoot == null ? 0 : CountNamedWorldObjects("暗线节点");

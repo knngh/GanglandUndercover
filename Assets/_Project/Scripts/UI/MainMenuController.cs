@@ -68,9 +68,23 @@ namespace GanglandUndercover.UI
         private Text _mapDescText; // 地图描述文本引用
         private Text _loginStatusText;
         private Text _settingsStatusText;
+        private Text _settingsPanelStatusText;
+        private GameObject _settingsOverlay;
+        private Slider _masterVolumeSlider;
+        private Slider _sfxVolumeSlider;
+        private Slider _bgmVolumeSlider;
+        private Slider _voiceVolumeSlider;
+        private Slider _mouseSensitivitySlider;
+        private Text _masterVolumeValueText;
+        private Text _sfxVolumeValueText;
+        private Text _bgmVolumeValueText;
+        private Text _voiceVolumeValueText;
+        private Text _mouseSensitivityValueText;
         private string _onlinePlayerName = "港区玩家";
+        private float _nextLoginStatusRefreshTime;
 
         public bool IsVisible => _visible;
+        public bool SettingsPanelVisible => _settingsOverlay != null && _settingsOverlay.activeSelf;
 
         public void Initialize(PrototypeBootstrap bootstrap)
         {
@@ -92,6 +106,17 @@ namespace GanglandUndercover.UI
             _visible = false;
             if (_rootPanel != null) _rootPanel.SetActive(false);
             if (_particles != null) _particles.enabled = false;
+        }
+
+        private void Update()
+        {
+            if (!_visible || Time.unscaledTime < _nextLoginStatusRefreshTime)
+            {
+                return;
+            }
+
+            _nextLoginStatusRefreshTime = Time.unscaledTime + 1f;
+            RefreshLoginStatus();
         }
 
         // ══════════════════════════════════════════════════════
@@ -219,10 +244,16 @@ namespace GanglandUndercover.UI
                 BuildLoginStatusLine(null), ThemeManager.FontSizeFooter, TextMuted, FontStyle.Normal, TextAnchor.UpperLeft);
             Center(_loginStatusText.gameObject, 0f, -216f, 520f, 54f);
 
+            var loginBtn = BuildButton("AnonymousLoginButton", onlinePanel.transform,
+                "匿 名 登 录", 132f, ThemeManager.ButtonHeight + 4f,
+                MoleTeal, Color.white, ThemeManager.FontSizeSmall);
+            Center(loginBtn, -74f, -286f, 132f, ThemeManager.ButtonHeight + 4f);
+            loginBtn.GetComponent<Button>().onClick.AddListener(OnAnonymousLogin);
+
             var enterBtn = BuildButton("EnterLobbyButton", onlinePanel.transform,
-                "进  入  大  厅", 280f, ThemeManager.ButtonHeight + 4f,
+                "进 入 大 厅", 132f, ThemeManager.ButtonHeight + 4f,
                 BtnPrimary, Color.white, ThemeManager.FontSizeButton);
-            Center(enterBtn, 0f, -286f, 280f, ThemeManager.ButtonHeight + 4f);
+            Center(enterBtn, 74f, -286f, 132f, ThemeManager.ButtonHeight + 4f);
             enterBtn.GetComponent<Button>().onClick.AddListener(OnEnterLobby);
 
             // F1: 重看教程按钮
@@ -238,14 +269,7 @@ namespace GanglandUndercover.UI
                 BuildSettingsStatusLine(CurrentSettings()), ThemeManager.FontSizeFooter, TextMuted, FontStyle.Normal, TextAnchor.MiddleCenter);
             Center(_settingsStatusText.gameObject, 0f, -440f, 560f, 24f);
 
-            const float settingBtnW = 112f;
-            const float settingBtnH = 34f;
-            const float settingGap = 14f;
-            float settingStart = -((settingBtnW + settingGap) * 4f - settingGap) * 0.5f + settingBtnW * 0.5f;
-            BuildSettingsButton(onlinePanel.transform, "音量", settingStart, -478f, settingBtnW, settingBtnH, OnCycleMasterVolume);
-            BuildSettingsButton(onlinePanel.transform, "画质", settingStart + (settingBtnW + settingGap), -478f, settingBtnW, settingBtnH, OnCycleQuality);
-            BuildSettingsButton(onlinePanel.transform, "窗口", settingStart + (settingBtnW + settingGap) * 2f, -478f, settingBtnW, settingBtnH, OnCycleWindowMode);
-            BuildSettingsButton(onlinePanel.transform, "色盲", settingStart + (settingBtnW + settingGap) * 3f, -478f, settingBtnW, settingBtnH, OnCycleColorBlindMode);
+            BuildSettingsButton(onlinePanel.transform, "打开设置", 0f, -478f, 280f, 34f, OnOpenSettingsPanel);
 
             // ── 底部版本号 ──────────────────────────────────
             var verT = MakeText("Version", _rootPanel.transform,
@@ -253,6 +277,8 @@ namespace GanglandUndercover.UI
                 ThemeManager.FontSizeFooter, Hex("#4a4a5a"),
                 FontStyle.Normal, TextAnchor.MiddleCenter);
             Center(verT.gameObject, 0f, -510f, refW * 0.7f, 20f);
+
+            BuildSettingsOverlay();
         }
 
         // ══════════════════════════════════════════════════════
@@ -536,6 +562,105 @@ namespace GanglandUndercover.UI
             return button;
         }
 
+        private void BuildSettingsOverlay()
+        {
+            _settingsOverlay = CreatePanel("SettingsOverlay", _rootPanel.transform, new Color(0.005f, 0.008f, 0.012f, 0.82f));
+            Stretch(_settingsOverlay, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            _settingsOverlay.GetComponent<Image>().raycastTarget = true;
+
+            GameObject panel = CreateBorderedPanel("SettingsPanel", _settingsOverlay.transform, PanelBg);
+            Center(panel, 0f, 0f, 820f, 620f);
+
+            PanelHeader(panel.transform, "设 置 中 心", "音频 · 画面 · 游戏 · 辅助功能", -28f);
+            Divider(panel.transform, -68f, 640f);
+
+            _settingsPanelStatusText = MakeText("SettingsPanelStatus", panel.transform,
+                BuildSettingsStatusLine(CurrentSettings()), ThemeManager.FontSizeSmall, TextMuted, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Center(_settingsPanelStatusText.gameObject, 0f, -96f, 660f, 26f);
+
+            SettingsData current = CurrentSettings();
+            _masterVolumeSlider = BuildSettingsSlider(panel.transform, "主音量", -205f, -154f, current.MasterVolume, OnSetMasterVolume, out _masterVolumeValueText);
+            _sfxVolumeSlider = BuildSettingsSlider(panel.transform, "音效", 205f, -154f, current.SfxVolume, OnSetSfxVolume, out _sfxVolumeValueText);
+            _bgmVolumeSlider = BuildSettingsSlider(panel.transform, "音乐", -205f, -224f, current.BgmVolume, OnSetBgmVolume, out _bgmVolumeValueText);
+            _voiceVolumeSlider = BuildSettingsSlider(panel.transform, "聊天音量", 205f, -224f, current.VoiceChatVolume, OnSetVoiceVolume, out _voiceVolumeValueText);
+            _mouseSensitivitySlider = BuildSettingsSlider(panel.transform, "鼠标灵敏度", 0f, -294f, Mathf.InverseLerp(0.1f, 10f, current.MouseSensitivity), OnSetMouseSensitivityNormalized, out _mouseSensitivityValueText);
+
+            const float buttonW = 148f;
+            const float buttonH = 38f;
+            const float gap = 18f;
+            float startX = -((buttonW + gap) * 4f - gap) * 0.5f + buttonW * 0.5f;
+            BuildSettingsButton(panel.transform, "画质", startX, -374f, buttonW, buttonH, OnCycleQuality);
+            BuildSettingsButton(panel.transform, "窗口", startX + (buttonW + gap), -374f, buttonW, buttonH, OnCycleWindowMode);
+            BuildSettingsButton(panel.transform, "色盲", startX + (buttonW + gap) * 2f, -374f, buttonW, buttonH, OnCycleColorBlindMode);
+            BuildSettingsButton(panel.transform, "帧率", startX + (buttonW + gap) * 3f, -374f, buttonW, buttonH, OnCycleFrameRate);
+
+            BuildSettingsButton(panel.transform, "垂直同步", startX, -430f, buttonW, buttonH, OnToggleVSync);
+            BuildSettingsButton(panel.transform, "自由发言", startX + (buttonW + gap), -430f, buttonW, buttonH, OnCycleVoiceMode);
+            BuildSettingsButton(panel.transform, "重置设置", startX + (buttonW + gap) * 2f, -430f, buttonW, buttonH, OnResetSettings);
+            BuildSettingsButton(panel.transform, "关闭", startX + (buttonW + gap) * 3f, -430f, buttonW, buttonH, OnCloseSettingsPanel);
+
+            var hintText = MakeText("SettingsHint", panel.transform,
+                "设置会立即保存并应用；联机语音已改为文本聊天，聊天音量用于后续提示音与文本聊天反馈。",
+                ThemeManager.FontSizeFooter, TextMuted, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Center(hintText.gameObject, 0f, -500f, 680f, 34f);
+
+            _settingsOverlay.SetActive(false);
+            RefreshSettingsPanelControls();
+        }
+
+        private static Slider BuildSettingsSlider(
+            Transform parent,
+            string label,
+            float x,
+            float y,
+            float value,
+            UnityEngine.Events.UnityAction<float> onChanged,
+            out Text valueText)
+        {
+            GameObject row = new GameObject("SettingsSlider_" + label, typeof(RectTransform));
+            row.transform.SetParent(parent, false);
+            Center(row, x, y, 340f, 50f);
+
+            Text labelText = MakeText("Label", row.transform, label, ThemeManager.FontSizeSmall, TextMuted, FontStyle.Bold, TextAnchor.MiddleLeft);
+            Stretch(labelText.gameObject, Vector2.zero, Vector2.one, new Vector2(0f, 22f), new Vector2(-230f, 0f));
+
+            valueText = MakeText("Value", row.transform, string.Empty, ThemeManager.FontSizeFooter, TextPrimary, FontStyle.Normal, TextAnchor.MiddleRight);
+            Stretch(valueText.gameObject, Vector2.zero, Vector2.one, new Vector2(250f, 22f), Vector2.zero);
+
+            GameObject sliderObject = new GameObject("Slider", typeof(RectTransform), typeof(Slider));
+            sliderObject.transform.SetParent(row.transform, false);
+            Stretch(sliderObject, Vector2.zero, Vector2.one, new Vector2(0f, 0f), new Vector2(0f, -26f));
+
+            Slider slider = sliderObject.GetComponent<Slider>();
+            slider.minValue = 0f;
+            slider.maxValue = 1f;
+            slider.wholeNumbers = false;
+
+            GameObject background = CreatePanel("Background", sliderObject.transform, ThemeManager.InputBackground);
+            Stretch(background, Vector2.zero, Vector2.one, new Vector2(0f, 8f), new Vector2(0f, -8f));
+
+            GameObject fillArea = new GameObject("Fill Area", typeof(RectTransform));
+            fillArea.transform.SetParent(sliderObject.transform, false);
+            Stretch(fillArea, Vector2.zero, Vector2.one, new Vector2(4f, 8f), new Vector2(-4f, -8f));
+
+            GameObject fill = CreatePanel("Fill", fillArea.transform, NeonCyan);
+            Stretch(fill, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            slider.fillRect = fill.GetComponent<RectTransform>();
+
+            GameObject handleArea = new GameObject("Handle Slide Area", typeof(RectTransform));
+            handleArea.transform.SetParent(sliderObject.transform, false);
+            Stretch(handleArea, Vector2.zero, Vector2.one, new Vector2(4f, 0f), new Vector2(-4f, 0f));
+
+            GameObject handle = CreatePanel("Handle", handleArea.transform, TitleGold);
+            RectTransform handleRect = handle.GetComponent<RectTransform>();
+            handleRect.sizeDelta = new Vector2(16f, 30f);
+            slider.handleRect = handleRect;
+            slider.targetGraphic = handle.GetComponent<Image>();
+            slider.SetValueWithoutNotify(Mathf.Clamp01(value));
+            slider.onValueChanged.AddListener(onChanged);
+            return slider;
+        }
+
         private static Text MakeText(string n, Transform p, string content, int fs, Color c, FontStyle s, TextAnchor a)
         {
             var o = new GameObject(n, typeof(RectTransform), typeof(Text));
@@ -632,6 +757,78 @@ namespace GanglandUndercover.UI
             RefreshLoginStatus();
         }
 
+        private async void OnAnonymousLogin()
+        {
+            UnityServiceBootstrap service = EnsureUnityServiceBootstrap();
+            RefreshLoginStatus();
+
+            if (service != null)
+            {
+                await service.InitializeAsync();
+            }
+
+            RefreshLoginStatus();
+        }
+
+        private void OnOpenSettingsPanel()
+        {
+            if (_settingsOverlay == null)
+            {
+                return;
+            }
+
+            RefreshSettingsPanelControls();
+            _settingsOverlay.SetActive(true);
+        }
+
+        private void OnCloseSettingsPanel()
+        {
+            if (_settingsOverlay != null)
+            {
+                _settingsOverlay.SetActive(false);
+            }
+        }
+
+        private void OnSetMasterVolume(float value)
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetMasterVolume(value);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnSetSfxVolume(float value)
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetSfxVolume(value);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnSetBgmVolume(float value)
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetBgmVolume(value);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnSetVoiceVolume(float value)
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetVoiceChatVolume(value);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnSetMouseSensitivityNormalized(float value)
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetMouseSensitivity(Mathf.Lerp(0.1f, 10f, Mathf.Clamp01(value)));
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
         private void OnCycleMasterVolume()
         {
             SettingsManager settings = EnsureSettingsManager();
@@ -666,6 +863,39 @@ namespace GanglandUndercover.UI
             RefreshSettingsStatus();
         }
 
+        private void OnCycleFrameRate()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            int currentIndex = System.Array.IndexOf(SettingsManager.FrameRateOptions, settings.Current.FrameRateCap);
+            int nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % SettingsManager.FrameRateOptions.Length;
+            settings.SetFrameRateCap(SettingsManager.FrameRateOptions[nextIndex]);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnToggleVSync()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetVSync(!settings.Current.VSync);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnCycleVoiceMode()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.SetVoiceMode((settings.Current.VoiceMode + 1) % SettingsManager.VoiceModeNames.Length);
+            settings.Save();
+            RefreshSettingsStatus();
+        }
+
+        private void OnResetSettings()
+        {
+            SettingsManager settings = EnsureSettingsManager();
+            settings.ResetToDefault();
+            RefreshSettingsStatus();
+        }
+
         private void RefreshLoginStatus()
         {
             if (_loginStatusText != null)
@@ -680,12 +910,34 @@ namespace GanglandUndercover.UI
             {
                 _settingsStatusText.text = BuildSettingsStatusLine(CurrentSettings());
             }
+
+            RefreshSettingsPanelControls();
+        }
+
+        private void RefreshSettingsPanelControls()
+        {
+            SettingsData settings = CurrentSettings();
+
+            if (_settingsPanelStatusText != null)
+            {
+                _settingsPanelStatusText.text = BuildSettingsStatusLine(settings);
+            }
+
+            SetSliderWithoutNotify(_masterVolumeSlider, settings.MasterVolume, _masterVolumeValueText, FormatPercent(settings.MasterVolume));
+            SetSliderWithoutNotify(_sfxVolumeSlider, settings.SfxVolume, _sfxVolumeValueText, FormatPercent(settings.SfxVolume));
+            SetSliderWithoutNotify(_bgmVolumeSlider, settings.BgmVolume, _bgmVolumeValueText, FormatPercent(settings.BgmVolume));
+            SetSliderWithoutNotify(_voiceVolumeSlider, settings.VoiceChatVolume, _voiceVolumeValueText, FormatPercent(settings.VoiceChatVolume));
+            SetSliderWithoutNotify(
+                _mouseSensitivitySlider,
+                Mathf.InverseLerp(0.1f, 10f, settings.MouseSensitivity),
+                _mouseSensitivityValueText,
+                settings.MouseSensitivity.ToString("0.0"));
         }
 
         private static SettingsData CurrentSettings()
         {
             SettingsManager settings = EnsureSettingsManager();
-            return settings != null ? settings.Current : SettingsData.CreateDefault();
+            return settings != null && settings.Current != null ? settings.Current : SettingsData.CreateDefault();
         }
 
         private static SettingsManager EnsureSettingsManager()
@@ -697,7 +949,20 @@ namespace GanglandUndercover.UI
 
             GameObject settingsObject = new GameObject("Settings Manager");
             SettingsManager manager = settingsObject.AddComponent<SettingsManager>();
+            manager.Load();
             return manager;
+        }
+
+        private static UnityServiceBootstrap EnsureUnityServiceBootstrap()
+        {
+            UnityServiceBootstrap existing = FindAnyObjectByType<UnityServiceBootstrap>();
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            GameObject serviceObject = new GameObject("Unity Services Login Preview");
+            return serviceObject.AddComponent<UnityServiceBootstrap>();
         }
 
         private static string BuildLoginStatusLine(UnityServiceBootstrap service)
@@ -721,6 +986,9 @@ namespace GanglandUndercover.UI
             return "音量 " + Mathf.RoundToInt(safe.MasterVolume * 100f)
                 + "% | 画质 " + quality
                 + " | " + window
+                + " | 帧率 " + SettingsManager.GetFrameRateName(safe.FrameRateCap)
+                + " | " + (safe.VSync ? "VSync 开" : "VSync 关")
+                + " | 聊天 " + SettingsManager.VoiceModeNames[Mathf.Clamp(safe.VoiceMode, 0, SettingsManager.VoiceModeNames.Length - 1)]
                 + " | 色盲 " + safe.ColorBlindMode;
         }
 
@@ -728,6 +996,24 @@ namespace GanglandUndercover.UI
         {
             string safe = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
             return safe.Length <= maxLength ? safe : safe.Substring(0, maxLength);
+        }
+
+        private static void SetSliderWithoutNotify(Slider slider, float value, Text valueText, string label)
+        {
+            if (slider != null)
+            {
+                slider.SetValueWithoutNotify(Mathf.Clamp01(value));
+            }
+
+            if (valueText != null)
+            {
+                valueText.text = label;
+            }
+        }
+
+        private static string FormatPercent(float value)
+        {
+            return Mathf.RoundToInt(Mathf.Clamp01(value) * 100f) + "%";
         }
     }
 }

@@ -250,12 +250,18 @@ namespace GanglandUndercover.Tests
             settings.GetType().GetProperty("QualityPreset").SetValue(settings, 3);
             settings.GetType().GetProperty("WindowMode").SetValue(settings, 2);
             settings.GetType().GetProperty("ColorBlindMode").SetValue(settings, 1);
+            settings.GetType().GetProperty("FrameRateCap").SetValue(settings, 120);
+            settings.GetType().GetProperty("VSync").SetValue(settings, false);
+            settings.GetType().GetProperty("VoiceMode").SetValue(settings, 1);
 
             string status = BuildMainMenuSettingsStatus(settings);
 
             StringAssert.Contains("音量 60%", status);
             StringAssert.Contains("画质 极致", status);
             StringAssert.Contains("无边框", status);
+            StringAssert.Contains("120 FPS", status);
+            StringAssert.Contains("VSync 关", status);
+            StringAssert.Contains("自由发言", status);
             StringAssert.Contains("色盲 1", status);
         }
 
@@ -268,6 +274,29 @@ namespace GanglandUndercover.Tests
             Assert.AreEqual("港区玩家", limitText.Invoke(null, new object[] { "   ", 16, "港区玩家" }));
             Assert.AreEqual("九龙玩家", limitText.Invoke(null, new object[] { "  九龙玩家  ", 16, "港区玩家" }));
             Assert.AreEqual("abcdefghijklmnop", limitText.Invoke(null, new object[] { "abcdefghijklmnopq", 16, "港区玩家" }));
+        }
+
+        [Test]
+        public void MainMenuSettingsPanel_BuildsClosedOverlay()
+        {
+            Type menuType = RuntimeType("GanglandUndercover.UI.MainMenuController");
+            GameObject menuHost = new GameObject("MainMenuSettingsPanelHost");
+
+            try
+            {
+                object menu = menuHost.AddComponent(menuType);
+
+                menuType.GetMethod("Initialize").Invoke(menu, new object[] { null });
+
+                Assert.IsFalse(PropertyBool(menu, "SettingsPanelVisible"));
+                Assert.IsNotNull(FindObjectNamedIncludingInactive("SettingsPanel"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(menuHost);
+                DestroyAllObjectsNamed("Settings Manager");
+                DestroyAllObjectsNamed("UICanvas_Fallback");
+            }
         }
 
         [Test]
@@ -1366,6 +1395,32 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void OnlineMatchHud_ExposesCanvasChatSafetyActions()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            GameObject host = new GameObject("OnlineHudChatSafetyRegression_OnlineMatchController");
+
+            try
+            {
+                object controller = host.AddComponent(controllerType);
+
+                Assert.IsTrue((bool)Invoke(controller, "EditorForceActionPreviewForSmokeTest"));
+                Assert.GreaterOrEqual(PropertyInt(controller, "ChatSafetyCanvasActionCount"), 2);
+                Assert.IsTrue((bool)Invoke(controller, "EditorSeedChatSafetyMessageForSmokeTest"));
+
+                Invoke(controller, "RequestReportLatestChatMessage");
+                StringAssert.Contains("举报 1", PropertyString(controller, "VoiceHudLine"));
+
+                Invoke(controller, "RequestBlockLatestChatSender");
+                StringAssert.Contains("屏蔽 1", PropertyString(controller, "VoiceHudLine"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+            }
+        }
+
+        [Test]
         public void OnlineMatchController_DownedStateCreatesKillSceneVfx()
         {
             Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
@@ -1819,6 +1874,50 @@ namespace GanglandUndercover.Tests
             }
 
             return count;
+        }
+
+        private static GameObject FindObjectNamedIncludingInactive(string name)
+        {
+            foreach (GameObject obj in UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include))
+            {
+                if (obj == null)
+                {
+                    continue;
+                }
+
+                if (obj.name == name)
+                {
+                    return obj;
+                }
+            }
+
+            return null;
+        }
+
+        private static void DestroyAllObjectsNamed(string name)
+        {
+            List<GameObject> targets = new List<GameObject>();
+
+            foreach (GameObject obj in UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include))
+            {
+                if (obj == null)
+                {
+                    continue;
+                }
+
+                if (obj.name == name)
+                {
+                    targets.Add(obj);
+                }
+            }
+
+            foreach (GameObject target in targets)
+            {
+                if (target != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(target);
+                }
+            }
         }
 
         private static int CountChildrenContaining(Transform root, string text)

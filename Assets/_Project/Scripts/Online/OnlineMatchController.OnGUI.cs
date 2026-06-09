@@ -32,6 +32,10 @@ namespace GanglandUndercover.Online
                 + " | 屏蔽 " + chatSystem.BlockedSenderCount
                 + " | 举报 " + chatSystem.ReportCount
             : "聊天未连接";
+        public bool HasChatSafetyTarget => chatSystem != null && chatSystem.MessageCount > 0;
+        public string ChatSafetyStatusLine => chatSystem != null
+            ? "聊天安全: 最近消息可举报/屏蔽 | 屏蔽 " + chatSystem.BlockedSenderCount + " | 举报 " + chatSystem.ReportCount
+            : "聊天安全未连接";
         public string FocusedIntelText => BuildFocusedIntel();
         public string TaskListText => BuildTaskList();
         public string CaseLogText => BuildCaseLog();
@@ -72,6 +76,34 @@ namespace GanglandUndercover.Online
         public string TaskDistrictDisplayName(int id) => TaskDistrictName(id);
         public string TaskMapCodeDisplayName(int id) => TaskMapCode(id);
         public string PhaseDisplayNameFor(OnlineMatchPhase matchPhase) => PhaseName(matchPhase);
+
+        public void RequestReportLatestChatMessage()
+        {
+            EnsureChatSystem();
+
+            if (chatSystem.ReportLatestMessage("玩家举报"))
+            {
+                status = "已记录最近聊天消息举报。";
+            }
+            else
+            {
+                status = "暂无可举报的聊天消息。";
+            }
+        }
+
+        public void RequestBlockLatestChatSender()
+        {
+            EnsureChatSystem();
+
+            if (chatSystem.BlockLatestSender())
+            {
+                status = "已屏蔽最近聊天发送者。";
+            }
+            else
+            {
+                status = "暂无可屏蔽的聊天发送者。";
+            }
+        }
 
 #if UNITY_EDITOR
         public void EditorSimulateLocalMatch()
