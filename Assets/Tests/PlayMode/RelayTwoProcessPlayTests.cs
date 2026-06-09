@@ -75,14 +75,6 @@ namespace GanglandUndercover.PlayTests
                 Assert.Ignore($"未设置 {RoleEnv}=host，跳过 Relay Host 端到端用例。");
             }
 
-            // 本用例验证的是 Relay 双进程"连通性"，断言对象是连接状态（ConnectedClientCount 等）。
-            // 对局状态本身走 CustomMessagingManager 自定义消息/快照同步，不依赖 NGO 的
-            // NetworkObject 复制。唯一的 NetworkObject（监控摄像头 OnlineSecurityCamera）当前以
-            // 运行时 AddComponent<NetworkObject>().Spawn() 创建（globalObjectIdHash=0），无法向远端
-            // Client 复制 → 会在对端打出 "NetworkPrefab could not be found" 错误日志。这是独立于
-            // 连通性的对象复制问题（已记为后续工作），故此处忽略 NGO 日志噪声，避免误判连通性结论。
-            LogAssert.ignoreFailingMessages = true;
-
             yield return null; // 让 Awake 执行一帧，核心服务/网络栈就绪。
 
             string codeFile = CodeFilePath;
@@ -138,10 +130,6 @@ namespace GanglandUndercover.PlayTests
             {
                 Assert.Ignore($"未设置 {RoleEnv}=client，跳过 Relay Client 端到端用例。");
             }
-
-            // 见 Host 用例说明：本用例只断言连通性，忽略监控摄像头 NetworkObject 复制造成的
-            // NGO 错误日志噪声（独立的对象复制问题，已记为后续工作）。
-            LogAssert.ignoreFailingMessages = true;
 
             yield return null;
 
