@@ -276,7 +276,6 @@ namespace GanglandUndercover.Online
                     SendClientProfile();
                     EnsureMiniGameBridgeNetworkObject();
                     EnsureSurveillanceCameraNetworkObjects();
-                    UpsertLocalRelayLobbyRoom();
                     PlayCue("start");
                     BroadcastSnapshot();
                 }
@@ -361,6 +360,7 @@ namespace GanglandUndercover.Online
                     SendClientProfile();
                     EnsureMiniGameBridgeNetworkObject();
                     EnsureSurveillanceCameraNetworkObjects();
+                    UpsertLocalRelayLobbyRoom();
                     PlayCue("start");
                     BroadcastSnapshot();
 
