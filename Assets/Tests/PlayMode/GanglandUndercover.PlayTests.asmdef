@@ -2,6 +2,9 @@
     "name": "GanglandUndercover.PlayTests",
     "rootNamespace": "GanglandUndercover.PlayTests",
     "references": [
+        "Unity.Netcode.Runtime",
+        "Unity.Networking.Transport",
+        "Unity.Collections",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
