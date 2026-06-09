@@ -173,6 +173,52 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ChatSystem_BlocksMessagesFromMutedSender()
+        {
+            object chat = CreateChatSystem();
+            Invoke(chat, "BlockSender", "7");
+
+            ReceiveChatMessage(chat, "7", "刷屏玩家", "不应出现");
+            ReceiveChatMessage(chat, "8", "正常玩家", "应该出现");
+
+            Assert.AreEqual(1, PropertyInt(chat, "MessageCount"));
+            object message = First((IEnumerable)Property(chat, "Messages"));
+            Assert.AreEqual("8", FieldString(message, "SenderId"));
+            Assert.IsTrue((bool)Invoke(chat, "IsSenderBlocked", "7"));
+        }
+
+        [Test]
+        public void ChatSystem_UnblockSenderRestoresMessages()
+        {
+            object chat = CreateChatSystem();
+            Invoke(chat, "BlockSender", "7");
+            Invoke(chat, "UnblockSender", "7");
+
+            ReceiveChatMessage(chat, "7", "恢复玩家", "可以显示");
+
+            Assert.AreEqual(1, PropertyInt(chat, "MessageCount"));
+            Assert.IsFalse((bool)Invoke(chat, "IsSenderBlocked", "7"));
+        }
+
+        [Test]
+        public void ChatSystem_ReportLatestMessageStoresSanitizedSnapshot()
+        {
+            object chat = CreateChatSystem();
+            ReceiveChatMessage(chat, "7", "<b>可疑玩家</b>", "<script>alert('x')</script>码头集合", channelName: "Ghost");
+
+            bool reported = (bool)Invoke(chat, "ReportLatestMessage", "<b>辱骂/作弊</b>");
+
+            Assert.IsTrue(reported);
+            Assert.AreEqual(1, PropertyInt(chat, "ReportCount"));
+            object report = First((IEnumerable)Property(chat, "Reports"));
+            Assert.AreEqual("7", FieldString(report, "SenderId"));
+            Assert.AreEqual("可疑玩家", FieldString(report, "SenderName"));
+            Assert.AreEqual("码头集合", FieldString(report, "Content"));
+            Assert.AreEqual("辱骂/作弊", FieldString(report, "Reason"));
+            Assert.AreEqual("Ghost", FieldValueText(report, "Channel"));
+        }
+
+        [Test]
         public void RelayLobbySummary_EmptyStateGuidesCreateOrJoin()
         {
             string summary = BuildRelayLobbySummary(
@@ -1366,6 +1412,24 @@ namespace GanglandUndercover.Tests
             return (string)InvokeStatic(RuntimeType("GanglandUndercover.Online.ChatSystem"), "Sanitize", input);
         }
 
+        private static object CreateChatSystem()
+        {
+            Type chatType = RuntimeType("GanglandUndercover.Online.ChatSystem");
+            return Activator.CreateInstance(chatType, new Action<string>(_ => { }));
+        }
+
+        private static void ReceiveChatMessage(
+            object chat,
+            string senderId,
+            string senderName,
+            string content,
+            string channelName = "Meeting")
+        {
+            object faction = Enum.Parse(RuntimeType("GanglandUndercover.Core.Faction"), "Police");
+            object channel = Enum.Parse(RuntimeType("GanglandUndercover.Online.ChatChannel"), channelName);
+            Invoke(chat, "ReceiveMessage", senderId, senderName, content, false, faction, channel);
+        }
+
         private static string BuildRelayLobbySummary(
             string relayStatus,
             string relayJoinCode,
@@ -1626,6 +1690,16 @@ namespace GanglandUndercover.Tests
         private static string FieldString(object target, string fieldName)
         {
             return (string)target.GetType().GetField(fieldName).GetValue(target);
+        }
+
+        private static string FieldValueText(object target, string fieldName)
+        {
+            return target.GetType().GetField(fieldName).GetValue(target).ToString();
+        }
+
+        private static object Property(object target, string propertyName)
+        {
+            return target.GetType().GetProperty(propertyName).GetValue(target);
         }
 
         private static int PropertyInt(object target, string propertyName)

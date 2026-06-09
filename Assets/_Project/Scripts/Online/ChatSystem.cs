@@ -41,6 +41,7 @@ namespace GanglandUndercover.Online
     public class ChatSystem
     {
         private const int MaxMessages = 50;
+        private const int MaxReports = 20;
         private const float SendCooldown = 5.0f;   // F3: 发言冷却 5 秒
         private const int MaxMessageLength = 256;   // F3: 消息长度限制 256 字符
 
@@ -48,6 +49,8 @@ namespace GanglandUndercover.Online
         public const float ProximityRadius = 15f;
 
         private readonly List<ChatMessage> messages = new List<ChatMessage>();
+        private readonly List<ChatReport> reports = new List<ChatReport>();
+        private readonly HashSet<string> blockedSenderIds = new HashSet<string>();
         private readonly System.Action<string> sendCallback;
         private string inputBuffer = string.Empty;
         private bool isInputActive;
@@ -151,7 +154,26 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            messages.Add(new ChatMessage(senderId, senderName, Sanitize(content), Time.time, isDead, faction, channel));
+            string safeSenderId = NormalizeSenderId(senderId);
+            if (IsSenderBlocked(safeSenderId))
+            {
+                return;
+            }
+
+            string safeContent = Sanitize(content);
+            if (string.IsNullOrWhiteSpace(safeContent))
+            {
+                return;
+            }
+
+            messages.Add(new ChatMessage(
+                safeSenderId,
+                Sanitize(senderName) ?? string.Empty,
+                safeContent,
+                Time.time,
+                isDead,
+                faction,
+                channel));
 
             while (messages.Count > MaxMessages)
             {
@@ -162,14 +184,80 @@ namespace GanglandUndercover.Online
         public void Clear()
         {
             messages.Clear();
+            reports.Clear();
+            blockedSenderIds.Clear();
             inputBuffer = string.Empty;
             isInputActive = false;
         }
 
         public int MessageCount => messages.Count;
+        public int ReportCount => reports.Count;
+        public int BlockedSenderCount => blockedSenderIds.Count;
 
         /// <summary>获取消息列表（供 Canvas UI 读取）。</summary>
         public IReadOnlyList<ChatMessage> Messages => messages;
+
+        /// <summary>获取本地举报快照列表（后续可接后台上报）。</summary>
+        public IReadOnlyList<ChatReport> Reports => reports;
+
+        public void BlockSender(string senderId)
+        {
+            string safeSenderId = NormalizeSenderId(senderId);
+            if (!string.IsNullOrEmpty(safeSenderId))
+            {
+                blockedSenderIds.Add(safeSenderId);
+            }
+        }
+
+        public void UnblockSender(string senderId)
+        {
+            blockedSenderIds.Remove(NormalizeSenderId(senderId));
+        }
+
+        public bool IsSenderBlocked(string senderId)
+        {
+            return blockedSenderIds.Contains(NormalizeSenderId(senderId));
+        }
+
+        public bool ReportLatestMessage(string reason)
+        {
+            if (messages.Count == 0)
+            {
+                return false;
+            }
+
+            return ReportMessage(messages[messages.Count - 1], reason);
+        }
+
+        public bool ReportMessage(ChatMessage message, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(message.SenderId) || string.IsNullOrWhiteSpace(message.Content))
+            {
+                return false;
+            }
+
+            string safeReason = Sanitize(reason);
+            if (string.IsNullOrWhiteSpace(safeReason))
+            {
+                safeReason = "未填写原因";
+            }
+
+            reports.Add(new ChatReport(
+                NormalizeSenderId(message.SenderId),
+                Sanitize(message.SenderName) ?? string.Empty,
+                Sanitize(message.Content) ?? string.Empty,
+                safeReason,
+                Time.time,
+                message.Faction,
+                message.Channel));
+
+            while (reports.Count > MaxReports)
+            {
+                reports.RemoveAt(0);
+            }
+
+            return true;
+        }
 
         // ─── 输入处理 ─────────────────────────────
 
@@ -403,6 +491,11 @@ namespace GanglandUndercover.Online
             bool aIsGood = a == Faction.Police || a == Faction.Undercover;
             bool bIsGood = b == Faction.Police || b == Faction.Undercover;
             return aIsGood == bIsGood;
+        }
+
+        private static string NormalizeSenderId(string senderId)
+        {
+            return string.IsNullOrWhiteSpace(senderId) ? string.Empty : senderId.Trim();
         }
     }
 }

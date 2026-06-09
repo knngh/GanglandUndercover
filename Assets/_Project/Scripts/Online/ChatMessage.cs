@@ -28,4 +28,36 @@ namespace GanglandUndercover.Online
             Channel = channel;
         }
     }
+
+    /// <summary>
+    /// 本地聊天举报快照。后续接入后台时以该结构作为最小证据输入。
+    /// </summary>
+    public struct ChatReport
+    {
+        public string SenderId;
+        public string SenderName;
+        public string Content;
+        public string Reason;
+        public float Timestamp;
+        public Faction Faction;
+        public ChatChannel Channel;
+
+        public ChatReport(
+            string senderId,
+            string senderName,
+            string content,
+            string reason,
+            float timestamp,
+            Faction faction,
+            ChatChannel channel)
+        {
+            SenderId = senderId;
+            SenderName = senderName;
+            Content = content;
+            Reason = reason;
+            Timestamp = timestamp;
+            Faction = faction;
+            Channel = channel;
+        }
+    }
 }
