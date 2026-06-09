@@ -1354,7 +1354,9 @@ namespace GanglandUndercover.Online
                 case NotebookTab.Log:
                     return controller.CaseLogText;
                 case NotebookTab.Services:
-                    return controller.ReleaseReadinessText + "\n\nVivox: " + controller.VoiceStatus;
+                    return controller.ReleaseReadinessText
+                        + "\n\nLobby 房间列表\n" + controller.LobbyBrowserPanelText
+                        + "\n\nVivox: " + controller.VoiceStatus;
                 default:
                     return controller.PlayerListText;
             }
@@ -1368,6 +1370,11 @@ namespace GanglandUndercover.Online
         private void SelectNotebook(NotebookTab tab)
         {
             notebookTab = tab;
+            if (tab == NotebookTab.Services)
+            {
+                controller.RequestRefreshLobbyRooms();
+            }
+
             Refresh(true);
         }
 

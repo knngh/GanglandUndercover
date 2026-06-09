@@ -241,6 +241,72 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void LobbyBrowserSummary_RefreshInProgressMentionsRoomCount()
+        {
+            string summary = BuildLobbyBrowserSummary(
+                "Lobby 正在刷新房间列表。",
+                refreshInProgress: true,
+                visibleRoomCount: 3,
+                selectedIndex: 0);
+
+            StringAssert.Contains("正在刷新", summary);
+            StringAssert.Contains("3 间", summary);
+            StringAssert.Contains("选中第 1 间", summary);
+        }
+
+        [Test]
+        public void LobbyBrowserSummary_EmptyStateGuidesRelayFallback()
+        {
+            string summary = BuildLobbyBrowserSummary(
+                "Lobby 房间列表为空。",
+                refreshInProgress: false,
+                visibleRoomCount: 0,
+                selectedIndex: -1);
+
+            StringAssert.Contains("房间列表为空", summary);
+            StringAssert.Contains("Relay 房间码", summary);
+        }
+
+        [Test]
+        public void LobbyRoomLine_ShowsJoinableRelayCodeAndRules()
+        {
+            string line = BuildLobbyRoomLine(
+                displayIndex: 1,
+                roomName: "九龙港区夜局",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                mapName: "Harbour",
+                ruleSummary: "AI补位",
+                relayCode: "6kb6dh");
+
+            StringAssert.Contains("1. 九龙港区夜局", line);
+            StringAssert.Contains("2/8", line);
+            StringAssert.Contains("可加入", line);
+            StringAssert.Contains("6KB6DH", line);
+            StringAssert.Contains("AI补位", line);
+        }
+
+        [Test]
+        public void LobbyRoomLine_MissingRelayCodeIsVisibleButNotJoinable()
+        {
+            string line = BuildLobbyRoomLine(
+                displayIndex: 2,
+                roomName: "公开测试房",
+                playerCount: 1,
+                maxPlayers: 6,
+                isLocked: false,
+                hasPassword: false,
+                mapName: "Harbour",
+                ruleSummary: string.Empty,
+                relayCode: string.Empty);
+
+            StringAssert.Contains("2. 公开测试房", line);
+            StringAssert.Contains("待发布 Relay", line);
+        }
+
+        [Test]
         public void ChatSendPayload_RoundTripsContentWithPipes()
         {
             Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
@@ -1146,6 +1212,48 @@ namespace GanglandUndercover.Tests
                 isHost,
                 isClientConnected,
                 connectedClientCount
+            });
+        }
+
+        private static string BuildLobbyBrowserSummary(
+            string status,
+            bool refreshInProgress,
+            int visibleRoomCount,
+            int selectedIndex)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return (string)StaticNonPublic(controllerType, "BuildLobbyBrowserSummary").Invoke(null, new object[]
+            {
+                status,
+                refreshInProgress,
+                visibleRoomCount,
+                selectedIndex
+            });
+        }
+
+        private static string BuildLobbyRoomLine(
+            int displayIndex,
+            string roomName,
+            int playerCount,
+            int maxPlayers,
+            bool isLocked,
+            bool hasPassword,
+            string mapName,
+            string ruleSummary,
+            string relayCode)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return (string)StaticNonPublic(controllerType, "BuildLobbyRoomLine").Invoke(null, new object[]
+            {
+                displayIndex,
+                roomName,
+                playerCount,
+                maxPlayers,
+                isLocked,
+                hasPassword,
+                mapName,
+                ruleSummary,
+                relayCode
             });
         }
 
