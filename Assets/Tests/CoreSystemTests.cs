@@ -518,6 +518,77 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ServerSnapshot_IgnoresNonServerSender()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetMatchStarted(false);
+                fixture.SetPhase("Lobby");
+
+                fixture.ReceiveServerSnapshot(42UL, matchStarted: true, phaseName: "Action");
+
+                Assert.IsFalse(fixture.MatchStarted());
+                Assert.AreEqual("Lobby", fixture.PhaseName());
+            }
+        }
+
+        [Test]
+        public void ServerSnapshot_RejectsInvalidPhaseAndCounts()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetMatchStarted(false);
+                fixture.SetPhase("Lobby");
+
+                fixture.ReceiveServerSnapshotRaw(NetworkManager.ServerClientId, matchStarted: true, phaseValue: 999);
+                Assert.IsFalse(fixture.MatchStarted());
+                Assert.AreEqual("Lobby", fixture.PhaseName());
+
+                fixture.ReceiveServerSnapshotRaw(
+                    NetworkManager.ServerClientId,
+                    matchStarted: true,
+                    phaseValue: fixture.PhaseValue("Action"),
+                    playerCount: -1);
+
+                Assert.IsFalse(fixture.MatchStarted());
+                Assert.AreEqual("Lobby", fixture.PhaseName());
+            }
+        }
+
+        [Test]
+        public void RoleAssign_IgnoresNonServerSenderAndUndefinedRoles()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalRole("Unassigned");
+
+                fixture.ReceiveRoleAssign(7UL, fixture.RoleValue("Gang"));
+                Assert.AreEqual("Unassigned", fixture.LocalRoleName());
+
+                fixture.ReceiveRoleAssign(NetworkManager.ServerClientId, 999);
+                Assert.AreEqual("Unassigned", fixture.LocalRoleName());
+
+                fixture.ReceiveRoleAssign(NetworkManager.ServerClientId, fixture.RoleValue("Police"));
+                Assert.AreEqual("Police", fixture.LocalRoleName());
+            }
+        }
+
+        [Test]
+        public void MapSelect_IgnoresUndefinedMapType()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetActiveMapType("HarbourDistrict");
+
+                fixture.ReceiveMapSelect(NetworkManager.ServerClientId, 999);
+                Assert.AreEqual("HarbourDistrict", fixture.ActiveMapTypeName());
+
+                fixture.ReceiveMapSelect(NetworkManager.ServerClientId, fixture.MapTypeValue("PoliceStation"));
+                Assert.AreEqual("PoliceStation", fixture.ActiveMapTypeName());
+            }
+        }
+
+        [Test]
         public void OnboardingGuidance_LobbyShowsIdentityObjectiveAndActionPrompt()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -1205,6 +1276,7 @@ namespace GanglandUndercover.Tests
             private readonly Type roleType = RuntimeType("GanglandUndercover.Online.OnlineRole");
             private readonly Type professionType = RuntimeType("GanglandUndercover.Online.OnlineProfession");
             private readonly Type phaseType = RuntimeType("GanglandUndercover.Online.OnlineMatchPhase");
+            private readonly Type mapType = RuntimeType("GanglandUndercover.Online.OnlineMapService+OnlineMapType");
 
             private readonly GameObject host;
             private readonly object controller;
@@ -1230,9 +1302,44 @@ namespace GanglandUndercover.Tests
                 SetField("phase", Enum.Parse(phaseType, phaseName));
             }
 
+            public int PhaseValue(string phaseName)
+            {
+                return Convert.ToInt32(Enum.Parse(phaseType, phaseName));
+            }
+
+            public string PhaseName()
+            {
+                return GetField("phase").ToString();
+            }
+
+            public void SetMatchStarted(bool started)
+            {
+                SetField("matchStarted", started);
+            }
+
+            public bool MatchStarted()
+            {
+                return (bool)GetField("matchStarted");
+            }
+
             public void SetLocalPreviewMode(bool enabled)
             {
                 SetField("localPreviewMode", enabled);
+            }
+
+            public void SetLocalRole(string roleName)
+            {
+                SetField("localRole", Enum.Parse(roleType, roleName));
+            }
+
+            public int RoleValue(string roleName)
+            {
+                return Convert.ToInt32(Enum.Parse(roleType, roleName));
+            }
+
+            public string LocalRoleName()
+            {
+                return GetField("localRole").ToString();
             }
 
             public void SetPlayer(ulong clientId, Vector3 position, bool alive, string roleName = "Police", string professionName = null)
@@ -1293,6 +1400,83 @@ namespace GanglandUndercover.Tests
                     .Invoke(controller, new object[] { clientId, position, input, ready });
             }
 
+            public void ReceiveRoleAssign(ulong senderClientId, int roleValue)
+            {
+                FastBufferWriter writer = new FastBufferWriter(32, Allocator.Temp);
+
+                try
+                {
+                    writer.WriteValueSafe(roleValue);
+                    InvokeReceive("ReceiveRoleAssign", senderClientId, writer);
+                }
+                finally
+                {
+                    writer.Dispose();
+                }
+            }
+
+            public void SetActiveMapType(string mapTypeName)
+            {
+                object service = EnsureMapService();
+                service.GetType().GetProperty("ActiveMapType").SetValue(service, Enum.Parse(mapType, mapTypeName));
+            }
+
+            public int MapTypeValue(string mapTypeName)
+            {
+                return Convert.ToInt32(Enum.Parse(mapType, mapTypeName));
+            }
+
+            public string ActiveMapTypeName()
+            {
+                object service = EnsureMapService();
+                return service.GetType().GetProperty("ActiveMapType").GetValue(service).ToString();
+            }
+
+            public void ReceiveMapSelect(ulong senderClientId, int mapTypeValue)
+            {
+                FastBufferWriter writer = new FastBufferWriter(32, Allocator.Temp);
+
+                try
+                {
+                    writer.WriteValueSafe(mapTypeValue);
+                    InvokeReceive("ReceiveMapSelect", senderClientId, writer);
+                }
+                finally
+                {
+                    writer.Dispose();
+                }
+            }
+
+            public void ReceiveServerSnapshot(ulong senderClientId, bool matchStarted, string phaseName)
+            {
+                ReceiveServerSnapshotRaw(senderClientId, matchStarted, PhaseValue(phaseName));
+            }
+
+            public void ReceiveServerSnapshotRaw(
+                ulong senderClientId,
+                bool matchStarted,
+                int phaseValue,
+                int playerCount = 0,
+                byte criticalTaskType = 0,
+                int taskCount = 0,
+                int bodyCount = 0,
+                int voteCount = 0,
+                int caseLogCount = 0)
+            {
+                EnsureSnapshotDependencies();
+                FastBufferWriter writer = new FastBufferWriter(4096, Allocator.Temp);
+
+                try
+                {
+                    WriteEmptySnapshot(ref writer, matchStarted, phaseValue, playerCount, criticalTaskType, taskCount, bodyCount, voteCount, caseLogCount);
+                    InvokeReceive("ReceiveServerSnapshot", senderClientId, writer);
+                }
+                finally
+                {
+                    writer.Dispose();
+                }
+            }
+
             public string PropertyString(string propertyName)
             {
                 return (string)controllerType.GetProperty(propertyName).GetValue(controller);
@@ -1337,6 +1521,97 @@ namespace GanglandUndercover.Tests
             {
                 return controllerType.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .GetValue(controller);
+            }
+
+            private object EnsureMapService()
+            {
+                object service = GetField("mapService");
+
+                if (service == null)
+                {
+                    InvokeNonPublic("EnsureCoreServices");
+                    service = GetField("mapService");
+                }
+
+                return service;
+            }
+
+            private void EnsureSnapshotDependencies()
+            {
+                InvokeNonPublic("EnsureCoreServices");
+                InvokeNonPublic("EnsureRuntimeDependencies");
+            }
+
+            private void InvokeReceive(string methodName, ulong senderClientId, FastBufferWriter writer)
+            {
+                FastBufferReader reader = new FastBufferReader(writer, Allocator.Temp);
+
+                try
+                {
+                    controllerType
+                        .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)
+                        .Invoke(controller, new object[] { senderClientId, reader });
+                }
+                finally
+                {
+                    reader.Dispose();
+                }
+            }
+
+            private void InvokeNonPublic(string methodName)
+            {
+                controllerType
+                    .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, null);
+            }
+
+            private static void WriteEmptySnapshot(
+                ref FastBufferWriter writer,
+                bool matchStarted,
+                int phaseValue,
+                int playerCount,
+                byte criticalTaskType,
+                int taskCount,
+                int bodyCount,
+                int voteCount,
+                int caseLogCount)
+            {
+                writer.WriteValueSafe(matchStarted);
+                writer.WriteValueSafe(phaseValue);
+                writer.WriteValueSafe(0);
+                writer.WriteValueSafe(10);
+                writer.WriteValueSafe(1);
+                writer.WriteValueSafe(1);
+                writer.WriteValueSafe(10);
+                writer.WriteValueSafe(false);
+                writer.WriteValueSafe(false);
+                writer.WriteValueSafe(false);
+                writer.WriteValueSafe("Room");
+                writer.WriteValueSafe("Result");
+                writer.WriteValueSafe("Meeting");
+                writer.WriteValueSafe("Vote");
+                writer.WriteValueSafe("Evidence");
+                writer.WriteValueSafe("Sabotage");
+                writer.WriteValueSafe(0);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(false);
+                writer.WriteValueSafe(criticalTaskType);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(playerCount);
+                writer.WriteValueSafe(taskCount);
+                writer.WriteValueSafe(bodyCount);
+                writer.WriteValueSafe(voteCount);
+                writer.WriteValueSafe(caseLogCount);
             }
 
             private object GetPlayerState(ulong clientId)

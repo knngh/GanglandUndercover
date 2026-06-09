@@ -20,6 +20,11 @@ namespace GanglandUndercover.Online
         private const int ChatMaxNameBytes = 256;
         private const int ChatMaxIdBytes = 64;
         private const int ChatWriterCapacityBytes = ChatMaxContentBytes + 1024;
+        private const int MaxSnapshotPlayers = 64;
+        private const int MaxSnapshotTasks = 256;
+        private const int MaxSnapshotBodies = 128;
+        private const int MaxSnapshotVotes = 64;
+        private const int MaxSnapshotCaseLogEntries = 512;
 
         // --- EnsureNetworkStack ---
         private void EnsureNetworkStack()
@@ -865,6 +870,68 @@ namespace GanglandUndercover.Online
             return Enum.IsDefined(typeof(OnlineActionType), actionValue);
         }
 
+        // --- IsServerSender ---
+        private static bool IsServerSender(ulong senderClientId)
+        {
+            return senderClientId == NetworkManager.ServerClientId;
+        }
+
+        // --- IsDefinedOnlineMatchPhase ---
+        private static bool IsDefinedOnlineMatchPhase(int phaseValue)
+        {
+            return Enum.IsDefined(typeof(OnlineMatchPhase), phaseValue);
+        }
+
+        // --- IsDefinedOnlineRole ---
+        private static bool IsDefinedOnlineRole(int roleValue)
+        {
+            return Enum.IsDefined(typeof(OnlineRole), roleValue);
+        }
+
+        // --- IsDefinedOnlineProfession ---
+        private static bool IsDefinedOnlineProfession(int professionValue)
+        {
+            return Enum.IsDefined(typeof(OnlineProfession), professionValue);
+        }
+
+        // --- IsDefinedCriticalTaskType ---
+        private static bool IsDefinedCriticalTaskType(byte criticalTaskType)
+        {
+            return Enum.IsDefined(typeof(SocialDeduction.CriticalTaskType), criticalTaskType);
+        }
+
+        // --- IsDefinedMapType ---
+        private static bool IsDefinedMapType(int mapTypeValue)
+        {
+            return Enum.IsDefined(typeof(OnlineMapService.OnlineMapType), mapTypeValue);
+        }
+
+        // --- IsSnapshotCountInRange ---
+        private static bool IsSnapshotCountInRange(int count, int maxCount)
+        {
+            return count >= 0 && count <= maxCount;
+        }
+
+        // --- ToDefinedOnlineRole ---
+        private static OnlineRole ToDefinedOnlineRole(int roleValue)
+        {
+            return IsDefinedOnlineRole(roleValue) ? (OnlineRole)roleValue : OnlineRole.Unassigned;
+        }
+
+        // --- ToDefinedOnlineProfession ---
+        private static OnlineProfession ToDefinedOnlineProfession(int professionValue)
+        {
+            return IsDefinedOnlineProfession(professionValue) ? (OnlineProfession)professionValue : OnlineProfession.Inspector;
+        }
+
+        // --- ToDefinedCriticalTaskType ---
+        private static SocialDeduction.CriticalTaskType ToDefinedCriticalTaskType(byte criticalTaskType)
+        {
+            return IsDefinedCriticalTaskType(criticalTaskType)
+                ? (SocialDeduction.CriticalTaskType)criticalTaskType
+                : SocialDeduction.CriticalTaskType.None;
+        }
+
         // --- ClampClientInput ---
         private static Vector2 ClampClientInput(Vector2 input)
         {
@@ -1024,13 +1091,18 @@ namespace GanglandUndercover.Online
         // --- ReceiveServerSnapshot ---
         private void ReceiveServerSnapshot(ulong senderClientId, FastBufferReader reader)
         {
-            if (networkManager != null && networkManager.IsServer)
+            if ((networkManager != null && networkManager.IsServer) || !IsServerSender(senderClientId))
             {
                 return;
             }
 
             reader.ReadValueSafe(out bool snapshotMatchStarted);
             reader.ReadValueSafe(out int phaseValue);
+            if (!IsDefinedOnlineMatchPhase(phaseValue))
+            {
+                return;
+            }
+
             reader.ReadValueSafe(out int snapshotEvidenceScore);
             reader.ReadValueSafe(out int snapshotEvidenceTarget);
             reader.ReadValueSafe(out int snapshotEmergencyMeetingsLeft);
@@ -1061,6 +1133,11 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out byte snapshotCriticalTaskType);
             reader.ReadValueSafe(out float snapshotCriticalTaskTimeRemaining);
             reader.ReadValueSafe(out int count);
+            if (!IsDefinedCriticalTaskType(snapshotCriticalTaskType) || !IsSnapshotCountInRange(count, MaxSnapshotPlayers))
+            {
+                return;
+            }
+
             matchStarted = snapshotMatchStarted;
             phase = (OnlineMatchPhase)phaseValue;
             taskService.EvidenceScore = snapshotEvidenceScore;
@@ -1089,7 +1166,7 @@ namespace GanglandUndercover.Online
 
             // Phase 2.4: 紧急任务状态
             _criticalTaskActive = snapshotCriticalTaskActive;
-            _criticalTaskType = (SocialDeduction.CriticalTaskType)snapshotCriticalTaskType;
+            _criticalTaskType = ToDefinedCriticalTaskType(snapshotCriticalTaskType);
             _criticalTaskTimeRemaining = snapshotCriticalTaskTimeRemaining;
 
             status = "同步在线局：" + PhaseName(phase) + "。";
@@ -1110,18 +1187,20 @@ namespace GanglandUndercover.Online
                 reader.ReadValueSafe(out float killCooldown);
                 reader.ReadValueSafe(out float abilityCooldown);
                 reader.ReadValueSafe(out float ventCooldown);
+                OnlineRole publicRole = ToDefinedOnlineRole(roleValue);
+                OnlineProfession profession = ToDefinedOnlineProfession(professionValue);
 
                 OnlinePlayerState state = players.TryGetValue(clientId, out OnlinePlayerState existing)
                     ? existing
-                    : new OnlinePlayerState(clientId, displayName, position, ready, alive, (OnlineRole)roleValue, (OnlineProfession)professionValue, suspicion, isBot);
+                    : new OnlinePlayerState(clientId, displayName, position, ready, alive, publicRole, profession, suspicion, isBot);
 
                 state.DisplayName = displayName;
                 state.Position = position;
                 state.Ready = ready;
                 state.Alive = alive;
                 state.IsBot = isBot;
-                state.PublicRole = (OnlineRole)roleValue;
-                state.Profession = (OnlineProfession)professionValue;
+                state.PublicRole = publicRole;
+                state.Profession = profession;
                 state.Suspicion = suspicion;
                 state.KillCooldown = killCooldown;
                 state.AbilityCooldown = abilityCooldown;
@@ -1138,6 +1217,11 @@ namespace GanglandUndercover.Online
             RemoveMissingPlayers(seenPlayers);
 
             reader.ReadValueSafe(out int taskCount);
+            if (!IsSnapshotCountInRange(taskCount, MaxSnapshotTasks))
+            {
+                return;
+            }
+
             tasks.Clear();
 
             for (int i = 0; i < taskCount; i++)
@@ -1152,6 +1236,11 @@ namespace GanglandUndercover.Online
             }
 
             reader.ReadValueSafe(out int bodyCount);
+            if (!IsSnapshotCountInRange(bodyCount, MaxSnapshotBodies))
+            {
+                return;
+            }
+
             killSystem.bodies.Clear();
 
             for (int i = 0; i < bodyCount; i++)
@@ -1164,6 +1253,11 @@ namespace GanglandUndercover.Online
             }
 
             reader.ReadValueSafe(out int voteCount);
+            if (!IsSnapshotCountInRange(voteCount, MaxSnapshotVotes))
+            {
+                return;
+            }
+
             votes.Clear();
 
             for (int i = 0; i < voteCount; i++)
@@ -1174,6 +1268,11 @@ namespace GanglandUndercover.Online
             }
 
             reader.ReadValueSafe(out int caseLogCount);
+            if (!IsSnapshotCountInRange(caseLogCount, MaxSnapshotCaseLogEntries))
+            {
+                return;
+            }
+
             caseLog.Clear();
 
             for (int i = 0; i < caseLogCount; i++)
@@ -1257,7 +1356,17 @@ namespace GanglandUndercover.Online
         // --- ReceiveRoleAssign ---
         private void ReceiveRoleAssign(ulong senderClientId, FastBufferReader reader)
         {
+            if (!IsServerSender(senderClientId))
+            {
+                return;
+            }
+
             reader.ReadValueSafe(out int roleValue);
+            if (!IsDefinedOnlineRole(roleValue))
+            {
+                return;
+            }
+
             localRole = (OnlineRole)roleValue;
             status = "收到身份：" + RoleName(localRole);
         }
@@ -1593,9 +1702,11 @@ namespace GanglandUndercover.Online
         private void ReceiveMapSelect(ulong senderClientId, FastBufferReader reader)
         {
             // 仅服务器可发送地图选择
-            if (senderClientId != NetworkManager.ServerClientId) return;
+            if (!IsServerSender(senderClientId)) return;
 
             reader.ReadValueSafe(out int mapTypeInt);
+            if (!IsDefinedMapType(mapTypeInt)) return;
+
             var type = (OnlineMapService.OnlineMapType)mapTypeInt;
             mapService.ActiveMapType = type;
             Debug.Log($"[D5] Client received map select: {type}");
