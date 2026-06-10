@@ -2093,6 +2093,7 @@ namespace GanglandUndercover.Online
                     builder.Append("\n房间码流程: 正在加入 ").Append(safeJoinInput).Append("，请稍候。");
                 }
 
+                builder.Append("\n晚测记录: 超过 20 秒无变化就截图本行、房间码和 Console。");
                 return builder.ToString();
             }
 
@@ -2101,6 +2102,7 @@ namespace GanglandUndercover.Online
                 int visibleClientCount = Mathf.Max(1, connectedClientCount);
                 builder.Append("\n房主: 分享房间码 ").Append(safeJoinCode)
                     .Append(" | 已连接 ").Append(visibleClientCount).Append(" 人。");
+                builder.Append("\n晚测记录: 截图房间码和人数，朋友加入后再截图玩家列表。");
                 return builder.ToString();
             }
 
@@ -2108,6 +2110,7 @@ namespace GanglandUndercover.Online
             {
                 builder.Append("\nClient: 已加入房间码 ").Append(safeJoinCode)
                     .Append("，等待 Host 开局。");
+                builder.Append("\n晚测记录: 截图玩家列表和 Ready 状态，若 Host 看不到你就记录时间。");
                 return builder.ToString();
             }
 
@@ -2115,16 +2118,19 @@ namespace GanglandUndercover.Online
             {
                 builder.Append("\nClient: 已输入房间码 ").Append(safeJoinInput)
                     .Append("，点击 Relay 加入。");
+                builder.Append("\n提示: 确认房间码为 6 位大写字母数字；加入失败就记录错误提示。");
                 return builder.ToString();
             }
 
             if (!string.IsNullOrEmpty(safeJoinCode))
             {
                 builder.Append("\n房间码: ").Append(safeJoinCode).Append("。");
+                builder.Append("\n晚测记录: 把房间码和当前状态一起截图。");
                 return builder.ToString();
             }
 
-            builder.Append("\n下一步: 点击 Relay 开房生成房间码，或输入房间码加入。");
+            builder.Append("\n下一步: Host 点击 Relay 开房生成房间码；Client 输入房间码加入。");
+            builder.Append("\n晚测记录: 每次失败请截图本状态栏和当前步骤编号。");
             return builder.ToString();
         }
         private static Vector3 TaskScale(int taskId)

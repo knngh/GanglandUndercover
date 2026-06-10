@@ -340,6 +340,9 @@ namespace GanglandUndercover.Tests
             StringAssert.Contains("Relay 房间码未创建", summary);
             StringAssert.Contains("Relay 开房", summary);
             StringAssert.Contains("输入房间码", summary);
+            StringAssert.Contains("晚测", summary);
+            StringAssert.Contains("Host", summary);
+            StringAssert.Contains("Client", summary);
         }
 
         [Test]
@@ -357,6 +360,7 @@ namespace GanglandUndercover.Tests
 
             StringAssert.Contains("已输入房间码 6KB6DH", summary);
             StringAssert.Contains("Relay 加入", summary);
+            StringAssert.Contains("6 位大写", summary);
         }
 
         [Test]
@@ -374,6 +378,25 @@ namespace GanglandUndercover.Tests
 
             StringAssert.Contains("分享房间码 6KB6DH", summary);
             StringAssert.Contains("已连接 2 人", summary);
+            StringAssert.Contains("截图房间码和人数", summary);
+        }
+
+        [Test]
+        public void RelayLobbySummary_ClientJoinedGuidesWaitingAndScreenshot()
+        {
+            string summary = BuildRelayLobbySummary(
+                "Relay 已加入 6KB6DH。",
+                "6kb6dh",
+                string.Empty,
+                operationInProgress: false,
+                isOnline: true,
+                isHost: false,
+                isClientConnected: true,
+                connectedClientCount: 1);
+
+            StringAssert.Contains("已加入房间码 6KB6DH", summary);
+            StringAssert.Contains("等待 Host 开局", summary);
+            StringAssert.Contains("截图玩家列表", summary);
         }
 
         [Test]
@@ -391,6 +414,7 @@ namespace GanglandUndercover.Tests
 
             StringAssert.Contains("正在加入 6KB6DH", summary);
             StringAssert.Contains("请稍候", summary);
+            StringAssert.Contains("超过 20 秒", summary);
         }
 
         [Test]
