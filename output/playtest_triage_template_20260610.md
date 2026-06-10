@@ -2,8 +2,8 @@
 
 > 测试日期: ____________ | 测试者人数: ____ | 汇总人: ____________
 > 包: `GanglandUndercover-FriendTest-macOS-20260610.zip`
-> 构建 commit: `e0932942`
-> sha256: `ee35650855fa72fae224ae37097f975c47068743d4d26f956e453db38f3ef3a9`
+> 构建 commit: `fd784c71`
+> sha256: `a3ec614cee330acce902b3286430c8ba0b80f00a794347cf2e71289b34207806`
 
 ---
 

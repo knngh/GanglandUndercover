@@ -12,8 +12,8 @@
 ```text
 App: Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app
 Zip: Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip
-Zip sha256: ee35650855fa72fae224ae37097f975c47068743d4d26f956e453db38f3ef3a9
-构建代码 commit: e0932942
+Zip sha256: a3ec614cee330acce902b3286430c8ba0b80f00a794347cf2e71289b34207806
+构建代码 commit: fd784c71
 ```
 
 ---

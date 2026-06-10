@@ -1,6 +1,6 @@
 # Gangland Undercover — 朋友远程测试反馈登记表
 
-> 测试者: ____________ | 日期: ____________ | 包: FriendTest macOS | 构建 commit: e0932942
+> 测试者: ____________ | 日期: ____________ | 包: FriendTest macOS | 构建 commit: fd784c71
 
 ---
 

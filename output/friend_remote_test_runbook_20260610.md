@@ -2,7 +2,7 @@
 
 > 日期: 2026-06-10
 > 目标: 用两台真实机器验证公网 Relay 房间码联机，形成可复盘的问题记录。
-> 当前状态: Relay 双进程自动化已通过；FriendTest macOS 构建和 zip 分发包已生成；Lobby 状态栏已加入晚测截图/超时提示。
+> 当前状态: Relay 双进程自动化已通过；FriendTest macOS 构建和 zip 分发包已生成；Lobby 状态栏已加入晚测截图/超时提示和 Host 断线恢复提示。
 
 ---
 
@@ -27,16 +27,16 @@ Host 和朋友都使用同一构建包。
 
 | 项目 | 要求 | 状态 |
 |------|------|------|
-| 当前代码自动化 | EditMode 84/84 passed；PlayMode 8/10 passed, 2 ignored；Relay 双进程 PASS | 已满足 |
+| 当前代码自动化 | EditMode 86/86 passed；PlayMode 9/11 passed, 2 ignored；Relay 双进程 PASS | 已满足 |
 | macOS FriendTest 新构建 | `Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app` | 已生成 |
-| 发给朋友的 zip | `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip` | 已生成，96 MB |
-| 构建代码提交 | `e0932942` | 已写入包内 build info |
+| 发给朋友的 zip | `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip` | 已生成，84 MB |
+| 构建代码提交 | `fd784c71` | 已写入包内 build info |
 | 旧构建 | `Builds/macOS/GanglandUndercover.app` 存在，但为 Unity 6000.4.5f1 旧包 | 不作为今天新验证包 |
 
 分发包校验:
 
 ```text
-sha256: ee35650855fa72fae224ae37097f975c47068743d4d26f956e453db38f3ef3a9
+sha256: a3ec614cee330acce902b3286430c8ba0b80f00a794347cf2e71289b34207806
 ```
 
 如需重建，使用命令:
@@ -48,7 +48,7 @@ sha256: ee35650855fa72fae224ae37097f975c47068743d4d26f956e453db38f3ef3a9
   -executeMethod GanglandUndercover.Editor.BuildScript.Build \
   -buildTarget StandaloneOSX \
   -outputDir /Users/zhugehao/projects/GanglandUndercover/Builds/FriendTest-20260610 \
-  -logFile /Users/zhugehao/projects/GanglandUndercover/Logs/build-friendtest-macos-20260610-e0932942.log \
+  -logFile /Users/zhugehao/projects/GanglandUndercover/Logs/build-friendtest-macos-20260610-fd784c71.log \
   -accept-apiupdate
 ```
 
@@ -58,6 +58,7 @@ sha256: ee35650855fa72fae224ae37097f975c47068743d4d26f956e453db38f3ef3a9
 - Client 加入房间后会提示截图玩家列表、Ready 状态和等待 Host 开局。
 - 输入房间码但未加入时会提示确认 6 位大写字母数字。
 - 创建/加入超过 20 秒无变化时，截图状态栏、房间码和 Console。
+- Host 断开后 Client 会提示旧房间码已失效，要求返回主菜单或由 Host 重新开房。
 
 ---
 
@@ -102,7 +103,7 @@ sha256: ee35650855fa72fae224ae37097f975c47068743d4d26f956e453db38f3ef3a9
 | M6 | 会议中发送聊天 | 会议聊天可见 |
 | M7 | 投票或等待会议结束 | 能返回行动阶段或进入结果 |
 | M8 | Client 退出游戏 | Host 不崩溃，玩家离开状态可解释 |
-| M9 | Host 退出游戏 | Client 返回主菜单或显示断开提示 |
+| M9 | Host 退出游戏 | Client 显示 Host 已断开、旧房间码已失效，并可点正式 HUD 的“离开房间”返回 |
 
 ---
 
