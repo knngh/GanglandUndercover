@@ -1,7 +1,7 @@
 # Gangland Undercover — 远程测试闭环记录
 
 > 日期: 2026-06-10
-> 目标: 以“今天能和朋友远程测试”为验收目标，确认自动化、手工脚本、构建状态和剩余阻塞。
+> 目标: 以“今天能和朋友远程测试”为验收目标，确认自动化、手工脚本、构建状态和剩余风险。
 
 ---
 
@@ -12,11 +12,8 @@
 - Relay 双进程真实云服务验证通过。
 - EditMode 全量通过。
 - PlayMode 常规套件通过，无失败；Relay 两个 PlayMode 用例在常规套件中按设计 ignored，并已由双进程脚本单独验证。
+- macOS FriendTest 构建已生成，并已压缩成可发送给朋友的 zip。
 - 朋友手工测试脚本已补齐: `output/friend_remote_test_runbook_20260610.md`。
-
-未完成项:
-
-- 今天的新 macOS FriendTest 构建未生成。原因是 Unity batchmode 构建卡在本机 Unity Licensing Client 重连，不是项目代码或测试失败。
 
 ---
 
@@ -27,7 +24,8 @@
 | Relay 双进程 | `bash run-relay-twoprocess.sh` | PASS | `Logs/relay-host-result.txt`, clone `Logs/relay-client-result.txt` |
 | EditMode | Unity `-runTests -testPlatform EditMode` | 83 passed, 0 failed, 0 skipped | `Logs/friendtest-editmode-20260610.xml` |
 | PlayMode | Unity `-runTests -testPlatform PlayMode` | 8 passed, 0 failed, 2 ignored | `Logs/friendtest-playmode-20260610.xml` |
-| macOS FriendTest 构建 | `BuildScript.Build` | 阻塞 | `Logs/build-friendtest-macos-20260610.log`, `Logs/build-friendtest-macos-20260610-gfx.log` |
+| macOS FriendTest 构建 | `BuildScript.Build` | SUCCESS | `Logs/build-friendtest-macos-20260610-retry2.log` |
+| macOS FriendTest zip | `ditto -c -k --sequesterRsrc --keepParent` | 84 MB zip | `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip` |
 
 Relay 双进程本轮结果:
 
@@ -52,7 +50,7 @@ PlayMode ignored 说明:
 
 ---
 
-## 3. 构建阻塞
+## 3. 构建产物
 
 目标输出:
 
@@ -60,36 +58,37 @@ PlayMode ignored 说明:
 Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app
 ```
 
-实际结果:
+实际产物:
 
-- 首次构建在沙盒内失败: Unity Package Manager 无法创建 `/tmp/Unity-Upm-*.sock`。
-- 沙盒外重跑 `-nographics` 后越过 UPM，但 Unity Licensing Client 反复断线重连，目标构建目录未生成。
-- 去掉 `-nographics` 后再次重跑，Metal/GPU 初始化正常，但仍停在 Unity Licensing Client 重连，未进入 `BuildScript` 输出阶段。
-- 已终止卡住的 Unity 构建进程，避免占用工程。
+- App: `Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app`
+- Zip: `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip`
+- Zip 大小: 84 MB
+- Zip sha256: `8556990ab3c226176fc6c7f495f81f7ef96c84395afde4fd63208923a2fced89`
+- Unity: 6000.4.9f1
+- App version: 0.1.0-dev
+- 构建代码 commit: `faaf88be`
 
-关键日志片段含义:
+构建日志摘要:
 
 ```text
-Error: 'com.unity.editor.headless' was not found.
-The connection with the Unity Licensing Client has been lost.
+[BuildScript] BUILD SUCCESS: .../Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app (234 MB, 00:00:16.0679490)
 ```
 
-恢复动作:
+构建恢复过程:
 
-1. 打开 Unity Hub 或 Unity Editor，确认账号/许可证状态正常。
-2. 关闭所有 Unity 进程。
-3. 重跑 FriendTest 构建命令；若 `-nographics` 继续触发 Licensing 问题，改用不带 `-nographics` 的 batchmode 命令。
-4. 确认日志出现 `[BuildScript] BUILD SUCCESS`，且目标目录生成后，再把 `Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app` 发给朋友。
+- 前两次构建卡在 Unity Licensing Client 重连，未进入 `BuildScript` 输出阶段。
+- 清理残留 `Unity.Licensing.Client` 进程后重跑成功。
+- 成功构建命令未使用 `-nographics`，避免再次触发 headless/licensing 组合问题。
 
 ---
 
 ## 4. 今天可以继续推进的测试
 
-如果需要在新构建前继续验证:
+现在可以继续推进:
 
-- 本机继续跑 `run-relay-twoprocess.sh` 做 Relay 稳定性复测。
-- 使用 Unity Editor PlayMode 双开验证最新代码的 Lobby/聊天/会议流程。
-- 等新构建恢复后，再执行 `friend_remote_test_runbook_20260610.md` 的两人公网测试。
+- 把 zip 发给朋友，让双方使用同一包执行 `friend_remote_test_runbook_20260610.md`。
+- 本机保留 `run-relay-twoprocess.sh` 作为云服务健康复测入口。
+- 朋友反馈统一按 runbook 的问题记录模板回填。
 
 今天不要用旧构建冒充新构建:
 
@@ -100,7 +99,7 @@ The connection with the Unity Licensing Client has been lost.
 
 ## 5. 远程测试通过门槛
 
-新构建恢复后，朋友测试只要满足下面 6 条即可记为今天 P0 闭环通过:
+朋友测试只要满足下面 6 条即可记为今天 P0 闭环通过:
 
 - Host 创建 Relay 房间成功。
 - Client 使用房间码加入成功。

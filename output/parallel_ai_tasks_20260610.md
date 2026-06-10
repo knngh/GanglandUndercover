@@ -13,7 +13,7 @@
 | P0 | 整理朋友反馈 | 截图、录屏、问题记录模板 | `output/friend_feedback_triage_20260610.md` | 低 |
 | P1 | 更新旧文档日期和测试数字 | `output/test_coverage_matrix_20260609.md`, `output/progress_20260609.md` | 新建 2026-06-10 版本，不覆盖历史 | 低 |
 | P1 | 审查 UI 文案和截图清单 | `output/ui_*_20260609.md`, `output/screenshot_plan_20260609.md` | 文案差异表和截图缺口表 | 低 |
-| P1 | 复核构建阻塞日志 | `Logs/build-friendtest-macos-20260610.log` | Unity Licensing/UPM 故障摘要和重试步骤 | 低 |
+| P1 | 复核分发包和安装说明 | `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip` | macOS 打开/权限步骤和截图 | 低 |
 | P2 | 补 QA 证据索引 | `Logs/*.xml`, `output/*.md` | `output/qa_evidence_index_20260610.md` | 低 |
 
 ---
