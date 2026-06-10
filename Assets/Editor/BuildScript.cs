@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
@@ -14,11 +15,52 @@ namespace GanglandUndercover.Editor
     public static class BuildScript
     {
         // ─── 配置常量 ───────────────────────────────────────
-        private const string ProductName      = "GanglandUndercover";
+        private const string ExecutableName   = "GanglandUndercover";
+        private const string ProductName      = "Gangland Undercover";
         private const string CompanyName      = "GanglandUndercover";
         private const string OutputRoot       = "Builds";
-        private const string macOSBundleId    = "com.gangland.undercover";
-        private const string WindowsProductGuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        private const string StandaloneAppId  = "com.gangland.undercover";
+        private const long SteamVisualArchiveTargetBytes = 650L * 1024L * 1024L;
+
+        private static readonly VisualArchiveSource[] SteamVisualArchiveSources =
+        {
+            new VisualArchiveSource(
+                "street-and-road-kit",
+                "Assets/_Project/Legacy3D/ModularLowpolyStreetsFree",
+                "PC Steam depot art reference: roads, sidewalks, street props, and pavement textures for the港区 exterior pass."),
+            new VisualArchiveSource(
+                "synthetic-police-urban-kit",
+                "Assets/_Project/Legacy3D/Synty",
+                "PC Steam depot art reference: stylized character, prop, lens dirt, and generic scene material candidates."),
+            new VisualArchiveSource(
+                "city-crowd-animation-kit",
+                "Assets/_Project/Legacy3D/DenysAlmaral",
+                "PC Steam depot art reference: city crowd bodies, animation poses, and NPC staging candidates."),
+            new VisualArchiveSource(
+                "simple-poly-city-kit",
+                "Assets/_Project/Legacy3D/SimplePoly City - Low Poly Assets",
+                "PC Steam depot art reference: skyline, storefront, traffic, vehicle, and street silhouette candidates."),
+            new VisualArchiveSource(
+                "cinematic-audio-reference",
+                "Assets/_Project/Legacy3D/FreePackUnused",
+                "PC Steam depot audio reference: atmosphere, impact, alarm, and trailer sound candidates for visual presentation passes."),
+            new VisualArchiveSource(
+                "kenney-quaternius-source-library",
+                "Assets/_Project/Art/ThirdParty",
+                "PC Steam depot art reference: Kenney/Quaternius source packs for controls, city props, characters, vehicles, and future capsule/trailer material."),
+            new VisualArchiveSource(
+                "runtime-assetstore-reference",
+                "Assets/_Project/Resources/AssetStore",
+                "PC Steam depot art reference: local AssetStore resources kept for visual comparison and future runtime replacement candidates."),
+            new VisualArchiveSource(
+                "runtime-audio-ui-reference",
+                "Assets/_Project/Audio",
+                "PC Steam depot audio reference: curated UI, ambience, BGM, and gameplay SFX currently tracked in the project."),
+            new VisualArchiveSource(
+                "runtime-ui-source-library",
+                "Assets/_Project/UI",
+                "PC Steam depot UI reference: button sprites and UI skin source assets for the Steam UI polish pass."),
+        };
 
         private static readonly string[] MainScenes =
         {
@@ -32,15 +74,15 @@ namespace GanglandUndercover.Editor
         [MenuItem("Gangland/Build/macOS Release")]
         public static void BuildMacOS()
         {
-            string path = Path.Combine(OutputRoot, "macOS", ProductName + ".app");
-            Build(BuildTarget.StandaloneOSX, path, macOSBundleId);
+            string path = Path.Combine(OutputRoot, "macOS", ExecutableName + ".app");
+            Build(BuildTarget.StandaloneOSX, path, StandaloneAppId);
         }
 
         [MenuItem("Gangland/Build/Windows Release")]
         public static void BuildWindows()
         {
-            string path = Path.Combine(OutputRoot, "Windows", ProductName + ".exe");
-            Build(BuildTarget.StandaloneWindows64, path, WindowsProductGuid);
+            string path = Path.Combine(OutputRoot, "Windows", ExecutableName + ".exe");
+            Build(BuildTarget.StandaloneWindows64, path, StandaloneAppId);
         }
 
         [MenuItem("Gangland/Build/All Platforms")]
@@ -48,6 +90,18 @@ namespace GanglandUndercover.Editor
         {
             BuildMacOS();
             BuildWindows();
+        }
+
+        [MenuItem("Gangland/Build/Export Steam Visual Archive")]
+        public static void ExportSteamVisualArchive()
+        {
+            string outDir = GetCommandLineArg("outputDir")
+                ?? Path.Combine(OutputRoot, "SteamPC-20260610");
+            string buildRoot = Path.Combine(outDir, BuildTarget.StandaloneWindows64.ToString());
+            Directory.CreateDirectory(buildRoot);
+
+            string placeholderPlayerPath = Path.Combine(buildRoot, ExecutableName + ".exe");
+            AttachSteamVisualArchive(BuildTarget.StandaloneWindows64, placeholderPlayerPath);
         }
 
         /// <summary>命令行入口（CI 用）</summary>
@@ -61,10 +115,9 @@ namespace GanglandUndercover.Editor
                 return;
             }
             string outDir = GetCommandLineArg("outputDir") ?? OutputRoot;
-            string bundleId = target == BuildTarget.StandaloneOSX ? macOSBundleId : WindowsProductGuid;
             string ext = target == BuildTarget.StandaloneOSX ? ".app" : ".exe";
-            string path = Path.Combine(outDir, target.ToString(), ProductName + ext);
-            Build(target, path, bundleId);
+            string path = Path.Combine(outDir, target.ToString(), ExecutableName + ext);
+            Build(target, path, StandaloneAppId);
         }
 
         // ─── 核心逻辑 ───────────────────────────────────────
@@ -72,6 +125,16 @@ namespace GanglandUndercover.Editor
         private static void Build(BuildTarget target, string outputPath, string bundleId)
         {
             Debug.Log($"[BuildScript] Starting build for {target} → {outputPath}");
+
+            if (!EnsureBuildTargetSupported(target))
+            {
+                if (Application.isBatchMode)
+                {
+                    EditorApplication.Exit(1);
+                }
+
+                return;
+            }
 
             // 确保输出目录存在
             string dir = Path.GetDirectoryName(outputPath);
@@ -122,6 +185,7 @@ namespace GanglandUndercover.Editor
 
             if (summary.result == BuildResult.Succeeded)
             {
+                AttachSteamVisualArchive(target, outputPath);
                 Debug.Log($"[BuildScript] BUILD SUCCESS: {summary.outputPath} ({summary.totalSize / 1024 / 1024} MB, {summary.totalTime})");
             }
             else
@@ -132,6 +196,138 @@ namespace GanglandUndercover.Editor
                     EditorApplication.Exit(1);
                 }
             }
+        }
+
+        private static void AttachSteamVisualArchive(BuildTarget target, string outputPath)
+        {
+            if (target != BuildTarget.StandaloneWindows64)
+            {
+                return;
+            }
+
+            if (IsCommandLineFlagFalse("includeSteamVisualArchive"))
+            {
+                Debug.Log("[BuildScript] Steam visual archive skipped by -includeSteamVisualArchive false.");
+                return;
+            }
+
+            string buildRoot = Path.GetDirectoryName(outputPath);
+            if (string.IsNullOrEmpty(buildRoot))
+            {
+                Debug.LogWarning("[BuildScript] Steam visual archive skipped: build root is empty.");
+                return;
+            }
+
+            string archiveRoot = Path.Combine(buildRoot, "SteamVisualArchive");
+            if (Directory.Exists(archiveRoot))
+            {
+                Directory.Delete(archiveRoot, true);
+            }
+
+            Directory.CreateDirectory(archiveRoot);
+
+            long copiedBytes = 0L;
+            List<string> manifestLines = new List<string>
+            {
+                "# Gangland Undercover Steam Visual Archive",
+                string.Empty,
+                "Purpose: PC/Steam candidate package art source archive for review, trailer still selection, and downstream visual replacement work.",
+                "Runtime: not loaded automatically by gameplay; ships beside the Windows player for PC-first review builds.",
+                "Policy: real project-owned/local third-party art references only; no filler files.",
+                string.Empty,
+                "Included sources:",
+            };
+
+            foreach (VisualArchiveSource source in SteamVisualArchiveSources)
+            {
+                string sourcePath = Path.Combine(ProjectRootPath(), source.SourcePath);
+                if (!Directory.Exists(sourcePath))
+                {
+                    Debug.LogWarning("[BuildScript] Steam visual archive source missing: " + source.SourcePath);
+                    manifestLines.Add("- Missing: " + source.SourcePath);
+                    continue;
+                }
+
+                string destinationPath = Path.Combine(archiveRoot, source.Label);
+                long sourceBytes = CopyDirectoryForArchive(sourcePath, destinationPath);
+                copiedBytes += sourceBytes;
+                manifestLines.Add("- " + source.Label + ": " + source.SourcePath + " (" + FormatBytes(sourceBytes) + ")");
+                manifestLines.Add("  " + source.Description);
+            }
+
+            manifestLines.Add(string.Empty);
+            manifestLines.Add("Total copied bytes: " + copiedBytes + " (" + FormatBytes(copiedBytes) + ")");
+            manifestLines.Add("Build target minimum: " + SteamVisualArchiveTargetBytes + " (" + FormatBytes(SteamVisualArchiveTargetBytes) + ")");
+
+            File.WriteAllLines(Path.Combine(archiveRoot, "MANIFEST.md"), manifestLines);
+
+            if (copiedBytes < SteamVisualArchiveTargetBytes)
+            {
+                Debug.LogWarning("[BuildScript] Steam visual archive is below target: " + FormatBytes(copiedBytes));
+            }
+            else
+            {
+                Debug.Log("[BuildScript] Steam visual archive attached: " + FormatBytes(copiedBytes));
+            }
+        }
+
+        private static long CopyDirectoryForArchive(string sourceRoot, string destinationRoot)
+        {
+            Directory.CreateDirectory(destinationRoot);
+            long copiedBytes = 0L;
+
+            foreach (string directoryPath in Directory.GetDirectories(sourceRoot, "*", SearchOption.AllDirectories))
+            {
+                string relativePath = Path.GetRelativePath(sourceRoot, directoryPath);
+                Directory.CreateDirectory(Path.Combine(destinationRoot, relativePath));
+            }
+
+            foreach (string filePath in Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories))
+            {
+                if (filePath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string relativePath = Path.GetRelativePath(sourceRoot, filePath);
+                string destinationPath = Path.Combine(destinationRoot, relativePath);
+                string destinationDirectory = Path.GetDirectoryName(destinationPath);
+                if (!string.IsNullOrEmpty(destinationDirectory))
+                {
+                    Directory.CreateDirectory(destinationDirectory);
+                }
+
+                File.Copy(filePath, destinationPath, true);
+                copiedBytes += new FileInfo(filePath).Length;
+            }
+
+            return copiedBytes;
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            double mebibytes = bytes / 1024d / 1024d;
+            return mebibytes.ToString("0.0") + " MiB";
+        }
+
+        private static string ProjectRootPath()
+        {
+            return Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        }
+
+        private static bool EnsureBuildTargetSupported(BuildTarget target)
+        {
+            BuildTargetGroup targetGroup = BuildPipeline.GetBuildTargetGroup(target);
+            if (BuildPipeline.IsBuildTargetSupported(targetGroup, target))
+            {
+                return true;
+            }
+
+            string moduleHint = target == BuildTarget.StandaloneWindows64
+                ? "Install Windows Build Support (Mono) for Unity 6000.4.9f1 in Unity Hub."
+                : "Install the required platform support module for Unity 6000.4.9f1.";
+            Debug.LogError("[BuildScript] Build target unsupported: " + target + ". " + moduleHint);
+            return false;
         }
 
         // ─── 辅助 ───────────────────────────────────────
@@ -190,6 +386,15 @@ namespace GanglandUndercover.Editor
             return null;
         }
 
+        private static bool IsCommandLineFlagFalse(string key)
+        {
+            string value = GetCommandLineArg(key);
+            return !string.IsNullOrEmpty(value)
+                && (value.Equals("false", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("0", StringComparison.OrdinalIgnoreCase)
+                    || value.Equals("no", StringComparison.OrdinalIgnoreCase));
+        }
+
         [Serializable]
         private struct BuildInfo
         {
@@ -198,6 +403,20 @@ namespace GanglandUndercover.Editor
             public string target;
             public string buildTime;
             public string gitCommit;
+        }
+
+        private readonly struct VisualArchiveSource
+        {
+            public VisualArchiveSource(string label, string sourcePath, string description)
+            {
+                Label = label;
+                SourcePath = sourcePath;
+                Description = description;
+            }
+
+            public readonly string Label;
+            public readonly string SourcePath;
+            public readonly string Description;
         }
     }
 }
