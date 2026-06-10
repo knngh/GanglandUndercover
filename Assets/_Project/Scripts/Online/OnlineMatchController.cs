@@ -159,6 +159,7 @@ namespace GanglandUndercover.Online
         [SerializeField] private bool kenneyMode;
         private bool matchStarted;
         private bool localPreviewMode;
+        private bool disconnectedNetworkSession;
         private bool fullMapPreview = true;
         private bool tacticalMapOpen;
         private bool intelBoardOpen;
@@ -201,6 +202,7 @@ namespace GanglandUndercover.Online
 
         public ulong LocalClientIdValue => LocalClientId();
         public bool IsOnline => localPreviewMode || networkManager != null && (networkManager.IsHost || networkManager.IsClient);
+        public bool HasDisconnectedNetworkSession => disconnectedNetworkSession;
         /// <summary>当前已连接的客户端数（仅 Server/Host 有意义；用于 Relay 双进程联调断言）。</summary>
         /// <summary>NGO 是否已建立监听（Host）或已连接（Client）。</summary>
         /// <summary>Task#7：当前是否有现场小游戏在前台（供联机自动化断言小游戏确实接入）。</summary>

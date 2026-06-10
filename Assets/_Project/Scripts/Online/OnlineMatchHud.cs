@@ -1177,7 +1177,7 @@ namespace GanglandUndercover.Online
             relayHostButton.interactable = offline && relayReady;
             relayClientButton.interactable = offline && relayReady;
             localPreviewButton.interactable = offline;
-            shutdownButton.interactable = controller.IsOnline;
+            shutdownButton.interactable = controller.IsOnline || controller.HasDisconnectedNetworkSession;
 
             readyButton.interactable = controller.IsOnline && controller.Phase == OnlineMatchPhase.Lobby;
             SetButtonText(readyButton, controller.LocalReady ? "取消 Ready" : "Ready");

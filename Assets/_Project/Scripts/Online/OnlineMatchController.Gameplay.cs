@@ -2097,6 +2097,14 @@ namespace GanglandUndercover.Online
                 return builder.ToString();
             }
 
+            if (!string.IsNullOrEmpty(safeJoinCode) && safeStatus.Contains("Host 已断开"))
+            {
+                builder.Append("\n房间码: ").Append(safeJoinCode).Append("。");
+                builder.Append("\n断线处理: 旧房间码已失效；返回主菜单后由 Host 重新开房，再发新码。");
+                builder.Append("\n晚测记录: 截图本状态栏、系统时间和双方最后一步。");
+                return builder.ToString();
+            }
+
             if (isOnline && isHost && !string.IsNullOrEmpty(safeJoinCode))
             {
                 int visibleClientCount = Mathf.Max(1, connectedClientCount);

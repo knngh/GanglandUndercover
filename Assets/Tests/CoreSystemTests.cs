@@ -418,6 +418,44 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void RelayLobbySummary_DisconnectedHostGuidesReturnAndScreenshot()
+        {
+            string summary = BuildRelayLobbySummary(
+                "Host 已断开，房间码 6KB6DH 已失效。",
+                "6kb6dh",
+                string.Empty,
+                operationInProgress: false,
+                isOnline: false,
+                isHost: false,
+                isClientConnected: false,
+                connectedClientCount: 0);
+
+            StringAssert.Contains("Host 已断开", summary);
+            StringAssert.Contains("已失效", summary);
+            StringAssert.Contains("返回主菜单", summary);
+            StringAssert.Contains("重新开房", summary);
+            StringAssert.Contains("截图", summary);
+        }
+
+        [Test]
+        public void RelayLobbySummary_DisconnectedHostOverridesStaleClientConnectedState()
+        {
+            string summary = BuildRelayLobbySummary(
+                "Host 已断开，房间码 6KB6DH 已失效。",
+                "6kb6dh",
+                string.Empty,
+                operationInProgress: false,
+                isOnline: true,
+                isHost: false,
+                isClientConnected: true,
+                connectedClientCount: 1);
+
+            StringAssert.Contains("旧房间码已失效", summary);
+            StringAssert.Contains("重新开房", summary);
+            Assert.IsFalse(summary.Contains("等待 Host 开局"), "Host 断开回调瞬间不能继续提示 Client 等待旧房间。");
+        }
+
+        [Test]
         public void LobbyBrowserSummary_RefreshInProgressMentionsRoomCount()
         {
             string summary = BuildLobbyBrowserSummary(

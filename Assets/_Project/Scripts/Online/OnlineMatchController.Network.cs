@@ -272,6 +272,7 @@ namespace GanglandUndercover.Online
         {
             try
             {
+                disconnectedNetworkSession = false;
                 relayJoinCode = string.Empty;
                 relayStatus = "使用直连 Host。";
                 ConfigureTransport("0.0.0.0");
@@ -308,6 +309,7 @@ namespace GanglandUndercover.Online
         private void StartClient(string address)
         {
             string safeAddress = string.IsNullOrWhiteSpace(address) ? "127.0.0.1" : address.Trim();
+            disconnectedNetworkSession = false;
             relayJoinCode = string.Empty;
             relayStatus = "使用直连 Client。";
             ConfigureTransport(safeAddress);
@@ -332,6 +334,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            disconnectedNetworkSession = false;
             relayOperationInProgress = true;
             relayStatus = "Relay 正在创建房间码。";
             status = relayStatus;
@@ -419,6 +422,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            disconnectedNetworkSession = false;
             relayOperationInProgress = true;
             relayStatus = "Relay 正在加入 " + safeJoinCode + "。";
             status = relayStatus;
@@ -503,6 +507,7 @@ namespace GanglandUndercover.Online
         // --- StartLocalPreviewRoom ---
         private void StartLocalPreviewRoom()
         {
+            disconnectedNetworkSession = false;
             localPreviewMode = true;
             localReady = true;
             localPlayerName = LimitText(localPlayerName, 16, "港区玩家");
@@ -558,6 +563,7 @@ namespace GanglandUndercover.Online
             localRole = OnlineRole.Unassigned;
             phase = OnlineMatchPhase.Lobby;
             localPreviewMode = false;
+            disconnectedNetworkSession = false;
             localReady = false;
             matchStarted = false;
             activeTaskId = -1;
@@ -646,6 +652,8 @@ namespace GanglandUndercover.Online
         // --- HandleClientConnected ---
         private void HandleClientConnected(ulong clientId)
         {
+            disconnectedNetworkSession = false;
+
             if (networkManager.IsServer)
             {
                 EnsureMiniGameBridgeNetworkObject();
@@ -671,6 +679,12 @@ namespace GanglandUndercover.Online
         {
             // 主机迁移管理：通知迁移管理器检测主机断连
             migrationManager?.OnClientDisconnected(clientId);
+
+            if (IsRemoteHostDisconnect(clientId))
+            {
+                MarkHostDisconnectedForRecovery();
+                return;
+            }
 
             ReleaseTasksHeldByClient(clientId);
             RemoveDisconnectedPlayerVotes(clientId);
@@ -698,6 +712,37 @@ namespace GanglandUndercover.Online
                 EvaluateWinConditions();
                 BroadcastSnapshot();
             }
+        }
+
+        // --- IsRemoteHostDisconnect ---
+        private bool IsRemoteHostDisconnect(ulong clientId)
+        {
+            if (clientId != NetworkManager.ServerClientId || localPreviewMode)
+            {
+                return false;
+            }
+
+            return networkManager == null || !networkManager.IsHost;
+        }
+
+        // --- MarkHostDisconnectedForRecovery ---
+        private void MarkHostDisconnectedForRecovery()
+        {
+            disconnectedNetworkSession = true;
+            localReady = false;
+            matchStarted = false;
+            phase = OnlineMatchPhase.Lobby;
+
+            string safeJoinCode = CleanRelayJoinInput(relayJoinCode);
+            string codeStatus = string.IsNullOrEmpty(safeJoinCode)
+                ? string.Empty
+                : "，房间码 " + safeJoinCode + " 已失效";
+            string message = "Host 已断开" + codeStatus + "。请返回主菜单或重新开房。";
+            status = message;
+            relayStatus = message;
+            AddCaseLog(message);
+            OnRelayConnectionChanged?.Invoke(false);
+            OnRelayStatusChanged?.Invoke(relayStatus);
         }
 
         // --- ReleaseTasksHeldByClient ---

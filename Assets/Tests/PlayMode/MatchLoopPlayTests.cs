@@ -4,6 +4,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 namespace GanglandUndercover.PlayTests
 {
@@ -198,6 +199,30 @@ namespace GanglandUndercover.PlayTests
             Assert.AreEqual(1, GetCollectionCount(bodies), "断线玩家的尸体应保留，仍可被其他玩家报案");
         }
 
+        [UnityTest]
+        public IEnumerator HostDisconnect_ShowsVisibleRecoveryGuidance()
+        {
+            yield return null;
+
+            SetField("localPreviewMode", false);
+            SetField("relayJoinCode", "6kb6dh");
+            SetField("relayStatus", "Relay 已加入 6KB6DH。");
+
+            InvokePrivate("HandleClientDisconnected", 0UL);
+            yield return null;
+
+            StringAssert.Contains("Host 已断开", GetString("Status"));
+            StringAssert.Contains("6KB6DH", GetString("RelayStatus"));
+            StringAssert.Contains("Host 已断开", GetString("RelayLobbySummary"));
+            StringAssert.Contains("重新开房", GetString("RelayLobbySummary"));
+            Assert.IsTrue(GetBool("HasDisconnectedNetworkSession"), "Host 断开后应保留一个可见的断线状态，允许 UI 提供离开/重试入口。");
+            Assert.IsTrue(CollectionContainsString(GetProp("CaseLog"), "Host 已断开"), "案卷日志应记录 Host 断开，方便晚测回溯。");
+
+            Button shutdownButton = FindRuntimeButton("离开房间 Button");
+            Assert.IsNotNull(shutdownButton, "正式 HUD 应保留离开房间按钮，不能只靠 OnGUI 兜底。");
+            Assert.IsTrue(shutdownButton.interactable, "Host 断开后离开房间按钮仍应可点，用于清理旧会话并返回主菜单。");
+        }
+
         // ──────────────────────────────────────────────────────────
         //  帧驱动辅助
         // ──────────────────────────────────────────────────────────
@@ -315,6 +340,33 @@ namespace GanglandUndercover.PlayTests
         {
             PropertyInfo count = collection.GetType().GetProperty("Count");
             return Convert.ToInt32(count.GetValue(collection));
+        }
+
+        private static bool CollectionContainsString(object collection, string expected)
+        {
+            foreach (object item in (System.Collections.IEnumerable)collection)
+            {
+                if (item != null && item.ToString().Contains(expected))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private Button FindRuntimeButton(string objectName)
+        {
+            Button[] buttons = _host.GetComponentsInChildren<Button>(true);
+            foreach (Button button in buttons)
+            {
+                if (button.name == objectName)
+                {
+                    return button;
+                }
+            }
+
+            return null;
         }
 
         private static Type RuntimeType(string fullName)
