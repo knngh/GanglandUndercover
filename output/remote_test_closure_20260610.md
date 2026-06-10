@@ -10,7 +10,7 @@
 今天已完成远程联机前置闭环:
 
 - Relay 双进程真实云服务验证通过。
-- EditMode 全量通过。
+- EditMode 全量通过，已覆盖新增 Relay 晚测诊断文案。
 - PlayMode 常规套件通过，无失败；Relay 两个 PlayMode 用例在常规套件中按设计 ignored，并已由双进程脚本单独验证。
 - macOS FriendTest 构建已生成，并已压缩成可发送给朋友的 zip。
 - 朋友手工测试脚本已补齐: `output/friend_remote_test_runbook_20260610.md`。
@@ -22,10 +22,10 @@
 | 验证项 | 命令/入口 | 结果 | 证据 |
 |--------|-----------|------|------|
 | Relay 双进程 | `bash run-relay-twoprocess.sh` | PASS | `Logs/relay-host-result.txt`, clone `Logs/relay-client-result.txt` |
-| EditMode | Unity `-runTests -testPlatform EditMode` | 83 passed, 0 failed, 0 skipped | `Logs/friendtest-editmode-20260610.xml` |
-| PlayMode | Unity `-runTests -testPlatform PlayMode` | 8 passed, 0 failed, 2 ignored | `Logs/friendtest-playmode-20260610.xml` |
-| macOS FriendTest 构建 | `BuildScript.Build` | SUCCESS | `Logs/build-friendtest-macos-20260610-retry2.log` |
-| macOS FriendTest zip | `ditto -c -k --sequesterRsrc --keepParent` | 84 MB zip | `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip` |
+| EditMode | Unity `-runTests -testPlatform EditMode` | 84 passed, 0 failed, 0 skipped | `Logs/relay-diagnostics-editmode-20260610.xml` |
+| PlayMode | Unity `-runTests -testPlatform PlayMode` | 8 passed, 0 failed, 2 ignored | `Logs/relay-diagnostics-playmode-20260610.xml` |
+| macOS FriendTest 构建 | `BuildScript.Build` | SUCCESS | `Logs/build-friendtest-macos-20260610-e0932942.log` |
+| macOS FriendTest zip | `ditto -c -k --sequesterRsrc --keepParent` | 96 MB zip | `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip` |
 
 Relay 双进程本轮结果:
 
@@ -37,7 +37,7 @@ Client: 2026-06-10 08:52:08 PASS, connected=true
 测试结果摘要:
 
 ```text
-EditMode: testcasecount=83, passed=83, failed=0, skipped=0
+EditMode: testcasecount=84, passed=84, failed=0, skipped=0
 PlayMode: testcasecount=10, passed=8, failed=0, skipped=2
 ```
 
@@ -62,23 +62,25 @@ Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app
 
 - App: `Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app`
 - Zip: `Builds/FriendTest-20260610/GanglandUndercover-FriendTest-macOS-20260610.zip`
-- Zip 大小: 84 MB
-- Zip sha256: `8556990ab3c226176fc6c7f495f81f7ef96c84395afde4fd63208923a2fced89`
+- Zip 大小: 96 MB
+- Zip sha256: `ee35650855fa72fae224ae37097f975c47068743d4d26f956e453db38f3ef3a9`
 - Unity: 6000.4.9f1
 - App version: 0.1.0-dev
-- 构建代码 commit: `faaf88be`
+- 构建代码 commit: `e0932942`
+- 包内 build info: `gitCommit=e0932942`
 
 构建日志摘要:
 
 ```text
-[BuildScript] BUILD SUCCESS: .../Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app (234 MB, 00:00:16.0679490)
+[BuildScript] BUILD SUCCESS: .../Builds/FriendTest-20260610/StandaloneOSX/GanglandUndercover.app (234 MB, 00:00:04.6366150)
 ```
 
-构建恢复过程:
+本轮新增晚测诊断:
 
-- 前两次构建卡在 Unity Licensing Client 重连，未进入 `BuildScript` 输出阶段。
-- 清理残留 `Unity.Licensing.Client` 进程后重跑成功。
-- 成功构建命令未使用 `-nographics`，避免再次触发 headless/licensing 组合问题。
+- Lobby/Relay 状态栏现在会在 Host、Client、输入房间码、创建/加入中、空状态下给出明确下一步。
+- 超过 20 秒无变化时，状态栏提示截图本行、房间码和 Console。
+- Host 侧提示截图房间码、连接人数和玩家列表。
+- Client 侧提示截图玩家列表、Ready 状态和 Host 可见性。
 
 ---
 
