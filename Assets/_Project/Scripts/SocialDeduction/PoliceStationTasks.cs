@@ -15,7 +15,7 @@ namespace GanglandUndercover.SocialDeduction
         {
             Lobby,        // 整理档案（SortTask）
             Briefing,     // 调取监控（ScanTask）
-            Armory,       // 武器清点（TapTask）
+            Surveillance, // 监控巡查（TapTask）
             Interrogation,// 审讯记录（KeypadTask）
             Evidence,     // 证据归档（新任务）
         }
@@ -24,7 +24,7 @@ namespace GanglandUndercover.SocialDeduction
         {
             TaskArea.Lobby        => "整理档案",
             TaskArea.Briefing     => "调取监控",
-            TaskArea.Armory       => "武器清点",
+            TaskArea.Surveillance => "监控巡查",
             TaskArea.Interrogation=> "审讯记录",
             TaskArea.Evidence     => "证据归档",
             _                     => "未知任务",
@@ -39,7 +39,7 @@ namespace GanglandUndercover.SocialDeduction
             {
                 "整理档案" => MiniGameType.SortTask,
                 "调取监控" => MiniGameType.ScanTask,
-                "武器清点" => MiniGameType.TapTask,
+                "监控巡查" => MiniGameType.TapTask,
                 "审讯记录" => MiniGameType.KeypadTask,
                 "证据归档" => MiniGameType.EvidenceArchiveTask,
                 _          => null,

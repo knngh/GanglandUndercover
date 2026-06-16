@@ -23,6 +23,7 @@ namespace GanglandUndercover.Online
         private string lastReason = string.Empty;
         private string lastOutcome = string.Empty;
         private int meetingCount;
+        private bool endNotified;
 
         public event Action<string, string> MeetingStarted;    // (reason, phase)
         public event Action<ulong, ulong> VoteCast;             // (voterId, targetId)
@@ -46,6 +47,7 @@ namespace GanglandUndercover.Online
             IsActive = true;
             lastReason = reason;
             lastOutcome = string.Empty;
+            endNotified = false;
             pendingVotes.Clear();
             meetingCount++;
             addCaseLog($"MeetingSync #{meetingCount}: 会议开始 — {reason}。");
@@ -83,7 +85,13 @@ namespace GanglandUndercover.Online
 
         public void End()
         {
+            if (endNotified)
+            {
+                return;
+            }
+
             IsActive = false;
+            endNotified = true;
             MeetingEnded?.Invoke();
             addCaseLog($"MeetingSync #{meetingCount}: 会议结束。");
         }
@@ -92,7 +100,7 @@ namespace GanglandUndercover.Online
 
         public bool HasAllVoted(int alivePlayerCount)
         {
-            return pendingVotes.Count >= alivePlayerCount;
+            return IsActive && alivePlayerCount > 0 && pendingVotes.Count >= alivePlayerCount;
         }
 
         public static ulong SkipVoteTarget => ulong.MaxValue;

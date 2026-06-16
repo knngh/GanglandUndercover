@@ -149,6 +149,12 @@ namespace GanglandUndercover.Online
         [SerializeField] internal OnlineMapService mapService;
         [SerializeField] internal OnlineTaskService taskService;
         [SerializeField] internal MiniGames.OnlineMiniGameBridge miniGameBridge;
+        [Header("── T1 服务组件 ──")]
+        [SerializeField] public Services.VotingService votingService;
+        [SerializeField] public Services.SabotageService sabotageService;
+        [SerializeField] public Services.EvidenceService evidenceService;
+        [SerializeField] public Services.MeetingService meetingService;
+        [SerializeField] public SimpleGameEventBus gameEventBus;
         [Header("M6 地图布局")]
         [SerializeField] private Map.MapLayoutData mapLayoutData;
         [SerializeField] private Map.MapLayoutData policeStationMapLayoutData;
@@ -199,6 +205,19 @@ namespace GanglandUndercover.Online
         private OnlineCameraRig _cameraRig;
         private bool relayOperationInProgress;
         // currentCameraSubjectId moved to OnlineCameraRig; use _cameraRig.SetSubject() / _cameraRig.CurrentSubjectId
+
+        // T1 A2: 接口引用（与现有字段并存，供服务组件使用）
+        /// <summary>World builder as <see cref="IWorldBuilder"/> interface.</summary>
+        public GanglandUndercover.Online.World.IWorldBuilder WorldBuilderService => WorldBuilder;
+
+        /// <summary>Map service as <see cref="IMapService"/> interface.</summary>
+        public IMapService MapServiceProvider => mapService;
+
+        /// <summary>Audio manager as <see cref="IAudioService"/> interface.</summary>
+        public IAudioService AudioServiceInstance => AudioManager.Instance;
+
+        /// <summary>Chat system as <see cref="IChatService"/> interface.</summary>
+        public IChatService ChatServiceProvider => chatSystem;
 
         public ulong LocalClientIdValue => LocalClientId();
         public bool IsOnline => localPreviewMode || networkManager != null && (networkManager.IsHost || networkManager.IsClient);
@@ -515,7 +534,7 @@ namespace GanglandUndercover.Online
 
         public void SetEvidenceTarget(int value)
         {
-            taskService.EvidenceTarget = Mathf.Clamp(value, 34, 56);
+            taskService.EvidenceTarget = Mathf.Clamp(value, ruleSet.MinEvidenceTarget, ruleSet.MaxEvidenceTarget);
 
             if (IsOnline && IsHost)
             {
@@ -829,7 +848,7 @@ namespace GanglandUndercover.Online
                 if (phaseTimer <= 0f)
                 {
                     phase = OnlineMatchPhase.Voting;
-                    phaseTimer = ruleSet.VotingSeconds;
+                    phaseTimer = ruleSet.VotingSecondsFor(players.Count);
                     status = "开始投票。";
                     AddCaseLog(status);
                     BroadcastSnapshot();
@@ -1001,6 +1020,7 @@ namespace GanglandUndercover.Online
             }
 
             AssignRoles(ids);
+            ApplyFirstKillDelay();
             status = "专案开始：身份已私发，准备进入九龙港城。";
             AddCaseLog(status);
             PlayCue("start");
@@ -1058,6 +1078,27 @@ namespace GanglandUndercover.Online
             for (; idx < shuffled.Count; idx++)
             {
                 AssignSingleRole(shuffled[idx], OnlineRole.Police, policeIdx++);
+            }
+        }
+
+        private void ApplyFirstKillDelay()
+        {
+            float delay = ruleSet.FirstKillMinDelaySecondsFor(players.Count);
+
+            foreach (KeyValuePair<ulong, OnlineRole> pair in privateRoles)
+            {
+                if (pair.Value != OnlineRole.Gang && pair.Value != OnlineRole.Mole)
+                {
+                    continue;
+                }
+
+                killSystem.killCooldowns[pair.Key] = delay;
+
+                if (players.TryGetValue(pair.Key, out OnlinePlayerState state))
+                {
+                    state.KillCooldown = delay;
+                    players[pair.Key] = state;
+                }
             }
         }
 
@@ -1561,7 +1602,7 @@ namespace GanglandUndercover.Online
             {
                 worldBuilder.CreateCorpseMarker(victim.Position);
             }
-            killSystem.killCooldowns[senderClientId] = ruleSet.KillCooldownSeconds;
+            killSystem.killCooldowns[senderClientId] = ruleSet.KillCooldownFor(players.Count);
             player.Suspicion += 2;
             players[senderClientId] = player;
             killSystem.killCount++;
@@ -1778,7 +1819,7 @@ namespace GanglandUndercover.Online
         {
             if (emergencyMeetingsLeft <= 0 || emergencyCooldownTimer > 0f) return;
             emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-            emergencyCooldownTimer = ruleSet.EmergencyCooldownSeconds;
+            emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
             BeginMeeting(callerDisplayName + " 按下警署紧急铃");
             BroadcastSnapshot();
         }
@@ -1829,10 +1870,10 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (Vector3.Distance(player.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
+            if (Vector3.Distance(player.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRangeFor(players.Count))
             {
                 emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-                emergencyCooldownTimer = ruleSet.EmergencyCooldownSeconds;
+                emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
                 BeginMeeting(player.DisplayName + " 按下警署紧急铃");
                 BroadcastSnapshot();
                 return;
@@ -1845,9 +1886,9 @@ namespace GanglandUndercover.Online
         internal void BeginMeeting(string reason)
         {
             phase = OnlineMatchPhase.Meeting;
-            phaseTimer = ruleSet.MeetingIntroSeconds;
+            phaseTimer = ruleSet.MeetingIntroSecondsFor(players.Count);
             taskService.RepairSabotageEffect(SabotageType.Blackout);
-            killSystem.reportCooldownTimer = ruleSet.ReportCooldownSeconds;
+            killSystem.reportCooldownTimer = ruleSet.ReportCooldownSecondsFor(players.Count);
             activeTaskId = -1;
             activeTaskStep = 0;
             activeTaskCharge = 0f;
@@ -1959,11 +2000,13 @@ namespace GanglandUndercover.Online
             }
 
             Dictionary<ulong, int> tally = new Dictionary<ulong, int>();
+            int skipVotes = 0;
 
             foreach (ulong targetClientId in votes.Values)
             {
                 if (targetClientId == SkipVoteTarget)
                 {
+                    skipVotes++;
                     continue;
                 }
 
@@ -1981,6 +2024,11 @@ namespace GanglandUndercover.Online
             ulong ejectedClientId = SkipVoteTarget;
             int bestVotes = 0;
             bool tied = false;
+
+            if (skipVotes > 0)
+            {
+                bestVotes = skipVotes;
+            }
 
             foreach (KeyValuePair<ulong, int> pair in tally)
             {
@@ -2006,8 +2054,9 @@ namespace GanglandUndercover.Online
                 phase = OnlineMatchPhase.Action;
                 ApplyPostMeetingKillGrace();
                 status = "投票无结果，无人出局。";
-                lastVoteOutcome = status + " 票型: " + BuildVoteTallySummary(tally);
+                lastVoteOutcome = status + " 票型: " + BuildVoteTallySummary(tally, skipVotes);
                 AddCaseLog(status);
+                syncManager?.OnMeetingEnded();
                 BroadcastSnapshot();
                 return;
             }
@@ -2043,12 +2092,12 @@ namespace GanglandUndercover.Online
 
             RemoveReportedBodies();
             EvaluateWinConditions();
+            syncManager?.OnMeetingEnded();
 
             if (phase != OnlineMatchPhase.Result)
             {
                 phase = OnlineMatchPhase.Action;
                 ApplyPostMeetingKillGrace();
-                syncManager?.OnMeetingEnded();
             }
 
             BroadcastSnapshot();
@@ -2300,7 +2349,7 @@ namespace GanglandUndercover.Online
         private void ApplyPostMeetingKillGrace()
         {
             if (killSystem != null)
-                killSystem.ApplyPostMeetingKillGrace(ruleSet.PostMeetingKillGraceSeconds);
+                killSystem.ApplyPostMeetingKillGrace(ruleSet.PostMeetingKillGraceSecondsFor(players.Count));
         }
 
 

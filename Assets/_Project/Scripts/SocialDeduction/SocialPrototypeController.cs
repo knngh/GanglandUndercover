@@ -97,6 +97,10 @@ namespace GanglandUndercover.SocialDeduction
         private bool offlineChatRoundComplete;
         private ChatSystem offlineChatSystem;
 
+        // T1 A2: 接口引用（与现有字段并存，供服务组件使用）
+        /// <summary>Offline chat system as <see cref="IChatService"/> interface.</summary>
+        public IChatService ChatServiceProvider => offlineChatSystem;
+
         // --- 回合制策略层 ---
         private GameController turnController;
         private GameObject turnHudObject;
@@ -2293,11 +2297,11 @@ namespace GanglandUndercover.SocialDeduction
 
             CreateFloor();
 
-            // 6 个区域：大厅 / 审讯室 / 证物室 / 武器库 / 拘留室 / 简报室
+            // 6 个区域：大厅 / 审讯室 / 证物室 / 监控室 / 拘留室 / 简报室
             CreateZone("大厅",   PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Lobby),        PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Lobby));
             CreateZone("审讯室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Interrogation), PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Interrogation));
             CreateZone("证物室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Evidence),      PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Evidence));
-            CreateZone("武器库", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Armory),        PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Armory));
+            CreateZone("监控室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Surveillance),  PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Surveillance));
             CreateZone("拘留室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Cells),         PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Cells));
             CreateZone("简报室", PoliceStationMap.GetAreaCenter(PoliceStationMap.Area.Briefing),      PoliceStationMap.GetAreaSize(PoliceStationMap.Area.Briefing));
 
@@ -2327,7 +2331,7 @@ namespace GanglandUndercover.SocialDeduction
             CreateTask("整理档案", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Lobby));
             CreateTask("审讯记录", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Interrogation));
             CreateTask("证据归档", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Evidence));
-            CreateTask("武器清点", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Armory));
+            CreateTask("监控巡查", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Surveillance));
             CreateTask("调取监控", PoliceStationMap.GetTaskPosition(PoliceStationMap.Area.Briefing));
 
             // ── 紧急按钮 ──────────────────────────────────

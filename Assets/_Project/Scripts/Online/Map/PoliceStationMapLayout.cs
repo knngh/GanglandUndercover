@@ -58,7 +58,7 @@ namespace GanglandUndercover.Online.Map
                 new RoomDefinition
                 {
                     Name = "监控室",
-                    Label = "Armory",
+                    Label = "Surveillance",
                     Center = new Vector2(3.1f, -1.6f),
                     Size = new Vector3(2.2f, 1.6f, 0.16f),
                     FloorColor = new Color(0.22f, 0.20f, 0.14f, 1f),
@@ -178,7 +178,7 @@ namespace GanglandUndercover.Online.Map
                 new TaskAssignment { TaskId = 1, RoomIndex = 1, Position = new Vector2(-3.5f, 2.0f) },
                 // 2: 证物室 — 证据归档
                 new TaskAssignment { TaskId = 2, RoomIndex = 2, Position = new Vector2(-3.3f, -2.2f) },
-                // 3: 监控室 — 武器清点
+                // 3: 监控室 — 监控巡查
                 new TaskAssignment { TaskId = 3, RoomIndex = 3, Position = new Vector2(3.5f, -1.9f) },
                 // 4: 简报室 — 调取监控
                 new TaskAssignment { TaskId = 4, RoomIndex = 5, Position = new Vector2(3.1f, 1.9f) },
@@ -192,7 +192,9 @@ namespace GanglandUndercover.Online.Map
         }
 
         // ─── 暗线/通风管 ────────────────────────────
-        // 4 个节点，基于 PoliceStationMap.VentConfigs
+        // 4 个节点（索引 0-3），基于 PoliceStationMap.VentConfigs
+        // 拓扑：大厅(0) 为中心枢纽，连接其余三个节点；
+        //       审讯室(1) ↔ 证物室(2)；证物室(2) ↔ 监控室(3)
 
         public static VentNodeDefinition[] Vents()
         {
@@ -208,19 +210,19 @@ namespace GanglandUndercover.Online.Map
                 {
                     Name = "审讯室通风管",
                     Position = new Vector2(-3.0f, 1.3f),
-                    ConnectedIndices = new[] { 0, 4 },
+                    ConnectedIndices = new[] { 0, 2 },
                 },
                 new VentNodeDefinition
                 {
                     Name = "证物室通风管",
                     Position = new Vector2(-2.7f, -1.3f),
-                    ConnectedIndices = new[] { 0, 5 },
+                    ConnectedIndices = new[] { 0, 1, 3 },
                 },
                 new VentNodeDefinition
                 {
                     Name = "监控室通风管",
                     Position = new Vector2(2.8f, -1.2f),
-                    ConnectedIndices = new[] { 2, 3 },
+                    ConnectedIndices = new[] { 0, 2 },
                 },
             };
         }

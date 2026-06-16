@@ -44,7 +44,7 @@ namespace GanglandUndercover.Audio
     /// All AudioClip fields are Inspector-ready placeholders — drag audio assets in the Editor
     /// or leave them null; null clips silently skip playback.
     /// </summary>
-    public sealed class AudioManager : MonoBehaviour
+    public sealed class AudioManager : MonoBehaviour, IAudioService
     {
         public const string KenneySfxResourceRoot = "Audio/SFX/Kenney";
 

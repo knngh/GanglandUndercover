@@ -9,7 +9,7 @@ namespace GanglandUndercover.Online
     ///
     /// M8.1: 支持多地图（港区/警署），通过 ActiveMapType 切换。
     /// </summary>
-    public sealed class OnlineMapService : MonoBehaviour
+    public sealed class OnlineMapService : MonoBehaviour, IMapService
     {
         // ---- 地图类型枚举 ----
 
@@ -364,7 +364,7 @@ namespace GanglandUndercover.Online
                 new ShipRoomSpec("大厅",       "Lobby",      new Vector3(0f,   0f,   0f),  new Vector3(3.2f, 2.4f, 0.16f), new Color(0.18f, 0.22f, 0.32f, 1f), MapEntrance.South),
                 new ShipRoomSpec("审讯室",     "IntRoom",    new Vector3(-3.2f, 1.6f, 0f),  new Vector3(2.4f, 1.8f, 0.16f), new Color(0.28f, 0.18f, 0.18f, 1f), MapEntrance.East),
                 new ShipRoomSpec("证物室",     "Evidence",   new Vector3(-3.0f, -1.8f, 0f), new Vector3(2.6f, 1.8f, 0.16f), new Color(0.14f, 0.22f, 0.16f, 1f), MapEntrance.East),
-                new ShipRoomSpec("监控室",     "Armory",     new Vector3(3.1f, -1.6f, 0f),  new Vector3(2.2f, 1.6f, 0.16f), new Color(0.22f, 0.20f, 0.14f, 1f), MapEntrance.West),
+                new ShipRoomSpec("监控室",     "Surveillance", new Vector3(3.1f, -1.6f, 0f),  new Vector3(2.2f, 1.6f, 0.16f), new Color(0.22f, 0.20f, 0.14f, 1f), MapEntrance.West),
                 new ShipRoomSpec("拘留室",     "Cells",      new Vector3(-0.8f, 2.4f, 0f),  new Vector3(2.0f, 1.8f, 0.16f), new Color(0.16f, 0.16f, 0.22f, 1f), MapEntrance.South),
                 new ShipRoomSpec("简报室",     "Briefing",   new Vector3(2.8f, 1.5f, 0f),   new Vector3(2.4f, 1.8f, 0.16f), new Color(0.20f, 0.24f, 0.30f, 1f), MapEntrance.West),
             };

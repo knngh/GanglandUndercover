@@ -8,6 +8,7 @@ using UnityEditor;
 
 using GanglandUndercover.Art;
 using GanglandUndercover.Core;
+using GanglandUndercover.Online.World;
 using GanglandUndercover.SocialDeduction;
 
 namespace GanglandUndercover.Online
@@ -19,7 +20,7 @@ namespace GanglandUndercover.Online
     /// Pure class — no MonoBehaviour dependency.
     /// M3: Use2DBackend defaults to true — all world props render via SpriteRenderer.
     /// </summary>
-    public class OnlineWorldBuilder
+    public class OnlineWorldBuilder : IWorldBuilder
     {
         // --- M3 Backend Toggle ---
         /// <summary>

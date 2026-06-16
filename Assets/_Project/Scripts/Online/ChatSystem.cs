@@ -39,7 +39,7 @@ namespace GanglandUndercover.Online
     ///   - 会议阶段：玩家可输入，AI 自动发送预设消息
     ///   - 非会议阶段：无聊天功能
     /// </summary>
-    public class ChatSystem
+    public class ChatSystem : IChatService
     {
         private const int MaxMessages = 50;
         private const int MaxReports = 20;

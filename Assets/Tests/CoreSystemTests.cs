@@ -74,13 +74,24 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void RoleDistribution_4Players_Returns1GangNoUndercover()
+        {
+            object dist = GetRoleDistribution(4);
+
+            Assert.AreEqual(1, FieldInt(dist, "gang"));
+            Assert.AreEqual(0, FieldInt(dist, "undercover"));
+            Assert.AreEqual(0, FieldInt(dist, "mole"));
+            Assert.AreEqual(3, PropertyInt(dist, "PoliceCount"));
+        }
+
+        [Test]
         public void RoleDistribution_OutOfRange_UsesNearestPreset()
         {
-            object low = GetRoleDistribution(4);
+            object low = GetRoleDistribution(3);
             object high = GetRoleDistribution(12);
 
             Assert.AreEqual(1, FieldInt(low, "gang"));
-            Assert.AreEqual(1, FieldInt(low, "undercover"));
+            Assert.AreEqual(0, FieldInt(low, "undercover"));
             Assert.AreEqual(3, FieldInt(high, "gang"));
             Assert.AreEqual(2, FieldInt(high, "undercover"));
         }
@@ -91,8 +102,100 @@ namespace GanglandUndercover.Tests
             object ruleSet = CreateRuleSet();
 
             Assert.AreEqual(24, InvokeInt(ruleSet, "TotalTaskCount", 8, 2));
+            Assert.AreEqual(28, FieldInt(ruleSet, "MinEvidenceTarget"));
+            Assert.AreEqual(28, InvokeInt(ruleSet, "ScaledEvidenceTarget", 4));
+            Assert.AreEqual(34, InvokeInt(ruleSet, "ScaledEvidenceTarget", 6));
             Assert.AreEqual(44, InvokeInt(ruleSet, "ScaledEvidenceTarget", 8));
-            Assert.AreEqual(34, InvokeInt(ruleSet, "ScaledEvidenceTarget", 5));
+            Assert.AreEqual(55, InvokeInt(ruleSet, "ScaledEvidenceTarget", 10));
+        }
+
+        [Test]
+        public void EvidenceTarget_SettingClampsToRuleSetRange()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                Assert.AreEqual(28, fixture.PropertyInt("MinEvidenceTargetValue"));
+                Assert.AreEqual(56, fixture.PropertyInt("MaxEvidenceTargetValue"));
+
+                fixture.SetEvidenceTarget(12);
+                Assert.AreEqual(28, fixture.PropertyInt("EvidenceTarget"));
+
+                fixture.SetEvidenceTarget(99);
+                Assert.AreEqual(56, fixture.PropertyInt("EvidenceTarget"));
+            }
+        }
+
+        [Test]
+        public void MatchPacing_ScalesKillAndMeetingTimersByPlayerCount()
+        {
+            object ruleSet = CreateRuleSet();
+
+            Assert.AreEqual(30f, InvokeFloat(ruleSet, "KillCooldownFor", 4), 0.001f);
+            Assert.AreEqual(25f, InvokeFloat(ruleSet, "KillCooldownFor", 6), 0.001f);
+            Assert.AreEqual(22f, InvokeFloat(ruleSet, "KillCooldownFor", 8), 0.001f);
+
+            Assert.AreEqual(30f, InvokeFloat(ruleSet, "MeetingIntroSecondsFor", 4), 0.001f);
+            Assert.AreEqual(35f, InvokeFloat(ruleSet, "MeetingIntroSecondsFor", 6), 0.001f);
+            Assert.AreEqual(45f, InvokeFloat(ruleSet, "MeetingIntroSecondsFor", 8), 0.001f);
+
+            Assert.AreEqual(30f, InvokeFloat(ruleSet, "VotingSecondsFor", 4), 0.001f);
+            Assert.AreEqual(40f, InvokeFloat(ruleSet, "VotingSecondsFor", 6), 0.001f);
+            Assert.AreEqual(50f, InvokeFloat(ruleSet, "VotingSecondsFor", 8), 0.001f);
+
+            Assert.AreEqual(60f, InvokeFloat(ruleSet, "EmergencyCooldownSecondsFor", 4), 0.001f);
+            Assert.AreEqual(75f, InvokeFloat(ruleSet, "EmergencyCooldownSecondsFor", 6), 0.001f);
+            Assert.AreEqual(90f, InvokeFloat(ruleSet, "EmergencyCooldownSecondsFor", 8), 0.001f);
+
+            Assert.AreEqual(1.25f, InvokeFloat(ruleSet, "ReportRangeFor", 4), 0.001f);
+            Assert.AreEqual(1.35f, InvokeFloat(ruleSet, "ReportRangeFor", 6), 0.001f);
+            Assert.AreEqual(1.5f, InvokeFloat(ruleSet, "ReportRangeFor", 8), 0.001f);
+
+            Assert.AreEqual(5f, InvokeFloat(ruleSet, "ReportCooldownSecondsFor", 4), 0.001f);
+            Assert.AreEqual(5f, InvokeFloat(ruleSet, "ReportCooldownSecondsFor", 6), 0.001f);
+            Assert.AreEqual(6f, InvokeFloat(ruleSet, "ReportCooldownSecondsFor", 8), 0.001f);
+
+            Assert.AreEqual(12f, InvokeFloat(ruleSet, "FirstKillMinDelaySecondsFor", 4), 0.001f);
+            Assert.AreEqual(10f, InvokeFloat(ruleSet, "FirstKillMinDelaySecondsFor", 6), 0.001f);
+            Assert.AreEqual(8f, InvokeFloat(ruleSet, "FirstKillMinDelaySecondsFor", 8), 0.001f);
+
+            Assert.AreEqual(3f, InvokeFloat(ruleSet, "PostMeetingKillGraceSecondsFor", 4), 0.001f);
+            Assert.AreEqual(3f, InvokeFloat(ruleSet, "PostMeetingKillGraceSecondsFor", 6), 0.001f);
+            Assert.AreEqual(4f, InvokeFloat(ruleSet, "PostMeetingKillGraceSecondsFor", 8), 0.001f);
+        }
+
+        [Test]
+        public void BeginMeeting_UsesPlayerCountScaledDiscussionTimer()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Police");
+                fixture.SetPlayer(4UL, Vector3.up, alive: true, roleName: "Gang");
+
+                fixture.BeginMeeting("4P会议");
+
+                Assert.AreEqual(30f, fixture.FieldFloat("phaseTimer"), 0.001f);
+            }
+        }
+
+        [Test]
+        public void StartMatch_AppliesPlayerCountScaledFirstKillDelayToGangSide()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true);
+                fixture.SetPlayer(2UL, Vector3.right, alive: true);
+                fixture.SetPlayer(3UL, Vector3.left, alive: true);
+                fixture.SetPlayer(4UL, Vector3.up, alive: true);
+
+                fixture.StartOnlineMatchCore();
+
+                Assert.IsTrue(fixture.TryFindRoleWithKillCooldown("Gang", out float cooldown));
+                Assert.AreEqual(12f, cooldown, 0.001f);
+            }
         }
 
         [Test]
@@ -255,6 +358,87 @@ namespace GanglandUndercover.Tests
             string display = (string)InvokeStatic(chatType, "ChannelDisplayName", global);
 
             Assert.AreEqual("全局频道", display);
+        }
+
+        [Test]
+        public void MeetingSync_BeginClearsPreviousVotesAndRecordsReason()
+        {
+            List<string> caseLog = new List<string>();
+            object meeting = CreateMeetingSync(caseLog);
+            object actionPhase = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineMatchPhase"), "Action");
+            object meetingPhase = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineMatchPhase"), "Meeting");
+
+            Invoke(meeting, "Begin", "码头发现尸体", actionPhase);
+            Invoke(meeting, "RegisterVote", 1UL, 2UL);
+
+            Assert.AreEqual(1, InvokeInt(meeting, "VoteCount"));
+            Assert.IsTrue(PropertyBool(meeting, "IsActive"));
+
+            Invoke(meeting, "Begin", "警署紧急铃", meetingPhase);
+
+            Assert.AreEqual(0, InvokeInt(meeting, "VoteCount"), "新会议必须清理上轮未结算票，避免票型污染。");
+            Assert.AreEqual(2, PropertyInt(meeting, "MeetingCount"));
+            Assert.AreEqual("警署紧急铃", PropertyString(meeting, "LastReason"));
+            Assert.IsTrue(caseLog.Exists(line => line.Contains("警署紧急铃")));
+        }
+
+        [Test]
+        public void MeetingSync_IgnoresVotesAndResolveWhenInactive()
+        {
+            List<string> caseLog = new List<string>();
+            object meeting = CreateMeetingSync(caseLog);
+            Dictionary<ulong, int> tally = new Dictionary<ulong, int> { { 2UL, 1 } };
+
+            Invoke(meeting, "RegisterVote", 1UL, 2UL);
+            Invoke(meeting, "Resolve", 2UL, false, tally);
+
+            Assert.AreEqual(0, InvokeInt(meeting, "VoteCount"));
+            Assert.AreEqual(string.Empty, PropertyString(meeting, "LastOutcome"));
+            Assert.IsFalse(PropertyBool(meeting, "IsActive"));
+            Assert.AreEqual(0, caseLog.Count, "未激活会议不应写案卷，避免客户端误显示假投票。");
+        }
+
+        [Test]
+        public void MeetingSync_HasAllVotedRequiresActiveMeetingAndAlivePlayers()
+        {
+            object meeting = CreateMeetingSync(new List<string>());
+            object meetingPhase = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineMatchPhase"), "Meeting");
+
+            Assert.IsFalse((bool)Invoke(meeting, "HasAllVoted", 0), "零存活/未激活不能被判为全员已投。");
+
+            Invoke(meeting, "Begin", "会议开始", meetingPhase);
+
+            Assert.IsFalse((bool)Invoke(meeting, "HasAllVoted", 0), "零存活不能触发自动结票。");
+            Assert.IsFalse((bool)Invoke(meeting, "HasAllVoted", 2));
+
+            Invoke(meeting, "RegisterVote", 1UL, 2UL);
+            Assert.IsFalse((bool)Invoke(meeting, "HasAllVoted", 2));
+
+            Invoke(meeting, "RegisterVote", 2UL, 1UL);
+            Assert.IsTrue((bool)Invoke(meeting, "HasAllVoted", 2));
+        }
+
+        [Test]
+        public void MeetingSync_EndFiresOnceAfterResolve()
+        {
+            List<string> caseLog = new List<string>();
+            object meeting = CreateMeetingSync(caseLog);
+            object meetingPhase = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineMatchPhase"), "Meeting");
+            int endedCount = 0;
+            EventInfo ended = meeting.GetType().GetEvent("MeetingEnded");
+            ended.AddEventHandler(meeting, new Action(() => endedCount++));
+
+            Invoke(meeting, "Begin", "会议开始", meetingPhase);
+            Invoke(meeting, "RegisterVote", 1UL, ulong.MaxValue);
+            Invoke(meeting, "Resolve", ulong.MaxValue, false, new Dictionary<ulong, int>());
+
+            Assert.IsFalse(PropertyBool(meeting, "IsActive"));
+
+            Invoke(meeting, "End");
+            Invoke(meeting, "End");
+
+            Assert.AreEqual(1, endedCount, "Resolve 后仍必须发出一次会议结束事件，但重复 End 不能重复广播。");
+            Assert.AreEqual(1, caseLog.FindAll(line => line.Contains("会议结束")).Count);
         }
 
         [Test]
@@ -912,6 +1096,47 @@ namespace GanglandUndercover.Tests
                 phaseName: "Lobby");
 
             Assert.IsFalse(PropertyBool(result, "HasResult"));
+        }
+
+        [Test]
+        public void Voting_MajoritySkipDoesNotEjectSingleAccusedPlayer()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Meeting");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+
+                fixture.ApplyVote(1UL, 3UL);
+                fixture.ApplySkipVote(2UL);
+                fixture.ApplySkipVote(3UL);
+
+                Assert.AreEqual("Action", fixture.PhaseName(), "全员投票后应结束会议回到行动阶段。");
+                Assert.IsTrue(fixture.PlayerAlive(3UL), "多数跳过时，少数被投玩家不能被淘汰。");
+                StringAssert.Contains("无人出局", fixture.PropertyString("LastVoteOutcome"));
+                StringAssert.Contains("跳过", fixture.PropertyString("LastVoteOutcome"));
+            }
+        }
+
+        [Test]
+        public void Voting_ResultAfterEjectionStillEndsMeetingSync()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                int endedCount = 0;
+                fixture.AttachSyncManager();
+                fixture.SubscribeMeetingEnded(() => endedCount++);
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.BeginMeeting("结果分支会议");
+
+                fixture.ApplyVote(1UL, 2UL);
+                fixture.ApplyVote(2UL, 2UL);
+
+                Assert.AreEqual("Result", fixture.PhaseName(), "投出最后黑帮应进入结算。");
+                Assert.AreEqual(1, endedCount, "即使投票后直接结算，也必须发出会议结束事件。");
+            }
         }
 
         [Test]
@@ -1677,6 +1902,13 @@ namespace GanglandUndercover.Tests
             return Activator.CreateInstance(chatType, new Action<string>(_ => { }));
         }
 
+        private static object CreateMeetingSync(List<string> caseLog)
+        {
+            Type meetingType = RuntimeType("GanglandUndercover.Online.MeetingSync");
+            Action<string> addCaseLog = message => caseLog.Add(message);
+            return Activator.CreateInstance(meetingType, addCaseLog);
+        }
+
         private static void ReceiveChatMessage(
             object chat,
             string senderId,
@@ -2014,6 +2246,11 @@ namespace GanglandUndercover.Tests
             return Convert.ToInt32(Invoke(target, methodName, args));
         }
 
+        private static float InvokeFloat(object target, string methodName, params object[] args)
+        {
+            return Convert.ToSingle(Invoke(target, methodName, args));
+        }
+
         private static int CountChildrenStartingWith(Transform root, string prefix)
         {
             int count = 0;
@@ -2277,6 +2514,89 @@ namespace GanglandUndercover.Tests
                 return (bool)playerStateType.GetField("Ready").GetValue(GetPlayerState(clientId));
             }
 
+            public bool PlayerAlive(ulong clientId)
+            {
+                return (bool)playerStateType.GetField("Alive").GetValue(GetPlayerState(clientId));
+            }
+
+            public void AttachSyncManager()
+            {
+                Type syncType = RuntimeType("GanglandUndercover.Online.OnlineSyncManager");
+                object sync = host.AddComponent(syncType);
+                syncType.GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(sync, null);
+                SetField("syncManager", sync);
+            }
+
+            public void SubscribeMeetingEnded(Action handler)
+            {
+                object sync = GetField("syncManager");
+                Assert.IsNotNull(sync, "AttachSyncManager must be called before subscribing to MeetingSync events.");
+                object meetingSync = sync.GetType().GetProperty("MeetingSync").GetValue(sync);
+                EventInfo ended = meetingSync.GetType().GetEvent("MeetingEnded");
+                ended.AddEventHandler(meetingSync, handler);
+            }
+
+            public void BeginMeeting(string reason)
+            {
+                controllerType.GetMethod("BeginMeeting", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new object[] { reason });
+            }
+
+            public void ApplyVote(ulong voterClientId, ulong targetClientId)
+            {
+                controllerType.GetMethod("ApplyVote", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new object[] { voterClientId, targetClientId });
+            }
+
+            public void ApplySkipVote(ulong voterClientId)
+            {
+                ApplyVote(voterClientId, ulong.MaxValue);
+            }
+
+            public void SetEvidenceTarget(int value)
+            {
+                controllerType.GetMethod("SetEvidenceTarget").Invoke(controller, new object[] { value });
+            }
+
+            public void ConfigureRoom(int minPlayers, int maxPlayers, bool autoFillAi)
+            {
+                controllerType.GetMethod("SetRoomMinPlayers").Invoke(controller, new object[] { minPlayers });
+                controllerType.GetMethod("SetRoomMaxPlayers").Invoke(controller, new object[] { maxPlayers });
+                controllerType.GetMethod("SetAutoFillAi").Invoke(controller, new object[] { autoFillAi });
+            }
+
+            public void StartOnlineMatchCore()
+            {
+                controllerType.GetMethod("StartOnlineMatchCore", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new object[] { false });
+            }
+
+            public bool TryFindRoleWithKillCooldown(string roleName, out float cooldown)
+            {
+                object targetRole = Enum.Parse(roleType, roleName);
+                object privateRoles = GetField("privateRoles");
+                IEnumerable entries = (IEnumerable)privateRoles;
+
+                foreach (object entry in entries)
+                {
+                    ulong clientId = (ulong)entry.GetType().GetProperty("Key").GetValue(entry);
+                    object role = entry.GetType().GetProperty("Value").GetValue(entry);
+
+                    if (!role.Equals(targetRole))
+                    {
+                        continue;
+                    }
+
+                    object state = GetPlayerState(clientId);
+                    cooldown = Convert.ToSingle(playerStateType.GetField("KillCooldown").GetValue(state));
+                    return true;
+                }
+
+                cooldown = 0f;
+                return false;
+            }
+
             public void ApplyClientState(ulong clientId, Vector3 position, Vector2 input, bool ready)
             {
                 controllerType
@@ -2369,6 +2689,16 @@ namespace GanglandUndercover.Tests
             public bool PropertyBool(string propertyName)
             {
                 return (bool)controllerType.GetProperty(propertyName).GetValue(controller);
+            }
+
+            public int PropertyInt(string propertyName)
+            {
+                return Convert.ToInt32(controllerType.GetProperty(propertyName).GetValue(controller));
+            }
+
+            public float FieldFloat(string fieldName)
+            {
+                return Convert.ToSingle(GetField(fieldName));
             }
 
             public void SetSingleTask(int taskId, Vector3 position, bool completed, bool sabotaged)

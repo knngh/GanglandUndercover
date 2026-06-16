@@ -211,7 +211,9 @@ namespace GanglandUndercover.Online
 
         public void SetEvidenceTarget(int value)
         {
-            evidenceTarget = Mathf.Clamp(value, 34, 56);
+            int min = ruleSet != null ? ruleSet.MinEvidenceTarget : 28;
+            int max = ruleSet != null ? ruleSet.MaxEvidenceTarget : 56;
+            evidenceTarget = Mathf.Clamp(value, min, max);
         }
 
         public void ResetEvidence()

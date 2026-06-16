@@ -43,6 +43,8 @@ namespace GanglandUndercover.Online
         public int RoomMaxPlayers => roomMaxPlayers;
         public int MinimumRoomPlayersValue => ruleSet.MinimumRoomPlayers;
         public int MaximumRoomPlayersValue => ruleSet.MaximumRoomPlayers;
+        public int MinEvidenceTargetValue => ruleSet.MinEvidenceTarget;
+        public int MaxEvidenceTargetValue => ruleSet.MaxEvidenceTarget;
         public int EvidenceScore => taskService.EvidenceScore;
         public int EvidenceTarget => taskService.EvidenceTarget;
         public float MatchElapsedSeconds => matchElapsedSeconds;

@@ -965,7 +965,7 @@ namespace GanglandUndercover.Online
                 return "附近发现尸体，按 R 报案开会。";
             }
 
-            if (Vector3.Distance(localState.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRange)
+            if (Vector3.Distance(localState.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRangeFor(players.Count))
             {
                 return "你在紧急铃旁，剩余会议 " + emergencyMeetingsLeft + "，断讯/冷却会阻止开会。";
             }
@@ -1094,9 +1094,9 @@ namespace GanglandUndercover.Online
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
             GUILayout.Label("证据目标 " + taskService.EvidenceTarget, GUILayout.Width(110f));
-            taskService.EvidenceTarget = Mathf.RoundToInt(GUILayout.HorizontalSlider(taskService.EvidenceTarget, 34, 56));
+            taskService.EvidenceTarget = Mathf.RoundToInt(GUILayout.HorizontalSlider(taskService.EvidenceTarget, ruleSet.MinEvidenceTarget, ruleSet.MaxEvidenceTarget));
             GUILayout.EndHorizontal();
-            GUILayout.Label("目标局长: " + TargetMatchMinutesMin + "-" + TargetMatchMinutesMax + " 分钟 | 击倒冷却 " + Mathf.RoundToInt(ruleSet.KillCooldownSeconds) + "s | 会议 " + Mathf.RoundToInt(ruleSet.MeetingIntroSeconds + ruleSet.VotingSeconds) + "s");
+            GUILayout.Label("目标局长: " + TargetMatchMinutesMin + "-" + TargetMatchMinutesMax + " 分钟 | 击倒冷却 " + Mathf.RoundToInt(ruleSet.KillCooldownFor(roomMaxPlayers)) + "s | 会议 " + Mathf.RoundToInt(ruleSet.MeetingIntroSecondsFor(roomMaxPlayers) + ruleSet.VotingSecondsFor(roomMaxPlayers)) + "s");
             roomAutoFillAi = GUILayout.Toggle(roomAutoFillAi, "人数不足时 AI 补位");
             revealRoleOnEject = GUILayout.Toggle(revealRoleOnEject, "投出局时公开身份");
         }
@@ -1784,14 +1784,14 @@ namespace GanglandUndercover.Online
         }
 
         // --- BuildVoteTallySummary (moved from main controller) ---
-        private string BuildVoteTallySummary(Dictionary<ulong, int> tally)
+        private string BuildVoteTallySummary(Dictionary<ulong, int> tally, int skipVotes = 0)
         {
-            if (tally == null || tally.Count == 0)
-            {
-                return "无人得票";
-            }
-
             StringBuilder builder = new StringBuilder();
+
+            if (skipVotes > 0)
+            {
+                builder.Append("跳过 ").Append(skipVotes);
+            }
 
             // Show SecretVote voters separately
             StringBuilder secretBuilder = new StringBuilder();
@@ -1808,19 +1808,22 @@ namespace GanglandUndercover.Online
                 }
             }
 
-            foreach (KeyValuePair<ulong, int> pair in tally)
+            if (tally != null)
             {
-                if (!players.TryGetValue(pair.Key, out OnlinePlayerState state))
+                foreach (KeyValuePair<ulong, int> pair in tally)
                 {
-                    continue;
-                }
+                    if (!players.TryGetValue(pair.Key, out OnlinePlayerState state))
+                    {
+                        continue;
+                    }
 
-                if (builder.Length > 0)
-                {
-                    builder.Append(" | ");
-                }
+                    if (builder.Length > 0)
+                    {
+                        builder.Append(" | ");
+                    }
 
-                builder.Append(state.DisplayName).Append(" ").Append(pair.Value);
+                    builder.Append(state.DisplayName).Append(" ").Append(pair.Value);
+                }
             }
 
             if (secretBuilder.Length > 0)

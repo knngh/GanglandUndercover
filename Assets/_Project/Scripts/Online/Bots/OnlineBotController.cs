@@ -417,7 +417,7 @@ namespace GanglandUndercover.Online
             if (UnityEngine.Random.value < 0.12f &&
                 _ctrl.EmergencyMeetingsLeft > 0 &&
                 _ctrl.TaskService.CommunicationJamTimer <= 0f &&
-                Vector3.Distance(bot.Position, _ctrl.MapService.ScaleMapPosition(Vector3.zero)) <= _ctrl.RuleSet.ReportRange)
+                Vector3.Distance(bot.Position, _ctrl.MapService.ScaleMapPosition(Vector3.zero)) <= _ctrl.RuleSet.ReportRangeFor(_ctrl.Players.Count))
             {
                 _ctrl.CallEmergencyMeeting(bot.DisplayName);
                 return;
@@ -460,7 +460,7 @@ namespace GanglandUndercover.Online
             _ctrl.Bodies.Add(new OnlineBodyState(_ctrl.NextBodyId, victimId, victim.Position, false));
             _ctrl.IncrementNextBodyId();
 
-            float cooldown = _ctrl.RuleSet.KillCooldownSeconds;
+            float cooldown = _ctrl.RuleSet.KillCooldownFor(_ctrl.Players.Count);
             if (abilities?.HasAbility(AbilityType.KillCooldownReduce) == true)
                 cooldown *= abilities.Value.GetMultiplier(AbilityType.KillCooldownReduce);
             _ctrl.SetKillCooldown(botId, cooldown);

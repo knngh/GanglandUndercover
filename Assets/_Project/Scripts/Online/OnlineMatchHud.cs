@@ -626,7 +626,7 @@ namespace GanglandUndercover.Online
             settingsGroup = settings.gameObject;
             minPlayersSlider = CreateSliderRow(settings, "最少人数", controller.MinimumRoomPlayersValue, controller.MaximumRoomPlayersValue, value => controller.SetRoomMinPlayers(Mathf.RoundToInt(value)), out minPlayersText);
             maxPlayersSlider = CreateSliderRow(settings, "最大人数", controller.MinimumRoomPlayersValue, controller.MaximumRoomPlayersValue, value => controller.SetRoomMaxPlayers(Mathf.RoundToInt(value)), out maxPlayersText);
-            evidenceTargetSlider = CreateSliderRow(settings, "证据目标", 34f, 56f, value => controller.SetEvidenceTarget(Mathf.RoundToInt(value)), out evidenceTargetText);
+            evidenceTargetSlider = CreateSliderRow(settings, "证据目标", controller.MinEvidenceTargetValue, controller.MaxEvidenceTargetValue, value => controller.SetEvidenceTarget(Mathf.RoundToInt(value)), out evidenceTargetText);
             autoFillToggle = CreateToggle("人数不足时 AI 补位", settings, value => controller.SetAutoFillAi(value));
             revealRoleToggle = CreateToggle("出局时公开身份", settings, value => controller.SetRevealRoleOnEject(value));
             proximityVoiceToggle = CreateToggle("行动阶段近距离聊天", settings, value => controller.SetProximityVoiceEnabled(value));

@@ -162,11 +162,13 @@ namespace GanglandUndercover.Online.Map
         {
             return new[]
             {
+                // 修复：ConnectedIndices 只能在 0-4 范围内（共 5 个节点）。
+                // 拓扑：中央茶餐厅(0)连接四角，南北两对相邻节点互联。
                 new VentNodeDefinition { Name = "茶餐厅暗线", Position = new Vector2(0f, 0.8f), ConnectedIndices = new[] { 1, 2, 3, 4 } },
-                new VentNodeDefinition { Name = "药材铺暗线", Position = new Vector2(-4.5f, 2.5f), ConnectedIndices = new[] { 0, 3, 5 } },
-                new VentNodeDefinition { Name = "麻将馆暗线", Position = new Vector2(4.2f, 2.5f), ConnectedIndices = new[] { 0, 4, 6 } },
-                new VentNodeDefinition { Name = "后巷暗线", Position = new Vector2(-4.0f, -2.8f), ConnectedIndices = new[] { 0, 1, 7 } },
-                new VentNodeDefinition { Name = "钱庄暗线", Position = new Vector2(4.0f, -2.8f), ConnectedIndices = new[] { 0, 2, 7 } },
+                new VentNodeDefinition { Name = "药材铺暗线", Position = new Vector2(-4.5f, 2.5f), ConnectedIndices = new[] { 0, 3 } },
+                new VentNodeDefinition { Name = "麻将馆暗线", Position = new Vector2(4.2f, 2.5f), ConnectedIndices = new[] { 0, 4 } },
+                new VentNodeDefinition { Name = "后巷暗线",   Position = new Vector2(-4.0f, -2.8f), ConnectedIndices = new[] { 0, 1, 4 } },
+                new VentNodeDefinition { Name = "钱庄暗线",   Position = new Vector2(4.0f, -2.8f), ConnectedIndices = new[] { 0, 2, 3 } },
             };
         }
 

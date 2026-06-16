@@ -152,11 +152,11 @@ namespace GanglandUndercover.Environment
             CreateLodGroup(root, "LOD1", gen);
         }
 
-        // ─── 监控室（Armory → 监控室）─────────────
+        // ─── 监控室 ─────────────────────────────
 
         private static void BuildMonitorRoom(Transform parent, List<GameObject> gen)
         {
-            PoliceStationMap.Area area = PoliceStationMap.Area.Armory;
+            PoliceStationMap.Area area = PoliceStationMap.Area.Surveillance;
             Vector3 center = PoliceStationMap.GetAreaCenter(area);
             Vector2 size = PoliceStationMap.GetAreaSize(area);
 

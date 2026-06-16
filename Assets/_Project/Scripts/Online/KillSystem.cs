@@ -14,13 +14,25 @@ namespace GanglandUndercover.Online
     /// </summary>
     public sealed class KillSystem : MonoBehaviour
     {
-        // -------- 配置 --------
+        // -------- 配置（数据源统一为 OnlineRuleSet） --------
         [Header("距离与冷却")]
-        [Tooltip("显示击杀按钮的最大距离（米）")]
+        [Tooltip("显示击杀按钮的最大距离（米）。实际值从 RuleSet.KillRange 读取。")]
         public float killRange = 1.5f;
 
-        [Tooltip("击杀冷却时间（秒）")]
+        [Tooltip("击杀冷却时间（秒）。实际值从 RuleSet.KillCooldownFor 读取。")]
         public float killCooldownSeconds = 18f;
+
+        /// <summary>有效击杀范围：优先使用 RuleSet，回退到本地 Inspector 值。</summary>
+        private float EffectiveKillRange =>
+            controller != null && controller.RuleSet != null
+                ? controller.RuleSet.KillRange
+                : killRange;
+
+        /// <summary>有效击杀冷却：优先使用 RuleSet，回退到本地 Inspector 值。</summary>
+        private float EffectiveKillCooldown =>
+            controller != null && controller.RuleSet != null
+                ? controller.RuleSet.KillCooldownFor(controller.Players.Count)
+                : killCooldownSeconds;
 
         [Header("UI 引用（自动查找 Canvas/KillButton）")]
         [SerializeField] private Button killButton;
@@ -206,7 +218,7 @@ namespace GanglandUndercover.Online
         {
             bodyIndex = -1;
             if (controller == null) return false;
-            float bestDistance = controller.RuleSet.ReportRange;
+            float bestDistance = controller.RuleSet.ReportRangeFor(controller.Players.Count);
 
             for (int i = 0; i < bodies.Count; i++)
             {
@@ -590,7 +602,7 @@ namespace GanglandUndercover.Online
         private void StartCooldown()
         {
             isOnCooldown = true;
-            currentCooldown = killCooldownSeconds;
+            currentCooldown = EffectiveKillCooldown;
             UpdateKillButtonAppearance();
         }
 
@@ -600,7 +612,7 @@ namespace GanglandUndercover.Online
 
             currentCooldown -= Time.deltaTime;
 
-            float progress = 1f - Mathf.Clamp01(currentCooldown / killCooldownSeconds);
+            float progress = 1f - Mathf.Clamp01(currentCooldown / EffectiveKillCooldown);
 
             if (killCooldownFill != null)
                 killCooldownFill.fillAmount = progress;
@@ -690,7 +702,7 @@ namespace GanglandUndercover.Online
             if (!localState.Alive) return false;
 
             Vector3 localPos = localState.Position;
-            float bestDistance = killRange + 0.01f;
+            float bestDistance = EffectiveKillRange + 0.01f;
             ulong bestId = 0;
             OnlinePlayerState bestVictim = default;
 

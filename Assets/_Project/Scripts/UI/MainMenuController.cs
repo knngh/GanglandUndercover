@@ -51,7 +51,7 @@ namespace GanglandUndercover.UI
         private static readonly string[] MapDescs =
         {
             "夜幕下的九龙港区：货柜码头、夜市巷、地下诊所…黑帮与警察的暗战之地",
-            "警方总部大楼：大厅、审讯室、证物室、武器库…暗流涌动的警局内部"
+            "警方总部大楼：大厅、审讯室、证物室、监控室…暗流涌动的警局内部"
         };
         private static readonly MapType[] MapValues = { MapType.GanglandDistrict, MapType.PoliceStation };
 

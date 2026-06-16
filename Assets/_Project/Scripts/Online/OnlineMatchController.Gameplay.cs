@@ -2021,7 +2021,7 @@ namespace GanglandUndercover.Online
             {
                 OnlineBodyState body = killSystem.bodies[i];
 
-                if (!body.Reported && Vector3.Distance(position, body.Position) <= ruleSet.ReportRange * 1.4f)
+                if (!body.Reported && Vector3.Distance(position, body.Position) <= ruleSet.ReportRangeFor(players.Count) * 1.4f)
                 {
                     return true;
                 }

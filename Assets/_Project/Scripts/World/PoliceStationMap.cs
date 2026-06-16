@@ -4,7 +4,7 @@ namespace GanglandUndercover.World
 {
     /// <summary>
     /// 警察局地图定义 — 第二张地图。
-    /// 6 个区域：Lobby / Interrogation / Evidence / Armory / Cells / Briefing
+    /// 6 个区域：Lobby / Interrogation / Evidence / Surveillance / Cells / Briefing
     /// </summary>
     public static class PoliceStationMap
     {
@@ -14,7 +14,7 @@ namespace GanglandUndercover.World
             Lobby,        // 大厅
             Interrogation, // 审讯室
             Evidence,      // 证物室
-            Armory,        // 武器库
+            Surveillance,  // 监控室
             Cells,         // 拘留室
             Briefing       // 简报室
         }
@@ -25,7 +25,7 @@ namespace GanglandUndercover.World
             "大厅",
             "审讯室",
             "证物室",
-            "武器库",
+            "监控室",
             "拘留室",
             "简报室"
         };
@@ -117,14 +117,13 @@ namespace GanglandUndercover.World
         public static Vector3 GetSpawnPosition(int index) => SpawnPositions[index % SpawnPositions.Length];
 
         // ─── 通风管节点（警察局版）────────────────
-        // 4 个通风管节点，拓扑：Lobby ↔ Interrogation ↔ Cells, Lobby ↔ Evidence ↔ Armory, Lobby ↔ Briefing
+        // 4 个通风管节点（索引 0-3），拓扑：大厅(0) ↔ 审讯室(1) ↔ 证物室(2) ↔ 监控室(3) ↔ 大厅(0)
         public static readonly (string name, Vector3 position, int[] connections)[] VentConfigs =
         {
             ("大厅通风管",     new Vector3(0f,     0f,   0f),   new[] { 1, 2, 3 }),
-            ("审讯室通风管",   new Vector3(-3.0f,  1.3f, 0f),  new[] { 0, 4 }),
-            ("证物室通风管",   new Vector3(-2.7f, -1.3f, 0f),  new[] { 0, 5 }),
-            ("武器库通风管",   new Vector3(2.8f,  -1.2f, 0f),  new[] { 2, 3 }),
-            // 注：Cells 和 Briefing 的通风管复用节点 1 和 3 的邻接
+            ("审讯室通风管",   new Vector3(-3.0f,  1.3f, 0f),  new[] { 0, 2 }),
+            ("证物室通风管",   new Vector3(-2.7f, -1.3f, 0f),  new[] { 0, 1, 3 }),
+            ("监控室通风管",   new Vector3(2.8f,  -1.2f, 0f),  new[] { 0, 2 }),
         };
 
         // ─── 监控节点 ──────────────────────────────
@@ -133,7 +132,7 @@ namespace GanglandUndercover.World
             ("大厅监控",   new Vector3(0f,     0f,   0f),   2.0f),
             ("审讯室监控", new Vector3(-3.2f,  1.6f, 0f),   1.6f),
             ("证物室监控", new Vector3(-3.0f, -1.8f, 0f),   1.8f),
-            ("武器库监控", new Vector3(3.1f,   -1.6f, 0f),  1.5f),
+            ("监控室监控", new Vector3(3.1f,   -1.6f, 0f),  1.5f),
         };
 
         public static (string name, Vector3 position, float radius)[] GetSurveillanceConfigs() => SurveillanceConfigs;

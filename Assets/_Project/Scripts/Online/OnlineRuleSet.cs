@@ -10,6 +10,11 @@ namespace GanglandUndercover.Online
     [CreateAssetMenu(menuName = "Gangland/Online Rule Set", fileName = "OnlineRuleSet")]
     public class OnlineRuleSet : ScriptableObject
     {
+        private const int MidSizeEvidenceTargetFloor = 34;
+        private const int SmallLobbyPacingPlayers = 4;
+        private const int MidLobbyPacingPlayers = 6;
+        private const int LargeLobbyPacingPlayers = 8;
+
         // ═══════════════════════════════════════════════════════════════
         // M4.1 角色分配
         // ═══════════════════════════════════════════════════════════════
@@ -18,6 +23,7 @@ namespace GanglandUndercover.Online
         [Tooltip("按人数配置阵营比例。列表按 playerCount 升序排列，获取时取 <= 当前人数的最大预设。")]
         public RoleDistribution[] RoleDistributionTable = new RoleDistribution[]
         {
+            new RoleDistribution { playerCount = 4,  gang = 1, undercover = 0, mole = 0 },
             new RoleDistribution { playerCount = 5,  gang = 1, undercover = 1, mole = 0 },
             new RoleDistribution { playerCount = 6,  gang = 1, undercover = 1, mole = 1 },
             new RoleDistribution { playerCount = 7,  gang = 2, undercover = 1, mole = 0 },
@@ -101,13 +107,13 @@ namespace GanglandUndercover.Online
         [Tooltip("默认房间最大人数。")]
         public int DefaultRoomMaxPlayers = 10;
         [Tooltip("开局所需的最少可玩人数。")]
-        public int MinimumPlayablePlayers = 5;
+        public int MinimumPlayablePlayers = 4;
 
         [Header("证据")]
         [Tooltip("默认证据胜利目标。")]
         public int DefaultEvidenceTarget = 44;
         [Tooltip("证据目标滑条最小值。")]
-        public int MinEvidenceTarget = 34;
+        public int MinEvidenceTarget = 28;
         [Tooltip("证据目标滑条最大值。")]
         public int MaxEvidenceTarget = 56;
 
@@ -257,6 +263,46 @@ namespace GanglandUndercover.Online
             return Mathf.Clamp(playerCount / 3, 1, MaxEmergencyMeetings);
         }
 
+        public float KillCooldownFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, 30f, KillCooldownSeconds, 22f);
+        }
+
+        public float MeetingIntroSecondsFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, 30f, MeetingIntroSeconds, 45f);
+        }
+
+        public float VotingSecondsFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, 30f, VotingSeconds, 50f);
+        }
+
+        public float EmergencyCooldownSecondsFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, 60f, EmergencyCooldownSeconds, 90f);
+        }
+
+        public float ReportRangeFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, ReportRange, 1.35f, 1.5f);
+        }
+
+        public float ReportCooldownSecondsFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, ReportCooldownSeconds, ReportCooldownSeconds, 6f);
+        }
+
+        public float FirstKillMinDelaySecondsFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, 12f, 10f, FirstKillMinDelaySeconds);
+        }
+
+        public float PostMeetingKillGraceSecondsFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, PostMeetingKillGraceSeconds, PostMeetingKillGraceSeconds, 4f);
+        }
+
         /// <summary>计算本局任务总数 = 非Gang人数 × tasksPerNonGangPlayer。</summary>
         public int TotalTaskCount(int playerCount, int gangCount)
         {
@@ -268,10 +314,36 @@ namespace GanglandUndercover.Online
         public int ScaledEvidenceTarget(int playerCount)
         {
             float ratio = Mathf.Clamp(playerCount / 8f, 0.6f, 1.3f);
+            int minTarget = playerCount >= 6
+                ? Mathf.Max(MinEvidenceTarget, MidSizeEvidenceTargetFloor)
+                : MinEvidenceTarget;
+
             return Mathf.Clamp(
                 Mathf.RoundToInt(DefaultEvidenceTarget * ratio),
-                MinEvidenceTarget,
+                minTarget,
                 MaxEvidenceTarget);
+        }
+
+        private static float ScalePacingByPlayerCount(int playerCount, float smallLobbyValue, float midLobbyValue, float largeLobbyValue)
+        {
+            if (playerCount <= SmallLobbyPacingPlayers)
+            {
+                return smallLobbyValue;
+            }
+
+            if (playerCount >= LargeLobbyPacingPlayers)
+            {
+                return largeLobbyValue;
+            }
+
+            if (playerCount <= MidLobbyPacingPlayers)
+            {
+                float t = Mathf.InverseLerp(SmallLobbyPacingPlayers, MidLobbyPacingPlayers, playerCount);
+                return Mathf.Lerp(smallLobbyValue, midLobbyValue, t);
+            }
+
+            float upperT = Mathf.InverseLerp(MidLobbyPacingPlayers, LargeLobbyPacingPlayers, playerCount);
+            return Mathf.Lerp(midLobbyValue, largeLobbyValue, upperT);
         }
 
         // ═══════════════════════════════════════════════════════════════
