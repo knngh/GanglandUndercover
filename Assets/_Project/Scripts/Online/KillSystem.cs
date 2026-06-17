@@ -193,7 +193,13 @@ namespace GanglandUndercover.Online
             {
                 OnlinePlayerState candidate = pair.Value;
 
-                if (!candidate.Alive || controller.GetPrivateRole(pair.Key) == OnlineRole.Gang)
+                // 统一使用 PublicRole 判定可击杀目标，与客户端 UI 保持一致：
+                // PublicRole == Gang  → 公开黑帮（含真 Gang + 卧底 Undercover 伪装）
+                // PublicRole == Mole  → 公开内鬼（理论上不会出现，因 Mole 伪装为 Police）
+                // 以上两种均不可被击杀
+                if (!candidate.Alive
+                    || candidate.PublicRole == OnlineRole.Gang
+                    || candidate.PublicRole == OnlineRole.Mole)
                 {
                     continue;
                 }
@@ -310,7 +316,7 @@ namespace GanglandUndercover.Online
             {
                 if (!kv.Value.Alive) continue;
                 OnlineRole role = controller.GetPrivateRole(kv.Key);
-                if (role == OnlineRole.Gang || role == OnlineRole.Undercover)
+                if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                 {
                     if (!killCooldowns.ContainsKey(kv.Key))
                         killCooldowns[kv.Key] = grace;

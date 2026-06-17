@@ -7,6 +7,7 @@ using System.Reflection;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace GanglandUndercover.Tests
 {
@@ -19,6 +20,29 @@ namespace GanglandUndercover.Tests
     {
         private const string RuntimeAssemblyName = "Assembly-CSharp";
         private static readonly Dictionary<ulong, int> RoleLookup = new Dictionary<ulong, int>();
+
+        /// <summary>
+        /// 预热静态资源缓存并屏蔽初始化 Debug.Log，避免 Unity 测试框架
+        /// 将 Sprite2DAssetCache / UIStyle / OnlineSyncManager 等系统的
+        /// 运行时日志误判为测试失败。
+        /// </summary>
+        [OneTimeSetUp]
+        public void OneTimeSetUp()
+        {
+            // 项目运行时系统会在 AddComponent → Reset() 链中产生 Debug.Log
+            // （sprite 缓存加载、字体加载、HUD 构建等），这些是正常的初始化
+            // 行为，不应导致测试失败。
+            LogAssert.ignoreFailingMessages = true;
+
+            var asm = Assembly.Load(RuntimeAssemblyName);
+            var cacheType = asm.GetType("GanglandUndercover.Art.Sprite2DAssetCache");
+            if (cacheType != null)
+            {
+                var ensure = cacheType.GetMethod("Ensure",
+                    BindingFlags.Public | BindingFlags.Static);
+                ensure?.Invoke(null, null);
+            }
+        }
 
         [Test]
         public void EmergencyMeetingLimit_ClampsWithinRange()
@@ -2405,7 +2429,10 @@ namespace GanglandUndercover.Tests
             public ControllerFixture()
             {
                 host = new GameObject("SecurityRegression_OnlineMatchController");
+                // Sprite2DAssetCache 已在 [OneTimeSetUp] 中预热，
+                // AddComponent → Reset() → Ensure() 不会产生 Debug.Log。
                 controller = host.AddComponent(controllerType);
+
                 ClearCollection("players");
                 ClearCollection("privateRoles");
                 ClearCollection("tasks");

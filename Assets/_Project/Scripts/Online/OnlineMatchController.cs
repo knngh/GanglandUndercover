@@ -1037,9 +1037,9 @@ namespace GanglandUndercover.Online
             {
                 if (privateRoles.TryGetValue(kvp.Key, out OnlineRole role))
                 {
-                    if (role == OnlineRole.Gang || role == OnlineRole.Undercover)
+                    if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                         gangIds.Add(kvp.Key);
-                    else if (role == OnlineRole.Police)
+                    else if (role == OnlineRole.Police || role == OnlineRole.Undercover)
                         nonGangIds.Add(kvp.Key);
                 }
             }
@@ -1668,10 +1668,11 @@ namespace GanglandUndercover.Online
                         taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + 3);
                         status = player.DisplayName + " 当众背叛黑帮！已转为警方证人，全员黑帮嫌疑+2。";
                         lastEvidenceEvent = "卧底背叛！" + status + " 证据 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
-                        // 标记所有黑帮
+                        // 标记所有黑帮侧（Gang + Mole）
                         foreach (var kv in players)
                         {
-                            if (GetPrivateRole(kv.Key) == OnlineRole.Gang)
+                            OnlineRole kvRole = GetPrivateRole(kv.Key);
+                            if (kvRole == OnlineRole.Gang || kvRole == OnlineRole.Mole)
                             {
                                 var s = kv.Value;
                                 s.Suspicion += 2;
@@ -2133,8 +2134,13 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            // 阵营归属：黑帮侧 = Gang + Mole，警方侧 = Police + Undercover
+            int aliveGangSide = 0;
+            int alivePoliceSide = 0;
             int aliveGang = 0;
-            int aliveNonGang = 0;
+            int aliveNonGangSide = 0;
+            int aliveUndercover = 0;
+            int totalAlive = 0;
 
             foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
             {
@@ -2143,21 +2149,35 @@ namespace GanglandUndercover.Online
                     continue;
                 }
 
-                if (GetPrivateRole(pair.Key) == OnlineRole.Gang)
+                totalAlive++;
+                OnlineRole role = GetPrivateRole(pair.Key);
+                if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                 {
-                    aliveGang++;
+                    aliveGangSide++;
+                    if (role == OnlineRole.Gang) aliveGang++;
                 }
                 else
                 {
-                    aliveNonGang++;
+                    alivePoliceSide++;
+                    aliveNonGangSide++;
+                    if (role == OnlineRole.Undercover) aliveUndercover++;
                 }
             }
 
-            if (aliveGang == 0 && players.Count >= 2)
+            // 卧底特殊胜利：优先于阵营全灭判定
+            if (aliveUndercover == 1 && totalAlive == 1)
+            {
+                SetResult("卧底胜利：港区暗线完美收网。");
+            }
+            else if (aliveGangSide == 0 && totalAlive >= 1)
             {
                 SetResult("警方胜利：黑帮全部出局。");
             }
-            else if (aliveGang > 0 && (aliveNonGang == 0 || (players.Count >= 4 && aliveGang >= aliveNonGang)))
+            else if (alivePoliceSide == 0 && totalAlive >= 1)
+            {
+                SetResult("黑帮胜利：警方阵营全部出局。");
+            }
+            else if (aliveGang > 0 && (aliveNonGangSide == 0 || (totalAlive >= 4 && aliveGang >= aliveNonGangSide)))
             {
                 SetResult("黑帮胜利：港区控制权失守。");
             }
@@ -2733,14 +2753,14 @@ namespace GanglandUndercover.Online
         }
 
         /// <summary>
-        /// M5.4 公开方法：判断玩家是否属于黑帮阵营（Gang/Undercover/Mole）。
+        /// M5.4 公开方法：判断玩家是否属于黑帮阵营（Gang/Mole）。
         /// 用于监控系统红灯判定，不下发私密身份。
         /// </summary>
         public bool IsGangFaction(ulong clientId)
         {
             if (privateRoles.TryGetValue(clientId, out OnlineRole role))
             {
-                return role == OnlineRole.Gang || role == OnlineRole.Undercover || role == OnlineRole.Mole;
+                return role == OnlineRole.Gang || role == OnlineRole.Mole;
             }
             return false;
         }

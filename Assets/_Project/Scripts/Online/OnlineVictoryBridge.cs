@@ -124,6 +124,7 @@ namespace GanglandUndercover.Online
             int aliveGang = players.Count(kv => kv.Value.Alive && getPrivateRole(kv.Key) == OnlineRole.Gang);
             int alivePolice = players.Count(kv => kv.Value.Alive && getPrivateRole(kv.Key) == OnlineRole.Police);
             int aliveUndercover = players.Count(kv => kv.Value.Alive && getPrivateRole(kv.Key) == OnlineRole.Undercover);
+            int aliveMole = players.Count(kv => kv.Value.Alive && getPrivateRole(kv.Key) == OnlineRole.Mole);
             int totalPlayers = players.Count;
 
             // Cover: 反映破坏比率（任务完整度类比掩护）
@@ -155,21 +156,21 @@ namespace GanglandUndercover.Online
             gameState.AddPoliceHeat(-gameState.PoliceHeat);
             gameState.AddPoliceHeat(Clamp(heatValue, 0, 10));
 
-            // GangControlledDistricts: 类比黑帮存活率
+            // GangControlledDistricts: 类比黑帮存活率（黑帮侧 = Gang + Mole，警方侧 = Police + Undercover）
             int gangDistrictEquivalent = totalPlayers > 0
-                ? Mathf.RoundToInt((float)aliveGang / totalPlayers * 6f)
+                ? Mathf.RoundToInt((float)(aliveGang + aliveMole) / totalPlayers * 6f)
                 : 0;
             // 直接更新 district state（模拟）
             foreach (DistrictType type in Enum.GetValues(typeof(DistrictType)))
             {
                 gameState.GetDistrict(type).SetControl(type switch
                 {
-                    DistrictType.Dockyard => aliveGang > alivePolice ? Faction.Gang : Faction.Police,
+                    DistrictType.Dockyard => (aliveGang + aliveMole) > (alivePolice + aliveUndercover) ? Faction.Gang : Faction.Police,
                     DistrictType.WarehouseRow => sabotageCount > completedCount ? Faction.Gang : Faction.Police,
-                    DistrictType.NightMarket => Faction.Undercover,
+                    DistrictType.NightMarket => Faction.Gang,
                     DistrictType.PolicePrecinct => Faction.Police,
-                    DistrictType.Clinic => aliveUndercover > 0 ? Faction.Undercover : Faction.Police,
-                    DistrictType.TenementBlock => aliveGang >= alivePolice ? Faction.Gang : Faction.Police,
+                    DistrictType.Clinic => aliveUndercover > 0 ? Faction.Police : Faction.Police,
+                    DistrictType.TenementBlock => (aliveGang + aliveMole) >= (alivePolice + aliveUndercover) ? Faction.Gang : Faction.Police,
                     _ => Faction.Police
                 });
             }
@@ -178,7 +179,7 @@ namespace GanglandUndercover.Online
             gameState.SelectFaction(MapRole(localRole));
 
             // ShipmentProgress: 0 unless evidence is very low and gang dominates
-            int shipmentVal = (evidenceScore <= 3 && aliveGang >= alivePolice) ? 2 : 0;
+            int shipmentVal = (evidenceScore <= 3 && (aliveGang + aliveMole) >= (alivePolice + aliveUndercover)) ? 2 : 0;
             gameState.AddShipmentProgress(-gameState.ShipmentProgress);
             gameState.AddShipmentProgress(shipmentVal);
         }
@@ -207,26 +208,33 @@ namespace GanglandUndercover.Online
                 }
             }
 
-            int gangSide = aliveGang + aliveUndercover + aliveMole;
-            int policeSide = alivePolice;
+            // 阵营归属：黑帮侧 = Gang + Mole，警方侧 = Police + Undercover
+            int gangSide = aliveGang + aliveMole;
+            int policeSide = alivePolice + aliveUndercover;
+            int aliveNonGangSide = alivePolice + aliveUndercover + aliveMole;
 
             // 1) 证据链闭合
             if (evidenceScore >= evidenceTarget)
                 return "警方胜利：证据链闭合。";
 
-            // 2) 黑帮全灭
-            if (gangSide == 0 && totalAlive >= 2)
+            // 2) 卧底特殊胜利：卧底是最后唯一存活者（优先于阵营全灭判定）
+            if (aliveUndercover == 1 && totalAlive == 1)
+                return "卧底胜利：港区暗线完美收网。";
+
+            // 3) 黑帮全灭（Gang + Mole 均出局）
+            if (gangSide == 0 && totalAlive >= 1)
                 return "警方胜利：黑帮全部出局。";
 
-            // 3) 卧底特殊胜利：警方与黑帮均出局，仅卧底存活。
-            if (alivePolice == 0 && aliveUndercover > 0 && aliveGang == 0 && aliveMole == 0)
-                return "卧底胜利：警方与黑帮两败俱伤，卧底成功接管港区。";
+            // 4) 警方全灭（Police + Undercover 均出局）
+            if (policeSide == 0 && totalAlive >= 1)
+                return "黑帮胜利：警方阵营全部出局。";
 
-            // 4) 黑帮人数碾压。人数相等仍应继续进入会议/行动博弈。
-            if (gangSide > 0 && (policeSide == 0 || (totalAlive >= 4 && gangSide > policeSide)))
+            // 5) 黑帮人数碾压。用 aliveGang（不含 Mole）做比较，
+            //    平局时黑帮仍有优势（旧逻辑保持兼容）。
+            if (aliveGang > 0 && (aliveNonGangSide == 0 || (totalAlive >= 4 && aliveGang >= aliveNonGangSide)))
                 return "黑帮胜利：港区控制权失守。";
 
-            // 5) 全部任务完成 + 证据过半
+            // 6) 全部任务完成 + 证据过半
             int totalTasks = tasks.Count;
             int completedTasks = tasks.Count(t => t.Completed);
             int sabotagedTasks = tasks.Count(t => t.Sabotaged);
@@ -234,11 +242,9 @@ namespace GanglandUndercover.Online
             if (totalTasks > 0 && completedTasks >= totalTasks && evidenceScore >= Mathf.CeilToInt(evidenceTarget * 0.5f))
                 return "警方胜利：全部任务完成，证据链已足够收网。";
 
-            // 6) 破坏过半 + 证据不足
+            // 7) 破坏过半 + 证据不足
             if (totalTasks > 0 && sabotagedTasks >= Mathf.CeilToInt(totalTasks * 0.5f) && evidenceScore < Mathf.CeilToInt(evidenceTarget * 0.3f))
                 return "黑帮胜利：关键设施遭到严重破坏，警方无力回天。";
-
-            // M4.4: 内鬼随黑帮侧获胜；平局人数继续进入会议/行动博弈。
 
             return string.Empty;
         }
@@ -272,8 +278,9 @@ namespace GanglandUndercover.Online
         private static Faction MapRole(OnlineRole role) => role switch
         {
             OnlineRole.Gang => Faction.Gang,
+            OnlineRole.Mole => Faction.Gang,       // 内鬼属于黑帮侧
             OnlineRole.Police => Faction.Police,
-            OnlineRole.Undercover => Faction.Undercover,
+            OnlineRole.Undercover => Faction.Police, // 卧底属于警方侧
             _ => Faction.Police
         };
 
