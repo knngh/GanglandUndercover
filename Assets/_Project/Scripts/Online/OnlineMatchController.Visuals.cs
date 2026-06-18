@@ -156,7 +156,7 @@ namespace GanglandUndercover.Online
             // 每位玩家需完成的任务配额/证据目标，而不是地图上存在的站点数量。
             for (int id = 0; id < OnlineMapService.TaskStationCount; id++)
             {
-                tasks.Add(new OnlineTaskState(id, TaskNameFor(id), mapService.TaskPositionFor(id), 0, TaskRequiredProgress(id), false, false));
+                tasks.Add(new OnlineTaskState(id, OnlineWorldBuilder.TaskNameFor(id), mapService.TaskPositionFor(id), 0, OnlineMatchUtils.TaskRequiredProgress(id), false, false));
             }
         }
 
@@ -207,10 +207,10 @@ namespace GanglandUndercover.Online
 
                 visual.transform.position = task.Position + new Vector3(0f, 0f, 0.1f);
                 SetTaskVisualState(visual, task);
-                SetSortingFromZ(visual);
+                OnlineWorldBuilder.SetSortingFromZ(visual);
             }
 
-            RemoveStaleVisuals(taskVisuals, seen);
+            OnlineMatchUtils.RemoveStaleVisuals(taskVisuals, seen);
         }
 
         // --- UpdatePlayerVisuals ---
@@ -239,9 +239,9 @@ namespace GanglandUndercover.Online
                     : new Vector3(baseScale.x * 0.92f, baseScale.y * 0.48f, baseScale.z);
                 AnimatePlayerVisual(visual, state);
                 SyncCharacterAnimationState(visual, state);
-                SetPlayerVisualColors(visual, state, isLocalPlayer);
+                OnlineWorldBuilder.SetPlayerVisualColors(visual, state, isLocalPlayer);
                 UpdatePlayerStageTwoStateLayer(visual, state, isLocalPlayer);
-                SetSortingFromZ(visual);
+                OnlineWorldBuilder.SetSortingFromZ(visual);
 
                 TextMesh[] labels = visual.GetComponentsInChildren<TextMesh>(true);
 
@@ -250,8 +250,8 @@ namespace GanglandUndercover.Online
                     TextMesh label = labels[i];
                     label.text = BuildPlayerWorldLabel(state, isLocalPlayer);
                     bool showLabel = ShouldShowPlayerWorldLabel(state, isLocalPlayer) && IsNearCameraSubject(state.Position);
-                    SetTextMeshVisible(label, showLabel);
-                    BillboardLabel(label.transform);
+                    OnlineWorldBuilder.SetTextMeshVisible(label, showLabel);
+                    OnlineWorldBuilder.BillboardLabel(label.transform);
                 }
             }
 
@@ -476,7 +476,7 @@ namespace GanglandUndercover.Online
                     continue;
                 }
 
-                SetTextMeshVisible(label, visible);
+                OnlineWorldBuilder.SetTextMeshVisible(label, visible);
             }
         }
 
@@ -490,7 +490,7 @@ namespace GanglandUndercover.Online
                     continue;
                 }
 
-                BillboardLabel(label.transform);
+                OnlineWorldBuilder.BillboardLabel(label.transform);
             }
         }
 
@@ -859,7 +859,7 @@ namespace GanglandUndercover.Online
             SpriteRenderer renderer = spriteObject.AddComponent<SpriteRenderer>();
             renderer.sprite = sprite != null ? sprite : roundedRectSprite;
             renderer.color = color;
-            renderer.sortingOrder = SortingOrderForZ(spriteObject.transform.position.z);
+            renderer.sortingOrder = OnlineMatchUtils.SortingOrderForZ(spriteObject.transform.position.z);
             return spriteObject;
         }
 

@@ -22,8 +22,8 @@ namespace GanglandUndercover.Online
         public string OnboardingActionPrompt => BuildOnboardingActionPrompt();
         public bool HasOnboardingGuidance => HasReadableOnboardingGuidance();
         public string LocalProfessionDisplayName => LocalProfessionName();
-        public string PhaseDisplayName => PhaseName(phase);
-        public string MatchTimeText => FormatMatchTime(matchElapsedSeconds);
+        public string PhaseDisplayName => OnlineMatchUtils.PhaseName(phase);
+        public string MatchTimeText => OnlineMatchUtils.FormatMatchTime(matchElapsedSeconds);
         public string HazardSummary => BuildHazardSummary();
         public string LocalActionHint => BuildLocalActionHint();
         public string VoiceHudLine => CurrentVoiceHudLine();
@@ -44,18 +44,18 @@ namespace GanglandUndercover.Online
         public string VoteTallySummary => BuildVoteTallySummary();
         public string ResultRosterLine => BuildResultRosterLine();
         public string ActiveTaskNameText => activeTaskId >= 0 ? GetTask(activeTaskId).Name : string.Empty;
-        public string ActiveTaskInstructionText => activeTaskId >= 0 ? TaskPanelInstruction(activeTaskId) : string.Empty;
-        public string ActiveTaskTemplateTitleText => activeTaskId >= 0 ? TaskPanelTemplateTitle(activeTaskId) : string.Empty;
-        public string ActiveTaskTemplateSubtitleText => activeTaskId >= 0 ? TaskPanelTemplateSubtitle(activeTaskId) : string.Empty;
-        public string ActiveTaskFooterText => activeTaskId >= 0 ? TaskPanelFooter(activeTaskId) : string.Empty;
-        public string ActiveTaskProgressText => activeTaskId >= 0 ? "证据价值 +" + TaskEvidenceValue(activeTaskId) + " | 错误 " + activeTaskMistakes + "/3" : string.Empty;
+        public string ActiveTaskInstructionText => activeTaskId >= 0 ? OnlineMatchUtils.TaskPanelInstruction(activeTaskId) : string.Empty;
+        public string ActiveTaskTemplateTitleText => activeTaskId >= 0 ? OnlineMatchUtils.TaskPanelTemplateTitle(activeTaskId) : string.Empty;
+        public string ActiveTaskTemplateSubtitleText => activeTaskId >= 0 ? OnlineMatchUtils.TaskPanelTemplateSubtitle(activeTaskId) : string.Empty;
+        public string ActiveTaskFooterText => activeTaskId >= 0 ? OnlineMatchUtils.TaskPanelFooter(activeTaskId) : string.Empty;
+        public string ActiveTaskProgressText => activeTaskId >= 0 ? "证据价值 +" + OnlineMatchUtils.TaskEvidenceValue(activeTaskId) + " | 错误 " + activeTaskMistakes + "/3" : string.Empty;
         public int ActiveTaskIdValue => activeTaskId;
         public int ActiveTaskStepValue => activeTaskStep;
         public int ActiveTaskMistakesValue => activeTaskMistakes;
         public float ActiveTaskChargeValue => activeTaskCharge;
-        public int ActiveTaskCorrectStepOne => activeTaskId >= 0 ? CorrectTaskStepInput(activeTaskId, 0) : 1;
-        public int ActiveTaskCorrectStepTwo => activeTaskId >= 0 ? CorrectTaskStepInput(activeTaskId, 1) : 2;
-        public int ActiveTaskCorrectStepThree => activeTaskId >= 0 ? CorrectTaskStepInput(activeTaskId, 2) : 3;
+        public int ActiveTaskCorrectStepOne => activeTaskId >= 0 ? OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 0) : 1;
+        public int ActiveTaskCorrectStepTwo => activeTaskId >= 0 ? OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 1) : 2;
+        public int ActiveTaskCorrectStepThree => activeTaskId >= 0 ? OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 2) : 3;
         public bool ActiveTaskStepOneDone => activeTaskStepOneDone;
         public bool ActiveTaskStepTwoDone => activeTaskStepTwoDone;
         public bool ActiveTaskStepThreeDone => activeTaskStepThreeDone;
@@ -70,12 +70,12 @@ namespace GanglandUndercover.Online
         public float LocalAbilityCooldown => TryGetLocalPlayer(out OnlinePlayerState localState) ? localState.AbilityCooldown : 0f;
         public float LocalKillCooldown => TryGetLocalPlayer(out OnlinePlayerState localState2) ? localState2.KillCooldown : 0f;
         public bool LocalAlive => IsLocalAlive();
-        public string RoleDisplayName(OnlineRole role) => RoleName(role);
-        public string ProfessionDisplayName(OnlineProfession profession) => ProfessionName(profession);
-        public string TaskDisplayName(int id) => TaskNameFor(id);
-        public string TaskDistrictDisplayName(int id) => TaskDistrictName(id);
-        public string TaskMapCodeDisplayName(int id) => TaskMapCode(id);
-        public string PhaseDisplayNameFor(OnlineMatchPhase matchPhase) => PhaseName(matchPhase);
+        public string RoleDisplayName(OnlineRole role) => OnlineMatchUtils.RoleName(role);
+        public string ProfessionDisplayName(OnlineProfession profession) => OnlineMatchUtils.ProfessionName(profession);
+        public string TaskDisplayName(int id) => OnlineWorldBuilder.TaskNameFor(id);
+        public string TaskDistrictDisplayName(int id) => OnlineWorldBuilder.TaskDistrictName(id);
+        public string TaskMapCodeDisplayName(int id) => OnlineMatchUtils.TaskMapCode(id);
+        public string PhaseDisplayNameFor(OnlineMatchPhase matchPhase) => OnlineMatchUtils.PhaseName(matchPhase);
 
         public void RequestReportLatestChatMessage()
         {
@@ -262,7 +262,7 @@ namespace GanglandUndercover.Online
 #endif
 
             GUI.depth = -100;
-            ApplyHudSkin();
+            OnlineMatchUtils.ApplyHudSkin();
 
             bool actionHud = IsOnline && phase == OnlineMatchPhase.Action;
 
@@ -308,8 +308,8 @@ namespace GanglandUndercover.Online
             GUILayout.BeginArea(new Rect(18f, 18f, leftWidth, leftPanelHeight), GUI.skin.box);
             GUILayout.Label("港区潜线 Release Candidate");
             GUILayout.Label(roomName + " | " + status);
-            GUILayout.Label("阶段: " + PhaseName(phase) + " | 局时: " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链: " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 危机: " + BuildHazardSummary());
-            GUILayout.Label("本机身份: " + RoleName(localRole) + " | 职责: " + LocalProfessionName());
+            GUILayout.Label("阶段: " + OnlineMatchUtils.PhaseName(phase) + " | 局时: " + OnlineMatchUtils.FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链: " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 危机: " + BuildHazardSummary());
+            GUILayout.Label("本机身份: " + OnlineMatchUtils.RoleName(localRole) + " | 职责: " + LocalProfessionName());
 
             if (!actionHud)
             {
@@ -321,7 +321,7 @@ namespace GanglandUndercover.Online
                 DrawModePillars();
                 GUILayout.Space(6f);
                 GUILayout.Label("玩家代号");
-                localPlayerName = LimitText(GUILayout.TextField(localPlayerName), 16, "港区玩家");
+                localPlayerName = OnlineMatchUtils.LimitText(GUILayout.TextField(localPlayerName), 16, "港区玩家");
                 GUILayout.Label("Host IP / Client 连接地址");
                 joinAddress = GUILayout.TextField(joinAddress);
                 DrawRoomSettings();
@@ -534,7 +534,7 @@ namespace GanglandUndercover.Online
             }
 
             return resultStatus
-                + "\n用时 " + FormatMatchTime(matchElapsedSeconds)
+                + "\n用时 " + OnlineMatchUtils.FormatMatchTime(matchElapsedSeconds)
                 + " | 存活 " + alive + "/" + players.Count
                 + " | 完成任务 " + completedTasks + "/" + tasks.Count
                 + " | 破坏残留 " + sabotageCount
@@ -560,9 +560,9 @@ namespace GanglandUndercover.Online
                     + " | "
                     + (state.Ready ? "Ready" : "Not Ready")
                     + " | "
-                    + RoleName(state.PublicRole)
+                    + OnlineMatchUtils.RoleName(state.PublicRole)
                     + " | "
-                    + ProfessionName(state.Profession)
+                    + OnlineMatchUtils.ProfessionName(state.Profession)
                     + " | 嫌疑 "
                     + state.Suspicion
                     + " | 技能 "
@@ -605,13 +605,13 @@ namespace GanglandUndercover.Online
         {
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("港区任务 | 调查组推进任务，黑帮可伪装靠近并破坏");
-            builder.AppendLine("局时: " + FormatMatchTime(matchElapsedSeconds) + "/20:00");
+            builder.AppendLine("局时: " + OnlineMatchUtils.FormatMatchTime(matchElapsedSeconds) + "/20:00");
             builder.AppendLine("证据链: " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget);
             builder.AppendLine("紧急会议: " + emergencyMeetingsLeft + " | 危机: " + BuildHazardSummary());
             builder.AppendLine("局势压力: " + BuildMatchPressureSummary());
             builder.AppendLine("最近证据: " + lastEvidenceEvent);
             builder.AppendLine("最近破坏: " + lastSabotageEvent);
-            builder.AppendLine("证据阶段: " + EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
+            builder.AppendLine("证据阶段: " + OnlineMatchUtils.EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
             builder.AppendLine("任务分型: 监控追踪、封条查验、电力修复、证物扫描、账本冻结、路线巡查");
 
             foreach (OnlineTaskState task in tasks)
@@ -621,10 +621,10 @@ namespace GanglandUndercover.Online
                     + task.Progress
                     + "/"
                     + task.RequiredProgress
-                    + " | 区域 " + TaskDistrictName(task.Id)
-                    + " | +" + TaskEvidenceValue(task.Id) + "证"
-                    + " | " + TaskPanelTemplateTitle(task.Id)
-                    + (task.Completed ? " 已完成" : task.Sabotaged ? " 被破坏/" + SabotageName(SabotageForTask(task.Id)) : " 待处理"));
+                    + " | 区域 " + OnlineWorldBuilder.TaskDistrictName(task.Id)
+                    + " | +" + OnlineMatchUtils.TaskEvidenceValue(task.Id) + "证"
+                    + " | " + OnlineMatchUtils.TaskPanelTemplateTitle(task.Id)
+                    + (task.Completed ? " 已完成" : task.Sabotaged ? " 被破坏/" + OnlineMatchUtils.SabotageName(OnlineMatchUtils.SabotageForTask(task.Id)) : " 待处理"));
             }
 
             int activeBodies = 0;
@@ -651,11 +651,11 @@ namespace GanglandUndercover.Online
         private string BuildFocusedIntel()
         {
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine("局时 " + FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 会议 " + emergencyMeetingsLeft);
+            builder.AppendLine("局时 " + OnlineMatchUtils.FormatMatchTime(matchElapsedSeconds) + "/20:00 | 证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 会议 " + emergencyMeetingsLeft);
             builder.AppendLine("目标: 警方闭合证据链或投出黑帮；黑帮通过击倒、破坏和会议误导拖到 20 分钟。");
             builder.AppendLine("局势压力: " + BuildMatchPressureSummary());
             builder.AppendLine("你的任务: " + BuildLocalObjectiveSummary());
-            builder.AppendLine("证据阶段: " + EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
+            builder.AppendLine("证据阶段: " + OnlineMatchUtils.EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
 
             int activeBodies = CountUnreportedBodies();
             if (activeBodies > 0)
@@ -676,14 +676,14 @@ namespace GanglandUndercover.Online
             if (nearest.Id >= 0)
             {
                 builder.AppendLine("当前目标: " + nearest.Name);
-                builder.AppendLine("所在区域: " + TaskDistrictName(nearest.Id));
-                builder.AppendLine("进度 " + nearest.Progress + "/" + nearest.RequiredProgress + " | " + TaskPanelTemplateTitle(nearest.Id) + " | +" + TaskEvidenceValue(nearest.Id) + "证" + (nearest.Sabotaged ? " | 被破坏/" + SabotageName(SabotageForTask(nearest.Id)) : string.Empty));
+                builder.AppendLine("所在区域: " + OnlineWorldBuilder.TaskDistrictName(nearest.Id));
+                builder.AppendLine("进度 " + nearest.Progress + "/" + nearest.RequiredProgress + " | " + OnlineMatchUtils.TaskPanelTemplateTitle(nearest.Id) + " | +" + OnlineMatchUtils.TaskEvidenceValue(nearest.Id) + "证" + (nearest.Sabotaged ? " | 被破坏/" + OnlineMatchUtils.SabotageName(OnlineMatchUtils.SabotageForTask(nearest.Id)) : string.Empty));
                 return builder.ToString();
             }
 
             OnlineTaskState target = FindRecommendedTask(LocalCameraTarget());
             builder.AppendLine("推荐路线: " + target.Name);
-            builder.AppendLine("区域: " + TaskDistrictName(target.Id));
+            builder.AppendLine("区域: " + OnlineWorldBuilder.TaskDistrictName(target.Id));
             builder.AppendLine("距离 " + Vector3.Distance(LocalCameraTarget(), target.Position).ToString("F1") + " | M 打开大地图");
             return builder.ToString();
         }
@@ -761,7 +761,7 @@ namespace GanglandUndercover.Online
             if (role == OnlineRole.Gang)
             {
                 OnlineTaskState sabotageTarget = FindHighestValueOpenTask();
-                string targetText = sabotageTarget.Id >= 0 ? sabotageTarget.Name + "/" + SabotageName(SabotageForTask(sabotageTarget.Id)) : "寻找落单目标";
+                string targetText = sabotageTarget.Id >= 0 ? sabotageTarget.Name + "/" + OnlineMatchUtils.SabotageName(OnlineMatchUtils.SabotageForTask(sabotageTarget.Id)) : "寻找落单目标";
                 return "隐藏身份，制造破坏，优先干扰 " + targetText + "，会议中误导投票。";
             }
 
@@ -774,7 +774,7 @@ namespace GanglandUndercover.Online
             if (role == OnlineRole.Mole)
             {
                 OnlineTaskState sabotageTargetMol = FindHighestValueOpenTask();
-                string targetTextMol = sabotageTargetMol.Id >= 0 ? sabotageTargetMol.Name + "/" + SabotageName(SabotageForTask(sabotageTargetMol.Id)) : "寻找落单目标";
+                string targetTextMol = sabotageTargetMol.Id >= 0 ? sabotageTargetMol.Name + "/" + OnlineMatchUtils.SabotageName(OnlineMatchUtils.SabotageForTask(sabotageTargetMol.Id)) : "寻找落单目标";
                 return "身为线人隐匿在警方之中，破坏证据并掩护黑帮，优先干扰 " + targetTextMol + "，利用警察身份误导搜查方向。";
             }
 
@@ -811,7 +811,7 @@ namespace GanglandUndercover.Online
         {
             OnlineRole role = LocalEffectiveRole();
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine("身份: " + RoleName(role));
+            builder.AppendLine("身份: " + OnlineMatchUtils.RoleName(role));
             builder.AppendLine("公开身份: " + PublicIdentityName(role));
             builder.AppendLine("职责: " + LocalProfessionName());
             builder.AppendLine("胜利目标: " + RoleWinGoal(role));
@@ -879,7 +879,7 @@ namespace GanglandUndercover.Online
                 return "警方成员（隐藏黑帮目标）";
             }
 
-            return RoleName(role);
+            return OnlineMatchUtils.RoleName(role);
         }
 
         private static string RoleWinGoal(OnlineRole role)
@@ -957,7 +957,7 @@ namespace GanglandUndercover.Online
             if (nearestTask.Id >= 0)
             {
                 return "附近任务: " + nearestTask.Name + " | E " + (localRole == OnlineRole.Gang ? "破坏" : nearestTask.Sabotaged ? "修复" : "推进")
-                    + " | 类型: " + SabotageName(SabotageForTask(nearestTask.Id));
+                    + " | 类型: " + OnlineMatchUtils.SabotageName(OnlineMatchUtils.SabotageForTask(nearestTask.Id));
             }
 
             if (TryFindNearestBody(localState.Position, out _))
@@ -1083,7 +1083,7 @@ namespace GanglandUndercover.Online
         {
             GUILayout.Space(8f);
             GUILayout.Label("房间设置");
-            roomName = LimitText(GUILayout.TextField(roomName), 20, "九龙港区夜局");
+            roomName = OnlineMatchUtils.LimitText(GUILayout.TextField(roomName), 20, "九龙港区夜局");
             GUILayout.BeginHorizontal();
             GUILayout.Label("最少人数 " + roomMinPlayers, GUILayout.Width(110f));
             roomMinPlayers = Mathf.RoundToInt(GUILayout.HorizontalSlider(roomMinPlayers, ruleSet.MinimumRoomPlayers, ruleSet.MaximumRoomPlayers));
@@ -1115,7 +1115,7 @@ namespace GanglandUndercover.Online
             }
 
             GUILayout.BeginHorizontal();
-            relayJoinInput = CleanRelayJoinInput(GUILayout.TextField(relayJoinInput));
+            relayJoinInput = OnlineMatchUtils.CleanRelayJoinInput(GUILayout.TextField(relayJoinInput));
 
             if (GUILayout.Button("加入房间码", GUILayout.Width(108f)))
             {
@@ -1151,9 +1151,9 @@ namespace GanglandUndercover.Online
             float topBarHeight = 68f;
             Rect topBar = new Rect(16f, 14f, topBarWidth, topBarHeight);
             GUILayout.BeginArea(topBar, GUI.skin.box);
-            GUILayout.Label("九龙港城行动 | " + RoleName(localRole) + " / " + LocalProfessionName());
+            GUILayout.Label("九龙港城行动 | " + OnlineMatchUtils.RoleName(localRole) + " / " + LocalProfessionName());
             GUILayout.Label("证据 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + " | 任务 " + CountCompletedTasks() + "/" + tasks.Count + " | 存活 " + CountAlivePlayers() + "/" + players.Count + " | 会议 " + emergencyMeetingsLeft + " | " + BuildHazardSummary() + (aiActionGraceTimer > 0f ? " | 缓冲 " + Mathf.CeilToInt(aiActionGraceTimer) + "s" : string.Empty));
-            GUILayout.Label("阶段 " + EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
+            GUILayout.Label("阶段 " + OnlineMatchUtils.EvidenceMilestoneName(evidenceMilestoneIndex) + " | " + BuildNextEvidenceMilestoneHint());
             GUILayout.EndArea();
 
             float promptWidth = Mathf.Clamp(Screen.width * 0.34f, 420f, 560f);
@@ -1192,12 +1192,12 @@ namespace GanglandUndercover.Online
 
             Rect rect = new Rect(18f, Screen.height - 92f, Mathf.Clamp(Screen.width * 0.15f, 180f, 250f), 56f);
             GUILayout.BeginArea(rect, GUI.skin.box);
-            GUILayout.Label("技能 | " + ProfessionName(localState.Profession));
+            GUILayout.Label("技能 | " + OnlineMatchUtils.ProfessionName(localState.Profession));
 
             float abilityCooldown = abilityCooldowns.TryGetValue(localState.ClientId, out float value) ? value : localState.AbilityCooldown;
             float ratio = Mathf.Clamp01(1f - abilityCooldown / ruleSet.AbilityCooldownSeconds);
             Rect bar = GUILayoutUtility.GetRect(rect.width - 18f, 12f);
-            DrawProgressBar(bar, ratio, ratio >= 1f ? new Color(0.12f, 0.74f, 0.36f, 1f) : new Color(0.08f, 0.42f, 0.72f, 1f));
+            OnlineMatchUtils.DrawProgressBar(bar, ratio, ratio >= 1f ? new Color(0.12f, 0.74f, 0.36f, 1f) : new Color(0.08f, 0.42f, 0.72f, 1f));
             GUILayout.Label(ratio >= 1f ? "F 可用" : "冷却 " + Mathf.CeilToInt(abilityCooldown) + "s");
             GUILayout.EndArea();
         }
@@ -1235,10 +1235,10 @@ namespace GanglandUndercover.Online
             Rect rect = new Rect((Screen.width - width) * 0.5f, (Screen.height - height) * 0.5f, width, height);
             GUILayout.BeginArea(rect, GUI.skin.box);
             GUILayout.Label("现场任务 | " + task.Name);
-            GUILayout.Label(TaskPanelInstruction(activeTaskId));
+            GUILayout.Label(OnlineMatchUtils.TaskPanelInstruction(activeTaskId));
             GUILayout.Space(4f);
             Rect tagRect = GUILayoutUtility.GetRect(width - 44f, 42f);
-            DrawTaskMiniGameTag(tagRect, TaskPanelTemplateTitle(activeTaskId), TaskPanelTemplateSubtitle(activeTaskId), TaskPanelAccent(activeTaskId));
+            DrawTaskMiniGameTag(tagRect, OnlineMatchUtils.TaskPanelTemplateTitle(activeTaskId), OnlineMatchUtils.TaskPanelTemplateSubtitle(activeTaskId), OnlineMatchUtils.TaskPanelAccent(activeTaskId));
             GUILayout.Space(6f);
             DrawTaskMiniGameWidget(activeTaskId, width - 44f, 112f);
             GUILayout.Space(6f);
@@ -1247,18 +1247,18 @@ namespace GanglandUndercover.Online
             GUILayout.Space(6f);
 
             Rect progressRect = GUILayoutUtility.GetRect(width - 44f, 24f);
-            DrawProgressBar(progressRect, activeTaskCharge, new Color(0.08f, 0.62f, 0.82f, 1f));
-            GUILayout.Label("证据价值 +" + TaskEvidenceValue(activeTaskId) + " | 错误 " + activeTaskMistakes + "/3 | 模板 " + TaskPanelTemplateTitle(activeTaskId));
+            OnlineMatchUtils.DrawProgressBar(progressRect, activeTaskCharge, new Color(0.08f, 0.62f, 0.82f, 1f));
+            GUILayout.Label("证据价值 +" + OnlineMatchUtils.TaskEvidenceValue(activeTaskId) + " | 错误 " + activeTaskMistakes + "/3 | 模板 " + OnlineMatchUtils.TaskPanelTemplateTitle(activeTaskId));
             DrawTaskFeedbackBanner(width - 44f);
 
             GUILayout.Space(8f);
             GUILayout.BeginHorizontal();
-            DrawTaskStepButton("键 " + CorrectTaskStepInput(activeTaskId, 0), CorrectTaskStepInput(activeTaskId, 0), activeTaskStepOneDone, activeTaskStep == 0);
-            DrawTaskStepButton("键 " + CorrectTaskStepInput(activeTaskId, 1), CorrectTaskStepInput(activeTaskId, 1), activeTaskStepTwoDone, activeTaskStep == 1);
-            DrawTaskStepButton("键 " + CorrectTaskStepInput(activeTaskId, 2), CorrectTaskStepInput(activeTaskId, 2), activeTaskStepThreeDone, activeTaskStep == 2);
+            DrawTaskStepButton("键 " + OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 0), OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 0), activeTaskStepOneDone, activeTaskStep == 0);
+            DrawTaskStepButton("键 " + OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 1), OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 1), activeTaskStepTwoDone, activeTaskStep == 1);
+            DrawTaskStepButton("键 " + OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 2), OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, 2), activeTaskStepThreeDone, activeTaskStep == 2);
             GUILayout.EndHorizontal();
             GUILayout.Space(8f);
-            GUILayout.Label("按高亮顺序点击或输入数字键，按住 Space 扫描/同步，Esc 退出 | " + TaskPanelFooter(activeTaskId));
+            GUILayout.Label("按高亮顺序点击或输入数字键，按住 Space 扫描/同步，Esc 退出 | " + OnlineMatchUtils.TaskPanelFooter(activeTaskId));
             GUILayout.EndArea();
         }
 
@@ -1287,31 +1287,31 @@ namespace GanglandUndercover.Online
             GUI.color = new Color(0.045f, 0.06f, 0.065f, 0.96f);
             GUI.DrawTexture(widget, Texture2D.whiteTexture);
 
-            int mode = TaskTemplateMode(taskId);
+            int mode = OnlineMatchUtils.TaskTemplateMode(taskId);
 
             if (mode == 0)
             {
-                DrawTaskScreenGrid(widget);
+                OnlineMatchUtils.DrawTaskScreenGrid(widget);
             }
             else if (mode == 1)
             {
-                DrawTaskSealScanner(widget);
+                OnlineMatchUtils.DrawTaskSealScanner(widget);
             }
             else if (mode == 2)
             {
-                DrawTaskBreakerWidget(widget);
+                OnlineMatchUtils.DrawTaskBreakerWidget(widget);
             }
             else if (mode == 3)
             {
-                DrawTaskEvidenceTray(widget);
+                OnlineMatchUtils.DrawTaskEvidenceTray(widget);
             }
             else if (mode == 4)
             {
-                DrawTaskLedgerWidget(widget);
+                OnlineMatchUtils.DrawTaskLedgerWidget(widget);
             }
             else
             {
-                DrawTaskRouteWidget(widget);
+                OnlineMatchUtils.DrawTaskRouteWidget(widget);
             }
 
             GUI.color = oldColor;
@@ -1334,12 +1334,12 @@ namespace GanglandUndercover.Online
         private void DrawTaskSequenceRail(Rect rect, int taskId)
         {
             Color oldColor = GUI.color;
-            int nextInput = CorrectTaskStepInput(taskId, Mathf.Clamp(activeTaskStep, 0, 2));
-            Color accent = TaskPanelAccent(taskId);
+            int nextInput = OnlineMatchUtils.CorrectTaskStepInput(taskId, Mathf.Clamp(activeTaskStep, 0, 2));
+            Color accent = OnlineMatchUtils.TaskPanelAccent(taskId);
 
             for (int i = 0; i < 3; i++)
             {
-                int required = CorrectTaskStepInput(taskId, i);
+                int required = OnlineMatchUtils.CorrectTaskStepInput(taskId, i);
                 bool completed = i == 0 ? activeTaskStepOneDone : i == 1 ? activeTaskStepTwoDone : activeTaskStepThreeDone;
                 bool current = !completed && activeTaskStep == i;
                 float segmentWidth = rect.width / 3f - 10f;
@@ -1365,7 +1365,7 @@ namespace GanglandUndercover.Online
         private void DrawTaskStepButton(string label, int input, bool completed, bool current)
         {
             Color oldColor = GUI.color;
-            GUI.color = completed ? new Color(0.16f, 0.72f, 0.36f, 1f) : current ? TaskPanelAccent(activeTaskId) : new Color(0.18f, 0.22f, 0.24f, 1f);
+            GUI.color = completed ? new Color(0.16f, 0.72f, 0.36f, 1f) : current ? OnlineMatchUtils.TaskPanelAccent(activeTaskId) : new Color(0.18f, 0.22f, 0.24f, 1f);
 
             if (completed)
             {
@@ -1384,7 +1384,7 @@ namespace GanglandUndercover.Online
         {
             if (players.TryGetValue(LocalClientId(), out OnlinePlayerState state))
             {
-                return ProfessionName(state.Profession);
+                return OnlineMatchUtils.ProfessionName(state.Profession);
             }
 
             return "待分配";
@@ -1396,7 +1396,7 @@ namespace GanglandUndercover.Online
             GUILayout.Space(10f);
             GUILayout.BeginVertical(GUI.skin.box);
             GUILayout.Label("专案简报");
-            GUILayout.Label("你的身份: " + RoleName(localRole));
+            GUILayout.Label("你的身份: " + OnlineMatchUtils.RoleName(localRole));
             GUILayout.Label("你的职责: " + LocalProfessionName());
             GUILayout.Label("地图: 九龙港区封控街区");
             GUILayout.Label("局长: 目标 10-20 分钟；20 分钟未闭合关键证据则按证据比例结算。");
@@ -1432,7 +1432,7 @@ namespace GanglandUndercover.Online
                 GUI.color = colors[i];
                 GUI.DrawTexture(card, Texture2D.whiteTexture);
                 GUI.color = Color.white;
-                GUI.Label(new Rect(card.x + 8f, card.y + 8f, card.width - 16f, card.height - 16f), labels[i] + "\n" + OpeningRouteStatus(i));
+                GUI.Label(new Rect(card.x + 8f, card.y + 8f, card.width - 16f, card.height - 16f), labels[i] + "\n" + OnlineMatchUtils.OpeningRouteStatus(i));
             }
 
             GUI.color = oldColor;
@@ -1487,7 +1487,7 @@ namespace GanglandUndercover.Online
 
                 if (withLabels)
                 {
-                    DrawMiniMapLabel(rect, task.Position, TaskMapCode(task.Id), taskColor);
+                    DrawMiniMapLabel(rect, task.Position, OnlineMatchUtils.TaskMapCode(task.Id), taskColor);
                 }
             }
 
@@ -1510,7 +1510,7 @@ namespace GanglandUndercover.Online
 
                 if (withLabels)
                 {
-                    DrawMiniMapLabel(rect, state.Position, state.ClientId == LocalClientId() ? "你" : ShortDisplayName(state.DisplayName, 3), playerColor);
+                    DrawMiniMapLabel(rect, state.Position, state.ClientId == LocalClientId() ? "你" : OnlineMatchUtils.ShortDisplayName(state.DisplayName, 3), playerColor);
                 }
             }
 
@@ -1721,7 +1721,7 @@ namespace GanglandUndercover.Online
         private string BuildMeetingEvidenceDigest()
         {
             OnlineTaskState keyTask = FindHighestValueOpenTask();
-            string keyTaskText = keyTask.Id >= 0 ? "关键未闭合: " + keyTask.Name + " +" + TaskEvidenceValue(keyTask.Id) : "关键未闭合: 无";
+            string keyTaskText = keyTask.Id >= 0 ? "关键未闭合: " + keyTask.Name + " +" + OnlineMatchUtils.TaskEvidenceValue(keyTask.Id) : "关键未闭合: 无";
             string dossier = evidenceDossier?.MeetingEvidenceDossier() ?? "";
             if (!string.IsNullOrEmpty(dossier))
                 return keyTaskText + "\n\n【证据指证】\n" + dossier;
@@ -1849,7 +1849,7 @@ namespace GanglandUndercover.Online
             {
                 GUILayout.BeginHorizontal(GUI.skin.box);
                 string voteBadge = votes.ContainsKey(state.ClientId) ? "已投" : "未投";
-                GUILayout.Label(state.DisplayName + " | " + (state.Alive ? "在场" : "出局") + " | 嫌疑 " + state.Suspicion + " | " + voteBadge + " | " + ProfessionName(state.Profession), GUILayout.ExpandWidth(true));
+                GUILayout.Label(state.DisplayName + " | " + (state.Alive ? "在场" : "出局") + " | 嫌疑 " + state.Suspicion + " | " + voteBadge + " | " + OnlineMatchUtils.ProfessionName(state.Profession), GUILayout.ExpandWidth(true));
                 GUI.enabled = previousEnabled && canVote && state.Alive && state.ClientId != localClientId;
 
                 if (GUILayout.Button("投票", GUILayout.Width(92f)))
@@ -1917,9 +1917,9 @@ namespace GanglandUndercover.Online
             float taskRatio = Mathf.Clamp01(CountCompletedTasks() / (float)Mathf.Max(1, tasks.Count));
             float survivalRatio = Mathf.Clamp01(CountAlivePlayers() / (float)Mathf.Max(1, players.Count));
 
-            DrawResultBar(new Rect(rect.x + 14f, rect.y + 18f, rect.width - 28f, 16f), evidenceRatio, new Color(0.08f, 0.62f, 0.82f, 1f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget);
-            DrawResultBar(new Rect(rect.x + 14f, rect.y + 50f, rect.width - 28f, 16f), taskRatio, new Color(0.86f, 0.68f, 0.12f, 1f), "任务 " + CountCompletedTasks() + "/" + tasks.Count);
-            DrawResultBar(new Rect(rect.x + 14f, rect.y + 82f, rect.width - 28f, 16f), survivalRatio, new Color(0.14f, 0.7f, 0.36f, 1f), "存活 " + CountAlivePlayers() + "/" + players.Count);
+            OnlineMatchUtils.DrawResultBar(new Rect(rect.x + 14f, rect.y + 18f, rect.width - 28f, 16f), evidenceRatio, new Color(0.08f, 0.62f, 0.82f, 1f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget);
+            OnlineMatchUtils.DrawResultBar(new Rect(rect.x + 14f, rect.y + 50f, rect.width - 28f, 16f), taskRatio, new Color(0.86f, 0.68f, 0.12f, 1f), "任务 " + CountCompletedTasks() + "/" + tasks.Count);
+            OnlineMatchUtils.DrawResultBar(new Rect(rect.x + 14f, rect.y + 82f, rect.width - 28f, 16f), survivalRatio, new Color(0.14f, 0.7f, 0.36f, 1f), "存活 " + CountAlivePlayers() + "/" + players.Count);
             GUI.color = oldColor;
         }
 
@@ -1933,7 +1933,7 @@ namespace GanglandUndercover.Online
             {
                 builder.Append(pair.Value.DisplayName)
                     .Append("/")
-                    .Append(RoleName(GetPrivateRole(pair.Key)))
+                    .Append(OnlineMatchUtils.RoleName(GetPrivateRole(pair.Key)))
                     .Append(pair.Value.Alive ? " " : "(出局) ");
             }
 

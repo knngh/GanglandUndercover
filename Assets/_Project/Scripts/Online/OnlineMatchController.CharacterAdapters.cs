@@ -23,7 +23,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            GameObject model = InstantiateModelPrefab(prefab);
+            GameObject model = OnlineWorldBuilder.InstantiateModelPrefab(prefab);
 
             if (model == null)
             {
@@ -36,10 +36,10 @@ namespace GanglandUndercover.Online
             model.transform.localPosition = new Vector3(0f, -0.16f, 0.02f);
             model.transform.localRotation = Quaternion.Euler(-90f, 0f, 180f);
             model.transform.localScale = Vector3.one;
-            ConfigureModelRenderers(model, true);
+            OnlineWorldBuilder.ConfigureModelRenderers(model, true);
             FitCharacterAdapterToPlayer(model);
             TintCharacterAdapter(model, state);
-            SetSortingFromZ(model);
+            OnlineWorldBuilder.SetSortingFromZ(model);
 
             foreach (UnityEngine.Collider collider in model.GetComponentsInChildren<UnityEngine.Collider>(true))
             {
@@ -117,7 +117,7 @@ namespace GanglandUndercover.Online
 
         private static void FitCharacterAdapterToPlayer(GameObject model)
         {
-            if (!TryGetRendererBounds(model, out Bounds bounds))
+            if (!OnlineWorldBuilder.TryGetRendererBounds(model, out Bounds bounds))
             {
                 model.transform.localScale = new Vector3(0.18f, 0.18f, 0.18f);
                 return;
@@ -130,8 +130,8 @@ namespace GanglandUndercover.Online
 
         private void TintCharacterAdapter(GameObject model, OnlinePlayerState state)
         {
-            Color accent = PlayerAccentColor(state);
-            Color roleColor = PlayerColor(state, false);
+            Color accent = OnlineWorldBuilder.PlayerAccentColor(state);
+            Color roleColor = OnlineWorldBuilder.PlayerColor(state, false);
 
             foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>(true))
             {
@@ -147,9 +147,9 @@ namespace GanglandUndercover.Online
                     continue;
                 }
 
-                Color current = ReadMaterialColor(material, Color.white);
+                Color current = OnlineWorldBuilder.ReadMaterialColor(material, Color.white);
                 Color mixed = Color.Lerp(current, Color.Lerp(roleColor, accent, 0.42f), 0.28f);
-                SetMaterialColor(material, new Color(mixed.r, mixed.g, mixed.b, current.a));
+                OnlineWorldBuilder.SetMaterialColor(material, new Color(mixed.r, mixed.g, mixed.b, current.a));
             }
         }
 
@@ -162,8 +162,8 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            Color accent = PlayerAccentColor(state);
-            CreateMeshBoxChild(parent, "FreeCharacterAdapter fallback coat panel", new Vector3(0f, -0.08f, 0.58f), new Vector3(0.28f, 0.035f, 0.3f), Darken(accent, 0.72f));
+            Color accent = OnlineWorldBuilder.PlayerAccentColor(state);
+            CreateMeshBoxChild(parent, "FreeCharacterAdapter fallback coat panel", new Vector3(0f, -0.08f, 0.58f), new Vector3(0.28f, 0.035f, 0.3f), OnlineWorldBuilder.Darken(accent, 0.72f));
             CreateMeshBoxChild(parent, "FreeCharacterAdapter fallback face strip", new Vector3(0.13f, 0.34f, 0.68f), new Vector3(0.2f, 0.035f, 0.09f), new Color(0.94f, 0.84f, 0.66f, 1f));
             CreateMeshBoxChild(parent, "FreeCharacterAdapter fallback role prop", new Vector3(-0.24f, -0.2f, 0.54f), new Vector3(0.1f, 0.04f, 0.18f), accent);
         }
@@ -182,7 +182,7 @@ namespace GanglandUndercover.Online
             if (worldBuilder == null) return;
             GanglandUndercover.Art.Sprite2DAssetCache.Ensure();
 
-            Color bodyColor = PlayerAccentColor(state);
+            Color bodyColor = OnlineWorldBuilder.PlayerAccentColor(state);
 
             // --- Body（E1: 使用人形剪影 sprite 替代纯色圆形）--- 
             GameObject body = new GameObject("FreeCharacterAdapter 2D " + state.Profession);

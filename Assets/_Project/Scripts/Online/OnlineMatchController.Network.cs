@@ -510,7 +510,7 @@ namespace GanglandUndercover.Online
             disconnectedNetworkSession = false;
             localPreviewMode = true;
             localReady = true;
-            localPlayerName = LimitText(localPlayerName, 16, "港区玩家");
+            localPlayerName = OnlineMatchUtils.LimitText(localPlayerName, 16, "港区玩家");
 
             if (!players.ContainsKey(LocalPreviewClientId))
             {
@@ -733,7 +733,7 @@ namespace GanglandUndercover.Online
             matchStarted = false;
             phase = OnlineMatchPhase.Lobby;
 
-            string safeJoinCode = CleanRelayJoinInput(relayJoinCode);
+            string safeJoinCode = OnlineMatchUtils.CleanRelayJoinInput(relayJoinCode);
             string codeStatus = string.IsNullOrEmpty(safeJoinCode)
                 ? string.Empty
                 : "，房间码 " + safeJoinCode + " 已失效";
@@ -855,7 +855,7 @@ namespace GanglandUndercover.Online
         {
             if (localPreviewMode)
             {
-                ApplyClientProfile(LocalPreviewClientId, LimitText(localPlayerName, 16, "港区玩家"));
+                ApplyClientProfile(LocalPreviewClientId, OnlineMatchUtils.LimitText(localPlayerName, 16, "港区玩家"));
                 return;
             }
 
@@ -864,7 +864,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            string safeName = LimitText(localPlayerName, 16, "港区玩家");
+            string safeName = OnlineMatchUtils.LimitText(localPlayerName, 16, "港区玩家");
             localPlayerName = safeName;
 
             if (networkManager.IsHost)
@@ -1104,7 +1104,7 @@ namespace GanglandUndercover.Online
         // --- ApplyClientProfile ---
         private void ApplyClientProfile(ulong senderClientId, string displayName)
         {
-            string safeName = LimitText(displayName, 16, "港区玩家");
+            string safeName = OnlineMatchUtils.LimitText(displayName, 16, "港区玩家");
 
             if (players.TryGetValue(senderClientId, out OnlinePlayerState state))
             {
@@ -1346,7 +1346,7 @@ namespace GanglandUndercover.Online
                 reader.ReadValueSafe(out int requiredProgress);
                 reader.ReadValueSafe(out bool completed);
                 reader.ReadValueSafe(out bool sabotaged);
-                snapshotTasks.Add(new OnlineTaskState(id, TaskNameFor(id), position, progress, requiredProgress, completed, sabotaged));
+                snapshotTasks.Add(new OnlineTaskState(id, OnlineWorldBuilder.TaskNameFor(id), position, progress, requiredProgress, completed, sabotaged));
             }
 
             reader.ReadValueSafe(out int bodyCount);
@@ -1452,7 +1452,7 @@ namespace GanglandUndercover.Online
 
             caseLog.Clear();
             caseLog.AddRange(snapshotCaseLog);
-            status = "同步在线局：" + PhaseName(phase) + "。";
+            status = "同步在线局：" + OnlineMatchUtils.PhaseName(phase) + "。";
 
             // ── 客户端初始快照完整性检查 ──
             ValidateClientSnapshotIntegrity();
@@ -1513,7 +1513,7 @@ namespace GanglandUndercover.Online
             if (clientId == LocalClientId())
             {
                 localRole = role;
-                status = "收到身份：" + RoleName(localRole);
+                status = "收到身份：" + OnlineMatchUtils.RoleName(localRole);
             }
 
             if (localPreviewMode || OnlineBotController.IsBotClient(clientId) || networkManager == null || networkManager.CustomMessagingManager == null)
@@ -1541,7 +1541,7 @@ namespace GanglandUndercover.Online
             }
 
             localRole = (OnlineRole)roleValue;
-            status = "收到身份：" + RoleName(localRole);
+            status = "收到身份：" + OnlineMatchUtils.RoleName(localRole);
         }
 
         // --- EnsureChatSystem ---
@@ -1955,12 +1955,12 @@ namespace GanglandUndercover.Online
                 existing.Position = localPosition;
                 existing.Ready = localReady;
                 existing.IsBot = false;
-                existing.DisplayName = LimitText(localPlayerName, 16, "港区玩家");
+                existing.DisplayName = OnlineMatchUtils.LimitText(localPlayerName, 16, "港区玩家");
                 players[clientId] = existing;
             }
             else
             {
-                players[clientId] = new OnlinePlayerState(clientId, LimitText(localPlayerName, 16, "港区玩家"), localPosition, localReady, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
+                players[clientId] = new OnlinePlayerState(clientId, OnlineMatchUtils.LimitText(localPlayerName, 16, "港区玩家"), localPosition, localReady, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
             }
         }
     }

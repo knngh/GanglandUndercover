@@ -473,7 +473,7 @@ namespace GanglandUndercover.Online
 
         public void SetLocalPlayerName(string value)
         {
-            localPlayerName = LimitText(value, 16, "港区玩家");
+            localPlayerName = OnlineMatchUtils.LimitText(value, 16, "港区玩家");
 
             if (localPreviewMode)
             {
@@ -489,7 +489,7 @@ namespace GanglandUndercover.Online
 
         public void SetRoomName(string value)
         {
-            roomName = LimitText(value, 20, "九龙港区夜局");
+            roomName = OnlineMatchUtils.LimitText(value, 20, "九龙港区夜局");
 
             if (IsOnline && IsHost)
             {
@@ -504,7 +504,7 @@ namespace GanglandUndercover.Online
 
         public void SetRelayJoinInput(string value)
         {
-            relayJoinInput = CleanRelayJoinInput(value);
+            relayJoinInput = OnlineMatchUtils.CleanRelayJoinInput(value);
         }
 
         public void SetRoomMinPlayers(int value)
@@ -698,7 +698,7 @@ namespace GanglandUndercover.Online
         {
             if (activeTaskId >= 0)
             {
-                activeTaskCharge = Mathf.Min(1f, activeTaskCharge + Time.deltaTime * TaskChargeRate(activeTaskId));
+                activeTaskCharge = Mathf.Min(1f, activeTaskCharge + Time.deltaTime * OnlineMatchUtils.TaskChargeRate(activeTaskId));
             }
         }
 
@@ -1051,7 +1051,7 @@ namespace GanglandUndercover.Online
         {
             RoleDistribution dist = ruleSet.GetRoleDistribution(ids.Count);
             List<ulong> shuffled = new List<ulong>(ids);
-            Shuffle(shuffled);
+            OnlineMatchUtils.Shuffle(shuffled);
 
             int idx = 0;
             int gangIdx = 0, undercoverIdx = 0, moleIdx = 0, policeIdx = 0;
@@ -1107,7 +1107,7 @@ namespace GanglandUndercover.Online
             privateRoles[clientId] = role;
             if (players.TryGetValue(clientId, out OnlinePlayerState state))
             {
-                state.Profession = ProfessionFor(role, roleIndex);
+                state.Profession = OnlineMatchUtils.ProfessionFor(role, roleIndex);
                 state.Suspicion = (role == OnlineRole.Gang || role == OnlineRole.Mole) ? 1 : 0;
                 state.PublicRole = role switch
                 {
@@ -1235,11 +1235,11 @@ namespace GanglandUndercover.Online
             snap.CaseLog = new List<string>(caseLog);
 
             // ── 冷却 ──
-            snap.KillCooldowns = CooldownsToList(killSystem.killCooldowns);
-            snap.AbilityCooldowns = CooldownsToList(abilityCooldowns);
-            snap.VentCooldowns = CooldownsToList(ventCooldowns);
-            snap.BotThinkTimers = CooldownsToList(_botController.ThinkTimers);
-            snap.BotVoteTimers = CooldownsToList(_botController.VoteTimers);
+            snap.KillCooldowns = OnlineMatchUtils.CooldownsToList(killSystem.killCooldowns);
+            snap.AbilityCooldowns = OnlineMatchUtils.CooldownsToList(abilityCooldowns);
+            snap.VentCooldowns = OnlineMatchUtils.CooldownsToList(ventCooldowns);
+            snap.BotThinkTimers = OnlineMatchUtils.CooldownsToList(_botController.ThinkTimers);
+            snap.BotVoteTimers = OnlineMatchUtils.CooldownsToList(_botController.VoteTimers);
 
             // ── Bot 目标 ──
             snap.BotTargets = new List<GameStateSnapshot.SnapshotTargetEntry>(_botController.Targets.Count);
@@ -1342,9 +1342,9 @@ namespace GanglandUndercover.Online
             caseLog.AddRange(snap.CaseLog);
 
             // ── 冷却 ──
-            ListToCooldowns(killSystem.killCooldowns, snap.KillCooldowns);
-            ListToCooldowns(abilityCooldowns, snap.AbilityCooldowns);
-            ListToCooldowns(ventCooldowns, snap.VentCooldowns);
+            OnlineMatchUtils.ListToCooldowns(killSystem.killCooldowns, snap.KillCooldowns);
+            OnlineMatchUtils.ListToCooldowns(abilityCooldowns, snap.AbilityCooldowns);
+            OnlineMatchUtils.ListToCooldowns(ventCooldowns, snap.VentCooldowns);
             // Bot 计时器通过 bot 控制器恢复
             if (snap.BotThinkTimers != null)
                 foreach (var entry in snap.BotThinkTimers)
@@ -1385,24 +1385,6 @@ namespace GanglandUndercover.Online
             SetResult(resultText);
         }
 
-        private static List<GameStateSnapshot.SnapshotCooldownEntry> CooldownsToList(IReadOnlyDictionary<ulong, float> dict)
-        {
-            var list = new List<GameStateSnapshot.SnapshotCooldownEntry>(dict.Count);
-            foreach (var kv in dict)
-            {
-                list.Add(new GameStateSnapshot.SnapshotCooldownEntry { ClientId = kv.Key, Value = kv.Value });
-            }
-            return list;
-        }
-
-        private static void ListToCooldowns(Dictionary<ulong, float> dict, List<GameStateSnapshot.SnapshotCooldownEntry> list)
-        {
-            dict.Clear();
-            foreach (var entry in list)
-            {
-                dict[entry.ClientId] = entry.Value;
-            }
-        }
 
 
 
@@ -1459,14 +1441,14 @@ namespace GanglandUndercover.Online
 
             if (role == OnlineRole.Gang || role == OnlineRole.Mole)
             {
-                SabotageType sabotageType = SabotageForTask(nearestTask.Id);
+                SabotageType sabotageType = OnlineMatchUtils.SabotageForTask(nearestTask.Id);
                 nearestTask.Sabotaged = true;
                 nearestTask.Completed = false;
                 nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
-                taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - SabotageEvidencePenalty(sabotageType));
+                taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - OnlineMatchUtils.SabotageEvidencePenalty(sabotageType));
                 string actorLabel = role == OnlineRole.Mole ? "线人" : "黑帮";
                 status = actorLabel + "秘密破坏了 " + nearestTask.Name + "。";
-                lastSabotageEvent = status + " 影响: " + SabotageName(sabotageType);
+                lastSabotageEvent = status + " 影响: " + OnlineMatchUtils.SabotageName(sabotageType);
                 AddCaseLog(status);
                 syncManager?.OnTaskSabotagedLocally(senderClientId, nearestTask.Id, sabotageType);
                 ApplySabotageEffect(sabotageType, nearestTask.Name);
@@ -1474,7 +1456,7 @@ namespace GanglandUndercover.Online
 
                 // M5.5: 证据板记录 + 嫌疑增加
                 LogEvidence(EvidenceCategory.EvidenceChain,
-                    $"{nearestTask.Name} 被破坏（{SabotageName(sabotageType)}），证据链-{SabotageEvidencePenalty(sabotageType)}", -1);
+                    $"{nearestTask.Name} 被破坏（{OnlineMatchUtils.SabotageName(sabotageType)}），证据链-{OnlineMatchUtils.SabotageEvidencePenalty(sabotageType)}", -1);
 
                 // 增加附近存活玩家的嫌疑（模糊线索，不点名）
                 foreach (var kv in players)
@@ -1512,7 +1494,7 @@ namespace GanglandUndercover.Online
                 if (nearestTask.Sabotaged)
                 {
                     nearestTask.Sabotaged = false;
-                    RepairSabotageEffect(SabotageForTask(nearestTask.Id));
+                    RepairSabotageEffect(OnlineMatchUtils.SabotageForTask(nearestTask.Id));
                     status = nearestTask.Name + " 的破坏已修复，危机效果下降。";
                     lastSabotageEvent = status;
                     AddCaseLog(status);
@@ -2074,9 +2056,9 @@ namespace GanglandUndercover.Online
 
                 players[ejectedClientId] = ejected;
                 status = revealRoleOnEject
-                    ? ejected.DisplayName + " 被投出局，身份是：" + RoleName(ejected.PublicRole) + "。"
+                    ? ejected.DisplayName + " 被投出局，身份是：" + OnlineMatchUtils.RoleName(ejected.PublicRole) + "。"
                     : ejected.DisplayName + " 被投出局，身份暂不公开。";
-                lastVoteOutcome = ejected.DisplayName + " 出局 | 得票 " + bestVotes + " | 身份 " + (revealRoleOnEject ? RoleName(ejectedRole) : "未公开");
+                lastVoteOutcome = ejected.DisplayName + " 出局 | 得票 " + bestVotes + " | 身份 " + (revealRoleOnEject ? OnlineMatchUtils.RoleName(ejectedRole) : "未公开");
                 AddCaseLog(status);
                 PlayCue("eliminated");
 
@@ -2662,7 +2644,7 @@ namespace GanglandUndercover.Online
                 return false;
 
             // 修复
-            SabotageType sabotageType = SabotageForTask(taskId);
+            SabotageType sabotageType = OnlineMatchUtils.SabotageForTask(taskId);
             SetTask(new OnlineTaskState(task.Id, task.Name, task.Position,
                 task.Progress, task.RequiredProgress, false, false));
             RepairSabotageEffect(sabotageType);
@@ -2859,7 +2841,7 @@ namespace GanglandUndercover.Online
 
         private int EvidenceGainFor(int taskId, OnlineProfession profession, OnlineRole role)
         {
-            int gain = TaskEvidenceValue(taskId);
+            int gain = OnlineMatchUtils.TaskEvidenceValue(taskId);
 
             if (profession == OnlineProfession.Forensics)
             {
@@ -2878,199 +2860,6 @@ namespace GanglandUndercover.Online
             return Mathf.Clamp(gain, 1, 5);
         }
 
-        private static int TaskEvidenceValue(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0:
-                case 3:
-                case 11:
-                case 15:
-                case 16:
-                case 21:
-                case 22:
-                case 26:
-                    return 2;
-                case 4:
-                case 8:
-                case 18:
-                case 24:
-                case 27:
-                    return 3;
-                default:
-                    return 1;
-            }
-        }
-
-
-        private static string FormatMatchTime(float seconds)
-        {
-            int totalSeconds = Mathf.Max(0, Mathf.FloorToInt(seconds));
-            return (totalSeconds / 60).ToString("00") + ":" + (totalSeconds % 60).ToString("00");
-        }
-
-
-
-        private int EmergencyMeetingLimitFor(int playerCount)
-        {
-            return ruleSet.EmergencyMeetingLimitFor(playerCount);
-        }
-
-
-
-
-
-
-        private int CountUnreportedBodies()
-        {
-            if (killSystem != null)
-                return killSystem.CountUnreportedBodies();
-            return 0;
-        }
-
-        private int CountCompletedTasks()
-        {
-            int completed = 0;
-
-            foreach (OnlineTaskState task in tasks)
-            {
-                if (task.Completed)
-                {
-                    completed++;
-                }
-            }
-
-            return completed;
-        }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        private static int TaskTemplateMode(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0:
-                case 6:
-                case 13:
-                case 21:
-                    return 0;
-                case 1:
-                case 10:
-                case 20:
-                case 23:
-                    return 1;
-                case 2:
-                case 7:
-                case 12:
-                case 14:
-                case 24:
-                    return 2;
-                case 3:
-                case 9:
-                case 15:
-                case 19:
-                    return 3;
-                case 4:
-                case 11:
-                case 16:
-                case 22:
-                    return 4;
-                default:
-                    return 5;
-            }
-        }
-
-
-
-        private static Color TaskPanelAccent(int taskId)
-        {
-            return OnlineWorldBuilder.TaskPanelAccent(taskId);
-        }
-
-
-
-
-
-
-
-
-
-
-
-        private static string TaskPanelInstruction(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0:
-                    return "切换摄像头、锁定可疑动线、导出录像。";
-                case 1:
-                case 23:
-                    return "核对封条号、扫描货柜、同步查验记录。";
-                case 2:
-                case 14:
-                case 24:
-                    return "对齐断路器、按住充电、恢复港区供电。";
-                case 3:
-                case 15:
-                    return "放置样本、校准光谱、生成鉴证报告。";
-                case 4:
-                case 16:
-                case 22:
-                    return "翻账本、标记异常、冻结可疑现金流。";
-                case 5:
-                case 27:
-                    return "递送情报、控制暴露、稳住接头安全。";
-                case 6:
-                case 13:
-                case 21:
-                    return "调频、过滤噪声、恢复无线电通道。";
-                case 7:
-                case 12:
-                    return "刷卡、解除门禁、记录出入日志。";
-                case 8:
-                case 18:
-                case 26:
-                    return "巡线、补充目击、锁定撤离路线。";
-                case 9:
-                case 19:
-                    return "搜查诊所、对照病历、追痕提证。";
-                case 10:
-                    return "顺线走访货场，补强路线证据。";
-                case 11:
-                    return "核对财务流向，锁定异常资金。";
-                case 17:
-                    return "执行巡逻打卡，压制高风险街口。";
-                case 20:
-                    return "读懂鱼档暗号，辨识黑市交易。";
-                case 25:
-                    return "排查后巷摩托，封死逃逸支线。";
-                default:
-                    return "完成现场校验并提交证据链。";
-            }
-        }
 
 
 
@@ -3350,26 +3139,53 @@ namespace GanglandUndercover.Online
 
 
 
-        private static void RemoveStaleVisuals<T>(Dictionary<T, GameObject> visuals, HashSet<T> seen)
+
+        private int EmergencyMeetingLimitFor(int playerCount)
         {
-            OnlineWorldBuilder.RemoveStaleVisuals(visuals, seen);
+            return ruleSet.EmergencyMeetingLimitFor(playerCount);
         }
 
-
-
-
-
-
-
-
-        private static int SortingOrderForZ(float z)
+        private int CountUnreportedBodies()
         {
-            return OnlineWorldBuilder.SortingOrderForZ(z);
+            if (killSystem != null)
+                return killSystem.CountUnreportedBodies();
+            return 0;
         }
 
-        private static int SortingOrderForLocalZ(float z)
+        private int CountCompletedTasks()
         {
-            return OnlineWorldBuilder.SortingOrderForLocalZ(z);
+            int completed = 0;
+            foreach (OnlineTaskState task in tasks)
+            {
+                if (task.Completed)
+                    completed++;
+            }
+            return completed;
+        }
+
+        private static string BuildRelayLobbySummary(
+            string relayStatusValue,
+            string relayJoinCodeValue,
+            string relayJoinInputValue,
+            bool operationInProgress,
+            bool isOnline,
+            bool isHost,
+            bool isClientConnected,
+            int connectedClientCount)
+        {
+            return OnlineMatchUtils.BuildRelayLobbySummary(
+                relayStatusValue, relayJoinCodeValue, relayJoinInputValue,
+                operationInProgress, isOnline, isHost, isClientConnected, connectedClientCount);
+        }
+
+        private static bool TryResolveSoundEffectCue(string cueName, out SoundEffect effect)
+        {
+            return OnlineMatchUtils.TryResolveSoundEffectCue(cueName, out effect);
+        }
+
+        private static AudioClip CreateToneClip(string clipName, float frequency, float duration)
+        {
+            return OnlineMatchUtils.CreateToneClip(clipName, frequency, duration);
         }
 
         private void EnsureAudio()
@@ -3402,21 +3218,21 @@ namespace GanglandUndercover.Online
 
         private AudioClip LoadAudioClipOrFallback(string resourcePath, string clipName, float frequency, float duration)
         {
-            AudioClip clip = Resources.Load<AudioClip>(NormalizeResourcePath(resourcePath));
+            AudioClip clip = Resources.Load<AudioClip>(OnlineWorldBuilder.NormalizeResourcePath(resourcePath));
 
             if (clip != null)
             {
                 return clip;
             }
 
-            return CreateToneClip(clipName, frequency, duration);
+            return OnlineMatchUtils.CreateToneClip(clipName, frequency, duration);
         }
 
         private void PlayCue(string cueName)
         {
             EnsureAudio();
 
-            if (TryResolveSoundEffectCue(cueName, out SoundEffect effect))
+            if (OnlineMatchUtils.TryResolveSoundEffectCue(cueName, out SoundEffect effect))
             {
                 AudioManager.Instance?.PlaySFX(effect);
             }
@@ -3427,57 +3243,6 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private static bool TryResolveSoundEffectCue(string cueName, out SoundEffect effect)
-        {
-            switch (cueName)
-            {
-                case "task":
-                    effect = SoundEffect.TaskComplete;
-                    return true;
-                case "kill":
-                    effect = SoundEffect.Kill;
-                    return true;
-                case "meeting":
-                    effect = SoundEffect.MeetingStart;
-                    return true;
-                case "vote":
-                    effect = SoundEffect.VoteCast;
-                    return true;
-                case "eliminated":
-                    effect = SoundEffect.PlayerEliminated;
-                    return true;
-                case "blackout":
-                    effect = SoundEffect.Emergency;
-                    return true;
-                case "vent":
-                    effect = SoundEffect.VentOpen;
-                    return true;
-                case "result":
-                    effect = SoundEffect.Victory;
-                    return true;
-                default:
-                    effect = default;
-                    return false;
-            }
-        }
-
-        private static AudioClip CreateToneClip(string clipName, float frequency, float duration)
-        {
-            const int sampleRate = 44100;
-            int sampleCount = Mathf.Max(1, Mathf.RoundToInt(sampleRate * duration));
-            float[] samples = new float[sampleCount];
-
-            for (int i = 0; i < sampleCount; i++)
-            {
-                float time = i / (float)sampleRate;
-                float envelope = 1f - i / (float)sampleCount;
-                samples[i] = Mathf.Sin(time * frequency * Mathf.PI * 2f) * 0.28f * envelope;
-            }
-
-            AudioClip clip = AudioClip.Create(clipName, sampleCount, 1, sampleRate, false);
-            clip.SetData(samples, 0);
-            return clip;
-        }
 
         private void RestartMatch()
         {
@@ -3586,13 +3351,5 @@ namespace GanglandUndercover.Online
 
 
 
-        private static void Shuffle<T>(IList<T> items)
-        {
-            for (int i = 0; i < items.Count; i++)
-            {
-                int j = UnityEngine.Random.Range(i, items.Count);
-                (items[i], items[j]) = (items[j], items[i]);
-            }
-        }
     }
 }

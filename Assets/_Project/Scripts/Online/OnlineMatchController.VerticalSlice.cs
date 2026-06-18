@@ -79,7 +79,7 @@ namespace GanglandUndercover.Online
             float halfWidth = size.x * 0.5f;
             float halfHeight = size.y * 0.5f;
 
-            CreateShapeProp(name + " floor", roundedRectSprite, center + new Vector3(0f, 0f, -0.11f), size, Darken(color, 0.82f));
+            CreateShapeProp(name + " floor", roundedRectSprite, center + new Vector3(0f, 0f, -0.11f), size, OnlineWorldBuilder.Darken(color, 0.82f));
             CreateMeshBoxProp(name + " back wall volume", center + new Vector3(0f, halfHeight, 0.28f), new Vector3(size.x, 0.1f, size.z), wall);
             CreateMeshBoxProp(name + " left return wall", center + new Vector3(-halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y, size.z * 0.86f), wall);
             CreateMeshBoxProp(name + " right return wall", center + new Vector3(halfWidth, 0f, 0.24f), new Vector3(0.1f, size.y * 0.72f, size.z * 0.8f), wall);
@@ -158,7 +158,7 @@ namespace GanglandUndercover.Online
             CreateMeshBoxChild(root.transform, "VerticalSlice Task physical base", new Vector3(0f, 0f, 0.12f), new Vector3(0.96f, 0.62f, 0.18f), new Color(0.055f, 0.065f, 0.07f, 1f));
             CreateMeshBoxChild(root.transform, "VerticalSlice Task lit face", new Vector3(0f, 0.29f, 0.3f), new Vector3(0.72f, 0.035f, 0.2f), accent);
             CreateMeshBoxChild(root.transform, "VerticalSlice Task interaction halo", new Vector3(0f, 0f, -0.02f), new Vector3(1.08f, 0.72f, 0.035f), new Color(accent.r, accent.g, accent.b, 0.22f));
-            SetSortingFromZ(root);
+            OnlineWorldBuilder.SetSortingFromZ(root);
             return root;
         }
 
@@ -299,7 +299,7 @@ namespace GanglandUndercover.Online
             {
                 float x = -6.2f + i * 0.72f;
                 float y = -1.38f + Mathf.Sin(i * 0.74f) * 0.42f;
-                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen wet route reflection " + i, new Vector3(x, y, -0.17f), new Vector3(0.46f, 0.03f, 0.035f), i % 2 == 0 ? wetBlue : Darken(wetBlue, 0.78f), i % 2 == 0 ? -11f : 17f);
+                CreateMeshBoxProp("VerticalSlice Stage1 FirstScreen wet route reflection " + i, new Vector3(x, y, -0.17f), new Vector3(0.46f, 0.03f, 0.035f), i % 2 == 0 ? wetBlue : OnlineWorldBuilder.Darken(wetBlue, 0.78f), i % 2 == 0 ? -11f : 17f);
             }
 
             for (int i = 0; i < 12; i++)
@@ -348,7 +348,7 @@ namespace GanglandUndercover.Online
             Color glass = new Color(0.08f, 0.18f, 0.22f, 0.72f);
             float sideOffset = Mathf.Max(0.22f, size.x * 0.48f);
 
-            CreateMeshBoxProp("VerticalSlice Stage1 Entrance " + id + " threshold floor", center + new Vector3(0f, 0f, -0.14f), new Vector3(size.x * 1.05f, size.y * 0.72f, 0.05f), Darken(accent, 0.38f), rotation);
+            CreateMeshBoxProp("VerticalSlice Stage1 Entrance " + id + " threshold floor", center + new Vector3(0f, 0f, -0.14f), new Vector3(size.x * 1.05f, size.y * 0.72f, 0.05f), OnlineWorldBuilder.Darken(accent, 0.38f), rotation);
             CreateSolidMeshBoxProp("VerticalSlice Stage1 Entrance " + id + " left jamb", center + new Vector3(-sideOffset, 0f, 0.18f), new Vector3(0.12f, size.y * 0.86f, size.z), frame, rotation);
             CreateSolidMeshBoxProp("VerticalSlice Stage1 Entrance " + id + " right jamb", center + new Vector3(sideOffset, 0f, 0.18f), new Vector3(0.12f, size.y * 0.86f, size.z), frame, rotation);
             CreateMeshBoxProp("VerticalSlice Stage1 Entrance " + id + " header", center + new Vector3(0f, size.y * 0.42f, 0.48f), new Vector3(size.x, 0.065f, 0.14f), frame, rotation);
@@ -391,7 +391,7 @@ namespace GanglandUndercover.Online
 
                 for (int i = 0; i < 5; i++)
                 {
-                    CreateMeshBoxProp("VerticalSlice Stage1 TaskContext " + taskZones[zone].id + " cable run " + i, center + new Vector3(-0.62f + i * 0.31f, 0.52f, 0.34f), new Vector3(0.23f, 0.028f, 0.035f), i % 2 == 0 ? accent : Darken(accent, 0.5f), i % 2 == 0 ? -8f : 12f);
+                    CreateMeshBoxProp("VerticalSlice Stage1 TaskContext " + taskZones[zone].id + " cable run " + i, center + new Vector3(-0.62f + i * 0.31f, 0.52f, 0.34f), new Vector3(0.23f, 0.028f, 0.035f), i % 2 == 0 ? accent : OnlineWorldBuilder.Darken(accent, 0.5f), i % 2 == 0 ? -8f : 12f);
                 }
 
                 CreateMeshBoxProp("VerticalSlice Stage1 TaskContext " + taskZones[zone].id + " readable task pad", center + new Vector3(0f, -0.56f, 0.04f), new Vector3(0.88f, 0.04f, 0.055f), accent, 0f);
@@ -428,7 +428,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < 11; i++)
             {
                 float x = -9.2f + i * 1.84f;
-                CreateMeshBoxProp("VerticalSlice Stage1 Depth parallax shop roof " + i, new Vector3(x, 4.55f + Mathf.Sin(i * 0.6f) * 0.16f, 0.86f), new Vector3(1.12f, 0.12f, 0.28f), i % 2 == 0 ? deepShadow : Darken(deepShadow, 0.82f), i % 2 == 0 ? -4f : 6f);
+                CreateMeshBoxProp("VerticalSlice Stage1 Depth parallax shop roof " + i, new Vector3(x, 4.55f + Mathf.Sin(i * 0.6f) * 0.16f, 0.86f), new Vector3(1.12f, 0.12f, 0.28f), i % 2 == 0 ? deepShadow : OnlineWorldBuilder.Darken(deepShadow, 0.82f), i % 2 == 0 ? -4f : 6f);
                 CreateMeshBoxProp("VerticalSlice Stage1 Sightline parallax roof occluder " + i, new Vector3(x, 4.28f + Mathf.Sin(i * 0.6f) * 0.12f, 0.58f), new Vector3(0.88f, 0.08f, 0.18f), deepShadow, i % 2 == 0 ? -4f : 6f);
             }
 

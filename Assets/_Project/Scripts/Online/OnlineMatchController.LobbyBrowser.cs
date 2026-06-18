@@ -119,7 +119,7 @@ namespace GanglandUndercover.Online
 
             lobbyJoinInProgress = true;
             int joinGeneration = ++lobbyJoinGeneration;
-            lobbyBrowserStatus = "正在加入 Lobby Session：" + LimitText(roomNameValue, 24, "未命名房间") + "。";
+            lobbyBrowserStatus = "正在加入 Lobby Session：" + OnlineMatchUtils.LimitText(roomNameValue, 24, "未命名房间") + "。";
             status = lobbyBrowserStatus;
 
             try
@@ -187,7 +187,7 @@ namespace GanglandUndercover.Online
 
         private async Task PublishRelayLobbySessionAsync()
         {
-            string safeRelayCode = CleanRelayJoinInput(relayJoinCode);
+            string safeRelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayJoinCode);
             if (string.IsNullOrWhiteSpace(safeRelayCode))
             {
                 lobbyBrowserStatus = "Relay 房间码未就绪，Lobby 暂不发布。";
@@ -239,7 +239,7 @@ namespace GanglandUndercover.Online
                 }
 
                 publishedLobbySession = createdSession;
-                publishedLobbySessionCode = CleanRelayJoinInput(publishedLobbySession?.Code);
+                publishedLobbySessionCode = OnlineMatchUtils.CleanRelayJoinInput(publishedLobbySession?.Code);
                 lobbyBrowserStatus = BuildLobbyPublishStatus(false, true, publishedLobbySessionCode);
                 UpsertLocalRelayLobbyRoom();
             }
@@ -468,7 +468,7 @@ namespace GanglandUndercover.Online
             return new SessionOptions
             {
                 Type = LobbySessionTypeValue,
-                Name = LimitText(roomNameValue, 24, "未命名房间"),
+                Name = OnlineMatchUtils.LimitText(roomNameValue, 24, "未命名房间"),
                 MaxPlayers = Mathf.Max(1, maxPlayersValue),
                 IsPrivate = false,
                 IsLocked = false,
@@ -497,15 +497,15 @@ namespace GanglandUndercover.Online
                 },
                 {
                     LobbyPropertyRelayCode,
-                    new SessionProperty(CleanRelayJoinInput(relayCodeValue), VisibilityPropertyOptions.Public, PropertyIndex.String2)
+                    new SessionProperty(OnlineMatchUtils.CleanRelayJoinInput(relayCodeValue), VisibilityPropertyOptions.Public, PropertyIndex.String2)
                 },
                 {
                     LobbyPropertyMap,
-                    new SessionProperty(LimitText(mapNameValue, 18, "地图待定"), VisibilityPropertyOptions.Public, PropertyIndex.String3)
+                    new SessionProperty(OnlineMatchUtils.LimitText(mapNameValue, 18, "地图待定"), VisibilityPropertyOptions.Public, PropertyIndex.String3)
                 },
                 {
                     LobbyPropertyRules,
-                    new SessionProperty(LimitText(ruleSummaryValue, 28, "默认规则"), VisibilityPropertyOptions.Public)
+                    new SessionProperty(OnlineMatchUtils.LimitText(ruleSummaryValue, 28, "默认规则"), VisibilityPropertyOptions.Public)
                 }
             };
         }
@@ -532,7 +532,7 @@ namespace GanglandUndercover.Online
 
         private void UpsertLocalRelayLobbyRoom()
         {
-            string safeRelayCode = CleanRelayJoinInput(relayJoinCode);
+            string safeRelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayJoinCode);
             if (string.IsNullOrWhiteSpace(safeRelayCode))
             {
                 return;
@@ -597,7 +597,7 @@ namespace GanglandUndercover.Online
             bool allowLocalPreview)
         {
             string safeSessionId = string.IsNullOrWhiteSpace(sessionIdValue) ? string.Empty : sessionIdValue.Trim();
-            string safeRelayCode = CleanRelayJoinInput(relayCodeValue);
+            string safeRelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayCodeValue);
             int maxPlayers = Mathf.Max(1, maxPlayersValue);
             int playerCount = Mathf.Clamp(playerCountValue, 0, maxPlayers);
             bool hasRelayCode = !string.IsNullOrWhiteSpace(safeRelayCode);
@@ -641,7 +641,7 @@ namespace GanglandUndercover.Online
 
             if (published)
             {
-                string safeCode = CleanRelayJoinInput(sessionCode);
+                string safeCode = OnlineMatchUtils.CleanRelayJoinInput(sessionCode);
                 return string.IsNullOrWhiteSpace(safeCode)
                     ? "Lobby Session 已发布。"
                     : "Lobby Session 已发布：" + safeCode + "。";
@@ -724,10 +724,10 @@ namespace GanglandUndercover.Online
         {
             int maxPlayers = Mathf.Max(1, maxPlayersValue);
             int playerCount = Mathf.Clamp(playerCountValue, 0, maxPlayers);
-            string safeName = LimitText(roomNameValue, 24, "未命名房间");
-            string safeMap = LimitText(mapNameValue, 18, "地图待定");
-            string safeRules = LimitText(ruleSummaryValue, 28, "默认规则");
-            string safeRelayCode = CleanRelayJoinInput(relayCodeValue);
+            string safeName = OnlineMatchUtils.LimitText(roomNameValue, 24, "未命名房间");
+            string safeMap = OnlineMatchUtils.LimitText(mapNameValue, 18, "地图待定");
+            string safeRules = OnlineMatchUtils.LimitText(ruleSummaryValue, 28, "默认规则");
+            string safeRelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayCodeValue);
             string joinState = RoomJoinState(playerCount, maxPlayers, isLocked, hasPassword, safeRelayCode);
 
             return Mathf.Max(1, displayIndex)
@@ -787,7 +787,7 @@ namespace GanglandUndercover.Online
                 string statusText)
             {
                 SessionId = string.IsNullOrWhiteSpace(sessionId) ? string.Empty : sessionId.Trim();
-                RelayCode = CleanRelayJoinInput(relayCode);
+                RelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayCode);
                 CanJoinRelay = canJoinRelay && !string.IsNullOrWhiteSpace(RelayCode);
                 CanJoinSession = CanJoinRelay && canJoinSession;
                 StatusText = string.IsNullOrWhiteSpace(statusText) ? "正在通过 Relay 房间码加入。" : statusText.Trim();
@@ -825,7 +825,7 @@ namespace GanglandUndercover.Online
                 HasPassword = hasPassword;
                 MapName = string.IsNullOrWhiteSpace(mapName) ? "地图待定" : mapName.Trim();
                 RuleSummary = string.IsNullOrWhiteSpace(ruleSummary) ? "默认规则" : ruleSummary.Trim();
-                RelayCode = CleanRelayJoinInput(relayCode);
+                RelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayCode);
             }
         }
     }
