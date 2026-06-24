@@ -56,16 +56,17 @@ namespace GanglandUndercover.Online
 
 
         internal readonly Dictionary<ulong, OnlinePlayerState> players = new Dictionary<ulong, OnlinePlayerState>();
-        private readonly List<OnlineTaskState> tasks = new List<OnlineTaskState>();
-        private readonly List<string> caseLog = new List<string>();
-        private readonly Dictionary<ulong, OnlineRole> privateRoles = new Dictionary<ulong, OnlineRole>();
+        internal readonly List<OnlineTaskState> tasks = new List<OnlineTaskState>();
+        internal readonly List<string> caseLog = new List<string>();
+        internal readonly Dictionary<ulong, OnlineRole> privateRoles = new Dictionary<ulong, OnlineRole>();
         internal readonly Dictionary<ulong, ulong> votes = new Dictionary<ulong, ulong>();
         internal readonly Dictionary<ulong, float> abilityCooldowns = new Dictionary<ulong, float>();
-        private readonly Dictionary<ulong, float> ventCooldowns = new Dictionary<ulong, float>();
+        internal readonly Dictionary<ulong, float> ventCooldowns = new Dictionary<ulong, float>();
         private OnlineBotController _botController;
+        internal OnlineBotController botController => _botController;
 
         // 击杀/尸体/报告状态已迁移到 KillSystem（单一数据源）
-        private KillSystem killSystem;
+        internal KillSystem killSystem;
 
         // M8.4: 对局数据采集器
         private MatchStatsCollector _statsCollector;
@@ -118,10 +119,11 @@ namespace GanglandUndercover.Online
             }
         }
         private GameObject worldRoot;
-        private bool proximityVoiceEnabled;
+        internal bool proximityVoiceEnabled;
         private OnlineMatchHud onlineHud;
         private OnlineSyncManager syncManager;
         private HostMigrationManager migrationManager;
+        internal MatchSnapshotService snapshotService;
         private AudioSource audioSource;
         private Vector2 rosterScroll;
         private Vector2 intelScroll;
@@ -130,20 +132,20 @@ namespace GanglandUndercover.Online
         private string relayJoinInput = string.Empty;
         private string relayStatus = "Relay 房间码未创建。";
         private string localPlayerName = "港区玩家";
-        private string roomName = "九龙港区夜局";
-        private string status = "离线。创建 Host 或加入 Client。";
-        private string resultSummary = "尚未结算。";
-        private string lastMeetingReason = "尚未召开会议。";
-        private string lastVoteOutcome = "尚未投票。";
-        private string lastEvidenceEvent = "尚未取得关键证据。";
-        private string lastSabotageEvent = "尚未发生破坏。";
+        internal string roomName = "九龙港区夜局";
+        internal string status = "离线。创建 Host 或加入 Client。";
+        internal string resultSummary = "尚未结算。";
+        internal string lastMeetingReason = "尚未召开会议。";
+        internal string lastVoteOutcome = "尚未投票。";
+        internal string lastEvidenceEvent = "尚未取得关键证据。";
+        internal string lastSabotageEvent = "尚未发生破坏。";
         private OnlineRole localRole = OnlineRole.Unassigned;
-        private OnlineMatchPhase phase = OnlineMatchPhase.Lobby;
+        internal OnlineMatchPhase phase = OnlineMatchPhase.Lobby;
         private ChatSystem chatSystem;
         private readonly Dictionary<ulong, float> serverChatLastSendTimes = new Dictionary<ulong, float>();
         private bool localReady;
-        private bool roomAutoFillAi;
-        private bool revealRoleOnEject;
+        internal bool roomAutoFillAi;
+        internal bool revealRoleOnEject;
         [SerializeField] private bool canvasHudEnabled = true;
         [SerializeField] internal OnlineRuleSet ruleSet;
         [SerializeField] internal OnlineMapService mapService;
@@ -163,15 +165,15 @@ namespace GanglandUndercover.Online
         [Header("M6 Kenney 美术")]
         [SerializeField] private Map.KenneySpriteCatalog kenneyCatalog;
         [SerializeField] private bool kenneyMode;
-        private bool matchStarted;
+        internal bool matchStarted;
         private bool localPreviewMode;
         private bool disconnectedNetworkSession;
         private bool fullMapPreview = true;
         private bool tacticalMapOpen;
         private bool intelBoardOpen;
-        private int roomMinPlayers;
-        private int roomMaxPlayers;
-        private int emergencyMeetingsLeft;
+        internal int roomMinPlayers;
+        internal int roomMaxPlayers;
+        internal int emergencyMeetingsLeft;
         private bool tacticalMapDisabled;         // Phase 4: Communications 破坏效果
         private bool _blackoutVisionReduced;       // Phase 4: Blackout 破坏效果
         private bool _blackoutInteractionHalved;   // Phase 4: Blackout 交互减半
@@ -184,14 +186,14 @@ namespace GanglandUndercover.Online
         private float clientSnapshotTimer;
         private float serverSnapshotTimer;
         private float actionCooldown;
-        private float phaseTimer;
-        private float emergencyCooldownTimer;
-        private float aiActionGraceTimer;
-        private float matchElapsedSeconds;
+        internal float phaseTimer;
+        internal float emergencyCooldownTimer;
+        internal float aiActionGraceTimer;
+        internal float matchElapsedSeconds;
         private int activeTaskId = -1;
         private int activeTaskStep;
         private int activeTaskMistakes;
-        private int evidenceMilestoneIndex;
+        internal int evidenceMilestoneIndex;
         private float activeTaskCharge;
         private float activeTaskFeedbackTimer;
         private bool activeTaskStepOneDone;
@@ -284,7 +286,56 @@ namespace GanglandUndercover.Online
         public int BlackoutVfxCount => CountNamedWorldObjects("Blackout VFX");
         public int FreeCharacterAdapterCount => CountNamedWorldObjects("FreeCharacterAdapter");
         public int StageTwoCharacterStateLayerCount => CountNamedWorldObjects("Stage2 Character");
-        internal void DecrementEmergencyMeetings() { emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1); }
+        internal void DecrementEmergencyMeetings()
+        {
+            emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
+            SyncMeetingServiceFromController();
+        }
+        internal void SyncMeetingStateFromService(int meetingsLeft, float cooldownTimer)
+        {
+            emergencyMeetingsLeft = Mathf.Max(0, meetingsLeft);
+            emergencyCooldownTimer = Mathf.Max(0f, cooldownTimer);
+        }
+
+        internal void ResetMeetingCountFromService()
+        {
+            _meetingCount = 0;
+        }
+
+        internal void SyncMeetingServiceFromController()
+        {
+            meetingService?.SyncStateFromController(emergencyMeetingsLeft, emergencyCooldownTimer, _meetingCount);
+        }
+
+        internal void SyncMeetingStartedWithService(string reason, ulong callerId, bool isEmergency)
+        {
+            meetingService?.SyncMeetingStartedFromController(
+                emergencyMeetingsLeft,
+                emergencyCooldownTimer,
+                _meetingCount,
+                reason,
+                callerId,
+                isEmergency);
+        }
+
+        private void PublishMeetingCalledEvent(ulong callerId, bool isEmergency)
+        {
+            gameEventBus?.Publish(new MeetingCalledEvent
+            {
+                CallerId = callerId,
+                IsEmergency = isEmergency,
+            });
+        }
+
+        private void PublishBodyReportedEvent(ulong reporterId, ulong victimId)
+        {
+            gameEventBus?.Publish(new BodyReportedEvent
+            {
+                ReporterId = reporterId,
+                VictimId = victimId,
+            });
+        }
+
         internal void AddBotPlayer(ulong clientId, string displayName, Vector3 spawn, OnlineProfession profession)
         {
             players[clientId] = new OnlinePlayerState(clientId, displayName, spawn, true, true, OnlineRole.Unassigned, profession, 0, true);
@@ -292,7 +343,7 @@ namespace GanglandUndercover.Online
         internal void SetKillCooldown(ulong clientId, float value) { if (killSystem != null) killSystem.killCooldowns[clientId] = value; }
         internal void SetAbilityCooldown(ulong clientId, float value) { abilityCooldowns[clientId] = value; }
         internal bool TryGetKillCooldown(ulong clientId, out float value) { if (killSystem != null) return killSystem.killCooldowns.TryGetValue(clientId, out value); value = 0f; return false; }
-        internal bool HasVoted(ulong clientId) => votes.ContainsKey(clientId);
+        internal bool HasVoted(ulong clientId) => votingService != null ? votingService.HasVoted(clientId) : votes.ContainsKey(clientId);
         /// <summary>B3: 通用破坏计时器设置（替代反射）</summary>
         public void ApplySabotageTimer(SabotageType type)
         {
@@ -808,6 +859,7 @@ namespace GanglandUndercover.Online
         {
             float deltaTime = Time.deltaTime;
             taskService.TickSabotageTimers(deltaTime);
+            sabotageService?.Tick(deltaTime);
 
             // Phase 2.4: 紧急任务触发检查与同步
             TickCriticalTaskTriggers();
@@ -816,6 +868,7 @@ namespace GanglandUndercover.Online
             if (emergencyCooldownTimer > 0f)
             {
                 emergencyCooldownTimer = Mathf.Max(0f, emergencyCooldownTimer - deltaTime);
+                SyncMeetingServiceFromController();
             }
 
             if (killSystem != null)
@@ -989,6 +1042,15 @@ namespace GanglandUndercover.Online
             taskService.ResetAllSabotageTimers();
             emergencyCooldownTimer = 0f;
             emergencyMeetingsLeft = ruleSet.EmergencyMeetingLimitFor(players.Count);
+            _meetingCount = 0;
+            if (meetingService != null)
+            {
+                meetingService.OnMatchStarted(players.Count);
+            }
+            else
+            {
+                SyncMeetingServiceFromController();
+            }
             aiActionGraceTimer = ruleSet.AiActionGraceSeconds;
             _cameraRig.SetSubject(LocalPreviewClientId);
             matchElapsedSeconds = 0f;
@@ -1135,232 +1197,28 @@ namespace GanglandUndercover.Online
 
         /// <summary>
         /// 捕获当前游戏状态的完整快照（供主机迁移使用）。
+        /// 实际逻辑已迁移到 MatchSnapshotService.Capture()。
         /// </summary>
         public GameStateSnapshot CaptureSnapshot()
         {
-            var snap = new GameStateSnapshot();
-
-            // ── 版本标记 ──
-            snap.Version = GameStateSnapshot.SNAPSHOT_VERSION;
-
-            // ── 全局状态 ──
-            snap.MatchStarted = matchStarted;
-            snap.Phase = phase;
-            snap.EvidenceScore = taskService.EvidenceScore;
-            snap.EvidenceTarget = taskService.EvidenceTarget;
-            snap.EmergencyMeetingsLeft = emergencyMeetingsLeft;
-            snap.EvidenceMilestoneIndex = evidenceMilestoneIndex;
-            snap.NextBodyId = killSystem.nextBodyId;
-            snap.RoomMinPlayers = roomMinPlayers;
-            snap.RoomMaxPlayers = roomMaxPlayers;
-            snap.RoomAutoFillAi = roomAutoFillAi;
-            snap.RevealRoleOnEject = revealRoleOnEject;
-            snap.ProximityVoiceEnabled = proximityVoiceEnabled;
-            snap.RoomName = roomName;
-            snap.ResultSummary = resultSummary;
-            snap.LastMeetingReason = lastMeetingReason;
-            snap.LastVoteOutcome = lastVoteOutcome;
-            snap.LastEvidenceEvent = lastEvidenceEvent;
-            snap.LastSabotageEvent = lastSabotageEvent;
-            snap.PhaseTimer = phaseTimer;
-            snap.BlackoutTimer = taskService.BlackoutTimer;
-            snap.LockdownTimer = taskService.LockdownTimer;
-            snap.CommunicationJamTimer = taskService.CommunicationJamTimer;
-            snap.EvidenceLeakTimer = taskService.EvidenceLeakTimer;
-            snap.EvidenceLeakAccumulator = taskService.EvidenceLeakAccumulator;
-            snap.PatrolAlertTimer = taskService.PatrolAlertTimer;
-            snap.EmergencyCooldownTimer = emergencyCooldownTimer;
-            snap.AiActionGraceTimer = aiActionGraceTimer;
-            snap.MatchElapsedSeconds = matchElapsedSeconds;
-
-            // ── 玩家状态 ──
-            snap.Players = new List<GameStateSnapshot.SnapshotPlayerEntry>(players.Count);
-            foreach (var p in players.Values)
-            {
-                snap.Players.Add(new GameStateSnapshot.SnapshotPlayerEntry
-                {
-                    ClientId = p.ClientId,
-                    DisplayName = p.DisplayName,
-                    Position = p.Position,
-                    Input = p.Input,
-                    Ready = p.Ready,
-                    Alive = p.Alive,
-                    IsBot = p.IsBot,
-                    PublicRole = p.PublicRole,
-                    Profession = p.Profession,
-                    KillCooldown = killSystem.killCooldowns.TryGetValue(p.ClientId, out float kd) ? kd : 0f,
-                    AbilityCooldown = abilityCooldowns.TryGetValue(p.ClientId, out float ac) ? ac : 0f,
-                    Suspicion = p.Suspicion,
-                });
-            }
-
-            // ── 私密角色 ──
-            snap.PrivateRoles = new List<GameStateSnapshot.SnapshotRoleEntry>(privateRoles.Count);
-            foreach (var kv in privateRoles)
-            {
-                snap.PrivateRoles.Add(new GameStateSnapshot.SnapshotRoleEntry { ClientId = kv.Key, Role = kv.Value });
-            }
-
-            // ── 任务 ──
-            snap.Tasks = new List<GameStateSnapshot.SnapshotTaskEntry>(tasks.Count);
-            foreach (var t in tasks)
-            {
-                snap.Tasks.Add(new GameStateSnapshot.SnapshotTaskEntry
-                {
-                    Id = t.Id, Name = t.Name, Position = t.Position,
-                    Progress = t.Progress, RequiredProgress = t.RequiredProgress,
-                    Completed = t.Completed, Sabotaged = t.Sabotaged,
-                });
-            }
-
-            // ── 尸体 ──
-            snap.Bodies = new List<GameStateSnapshot.SnapshotBodyEntry>(killSystem.bodies.Count);
-            foreach (var b in killSystem.bodies)
-            {
-                snap.Bodies.Add(new GameStateSnapshot.SnapshotBodyEntry
-                {
-                    Id = b.Id, VictimClientId = b.VictimClientId,
-                    Position = b.Position, Reported = b.Reported,
-                });
-            }
-
-            // ── 投票 ──
-            snap.Votes = new List<GameStateSnapshot.SnapshotVoteEntry>(votes.Count);
-            foreach (var v in votes)
-            {
-                snap.Votes.Add(new GameStateSnapshot.SnapshotVoteEntry { VoterClientId = v.Key, TargetClientId = v.Value });
-            }
-
-            // ── 案卷 ──
-            snap.CaseLog = new List<string>(caseLog);
-
-            // ── 冷却 ──
-            snap.KillCooldowns = OnlineMatchUtils.CooldownsToList(killSystem.killCooldowns);
-            snap.AbilityCooldowns = OnlineMatchUtils.CooldownsToList(abilityCooldowns);
-            snap.VentCooldowns = OnlineMatchUtils.CooldownsToList(ventCooldowns);
-            snap.BotThinkTimers = OnlineMatchUtils.CooldownsToList(_botController.ThinkTimers);
-            snap.BotVoteTimers = OnlineMatchUtils.CooldownsToList(_botController.VoteTimers);
-
-            // ── Bot 目标 ──
-            snap.BotTargets = new List<GameStateSnapshot.SnapshotTargetEntry>(_botController.Targets.Count);
-            foreach (var bt in _botController.Targets)
-            {
-                snap.BotTargets.Add(new GameStateSnapshot.SnapshotTargetEntry { ClientId = bt.Key, Target = bt.Value });
-            }
-
-            return snap;
+            return snapshotService.Capture();
         }
 
         /// <summary>
         /// 从快照恢复游戏状态（主机迁移时由新主机或客户端调用）。
+        /// 实际逻辑已迁移到 MatchSnapshotService.Restore()。
         /// </summary>
         public void RestoreFromSnapshot(GameStateSnapshot snap)
         {
-            // ── 版本兼容性检查 ──
-            if (snap.Version != GameStateSnapshot.SNAPSHOT_VERSION)
-            {
-                Debug.LogWarning(
-                    $"[RestoreFromSnapshot] 快照版本不匹配: 快照 v{snap.Version}, 当前 v{GameStateSnapshot.SNAPSHOT_VERSION}。" +
-                    "将尽力恢复，但部分状态可能存在差异。");
-            }
+            snapshotService.Restore(snap);
+        }
 
-            if (!snap.IsValid())
-            {
-                Debug.LogError("[RestoreFromSnapshot] 快照完整性检查失败，恢复后的状态可能不完整。");
-            }
-
-            // ── 全局状态 ──
-            matchStarted = snap.MatchStarted;
-            phase = snap.Phase;
-            taskService.EvidenceScore = snap.EvidenceScore;
-            taskService.EvidenceTarget = snap.EvidenceTarget;
-            emergencyMeetingsLeft = snap.EmergencyMeetingsLeft;
-            evidenceMilestoneIndex = snap.EvidenceMilestoneIndex;
-            killSystem.nextBodyId = snap.NextBodyId;
-            roomMinPlayers = snap.RoomMinPlayers;
-            roomMaxPlayers = snap.RoomMaxPlayers;
-            roomAutoFillAi = snap.RoomAutoFillAi;
-            revealRoleOnEject = snap.RevealRoleOnEject;
-            proximityVoiceEnabled = snap.ProximityVoiceEnabled;
-            roomName = snap.RoomName;
-            resultSummary = snap.ResultSummary;
-            lastMeetingReason = snap.LastMeetingReason;
-            lastVoteOutcome = snap.LastVoteOutcome;
-            lastEvidenceEvent = snap.LastEvidenceEvent;
-            lastSabotageEvent = snap.LastSabotageEvent;
-            phaseTimer = snap.PhaseTimer;
-            taskService.LoadSabotageTimersFromSnapshot(
-                snap.BlackoutTimer, snap.LockdownTimer, snap.CommunicationJamTimer,
-                snap.EvidenceLeakTimer, snap.EvidenceLeakAccumulator, snap.PatrolAlertTimer);
-            emergencyCooldownTimer = snap.EmergencyCooldownTimer;
-            aiActionGraceTimer = snap.AiActionGraceTimer;
-            matchElapsedSeconds = snap.MatchElapsedSeconds;
-
-            // ── 玩家状态 ──
-            players.Clear();
-            foreach (var p in snap.Players)
-            {
-                var state = new OnlinePlayerState(p.ClientId, p.DisplayName, p.Position, p.Ready, p.Alive, p.PublicRole, p.Profession, p.Suspicion, p.IsBot)
-                {
-                    Input = p.Input,
-                    KillCooldown = p.KillCooldown,
-                    AbilityCooldown = p.AbilityCooldown,
-                };
-                players[p.ClientId] = state;
-            }
-
-            // ── 私密角色 ──
-            privateRoles.Clear();
-            foreach (var r in snap.PrivateRoles)
-            {
-                privateRoles[r.ClientId] = r.Role;
-            }
-
-            // ── 任务 ──
-            tasks.Clear();
-            foreach (var t in snap.Tasks)
-            {
-                tasks.Add(new OnlineTaskState(t.Id, t.Name, t.Position, t.Progress, t.RequiredProgress, t.Completed, t.Sabotaged));
-            }
-
-            // ── 尸体 ──
-            killSystem.bodies.Clear();
-            foreach (var b in snap.Bodies)
-            {
-                killSystem.bodies.Add(new OnlineBodyState(b.Id, b.VictimClientId, b.Position, b.Reported));
-            }
-
-            // ── 投票 ──
-            votes.Clear();
-            foreach (var v in snap.Votes)
-            {
-                votes[v.VoterClientId] = v.TargetClientId;
-            }
-
-            // ── 案卷 ──
-            caseLog.Clear();
-            caseLog.AddRange(snap.CaseLog);
-
-            // ── 冷却 ──
-            OnlineMatchUtils.ListToCooldowns(killSystem.killCooldowns, snap.KillCooldowns);
-            OnlineMatchUtils.ListToCooldowns(abilityCooldowns, snap.AbilityCooldowns);
-            OnlineMatchUtils.ListToCooldowns(ventCooldowns, snap.VentCooldowns);
-            // Bot 计时器通过 bot 控制器恢复
-            if (snap.BotThinkTimers != null)
-                foreach (var entry in snap.BotThinkTimers)
-                    _botController.SetThinkTimer(entry.ClientId, entry.Value);
-            if (snap.BotVoteTimers != null)
-                foreach (var entry in snap.BotVoteTimers)
-                    _botController.SetVoteTimer(entry.ClientId, entry.Value);
-
-            // ── Bot 目标 ──
-            _botController.ClearTargets();
-            foreach (var bt in snap.BotTargets)
-            {
-                _botController.SetTarget(bt.ClientId, bt.Target);
-            }
-
-            // 更新本地位置
+        /// <summary>
+        /// 快照恢复后的收尾操作：更新本地位置、状态文本、启用 UI 同步。
+        /// 由 MatchSnapshotService.Restore() 调用。
+        /// </summary>
+        internal void OnSnapshotRestored()
+        {
             ulong localId = LocalClientId();
             if (players.TryGetValue(localId, out OnlinePlayerState localState))
             {
@@ -1370,7 +1228,6 @@ namespace GanglandUndercover.Online
             status = "主机迁移完成，对局已恢复。";
             AddCaseLog("主机迁移完成，新主机接管对局。");
 
-            // 确保 UI 刷新
             if (syncManager != null)
             {
                 syncManager.enabled = true;
@@ -1803,7 +1660,7 @@ namespace GanglandUndercover.Online
             if (emergencyMeetingsLeft <= 0 || emergencyCooldownTimer > 0f) return;
             emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
             emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
-            BeginMeeting(callerDisplayName + " 按下警署紧急铃");
+            BeginMeeting(callerDisplayName + " 按下警署紧急铃", 0UL, isEmergency: true);
             BroadcastSnapshot();
         }
 
@@ -1820,8 +1677,9 @@ namespace GanglandUndercover.Online
                 OnlineBodyState body = killSystem.bodies[bodyIndex];
                 body.Reported = true;
                 killSystem.bodies[bodyIndex] = body;
+                PublishBodyReportedEvent(senderClientId, body.VictimClientId);
                 AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
-                BeginMeeting(player.DisplayName + " 发现尸体并报案");
+                BeginMeeting(player.DisplayName + " 发现尸体并报案", senderClientId, isEmergency: false);
 
                 // M5.5: 证据板记录
                 LogEvidence(EvidenceCategory.Surveillance,
@@ -1857,7 +1715,7 @@ namespace GanglandUndercover.Online
             {
                 emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
                 emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
-                BeginMeeting(player.DisplayName + " 按下警署紧急铃");
+                BeginMeeting(player.DisplayName + " 按下警署紧急铃", senderClientId, isEmergency: true);
                 BroadcastSnapshot();
                 return;
             }
@@ -1866,7 +1724,7 @@ namespace GanglandUndercover.Online
             BroadcastSnapshot();
         }
 
-        internal void BeginMeeting(string reason)
+        internal void BeginMeeting(string reason, ulong callerId = 0, bool isEmergency = false)
         {
             phase = OnlineMatchPhase.Meeting;
             phaseTimer = ruleSet.MeetingIntroSecondsFor(players.Count);
@@ -1881,7 +1739,7 @@ namespace GanglandUndercover.Online
             activeTaskMistakes = 0;
             activeTaskFeedbackTimer = 0f;
             activeTaskFeedbackPositive = false;
-            votes.Clear();
+            votingService?.ClearVotes();
             lastMeetingReason = reason;
 
             List<ulong> ids = new List<ulong>(players.Keys);
@@ -1901,6 +1759,8 @@ namespace GanglandUndercover.Online
             status = reason + "。进入会议。";
             AddCaseLog(status);
             _meetingCount++;
+            SyncMeetingStartedWithService(reason, callerId, isEmergency);
+            PublishMeetingCalledEvent(callerId, isEmergency);
             syncManager?.OnMeetingBegan(reason, phase);
 
             // 激活聊天系统
@@ -1927,45 +1787,35 @@ namespace GanglandUndercover.Online
 
         internal void ApplyVote(ulong voterClientId, ulong targetClientId)
         {
-            if (phase != OnlineMatchPhase.Meeting && phase != OnlineMatchPhase.Voting)
+            // 委托给 VotingService 进行验证和记录
+            if (votingService == null || !votingService.ApplyVote(voterClientId, targetClientId))
             {
                 return;
             }
 
-            if (!players.TryGetValue(voterClientId, out OnlinePlayerState voter) || !voter.Alive)
+            // 首次投票 → 进入投票阶段
+            if (phase == OnlineMatchPhase.Meeting)
             {
-                return;
+                phase = OnlineMatchPhase.Voting;
+                phaseTimer = Mathf.Max(phaseTimer, 6f);
             }
 
-            if (targetClientId != SkipVoteTarget)
-            {
-                if (!players.TryGetValue(targetClientId, out OnlinePlayerState target) || !target.Alive)
-                {
-                    return;
-                }
-            }
-
-            phase = OnlineMatchPhase.Voting;
-            phaseTimer = Mathf.Max(phaseTimer, 6f);
-            votes[voterClientId] = targetClientId;
             // C2-2: Register as evidence accusation for vote weight bonus
             if (targetClientId != SkipVoteTarget)
                 AccusePlayer(voterClientId, targetClientId);
-            // SecretVote: hide who the voter voted for
+
+            // 构建状态消息
+            if (!players.TryGetValue(voterClientId, out OnlinePlayerState voter)) return;
             bool hasSecretVote = ruleSet != null && ruleSet.HasAbility(voter.Profession, AbilityType.SecretVote);
-            if (hasSecretVote)
-            {
-                status = voter.DisplayName + " 秘密投票";
-            }
-            else
-            {
-                status = voter.DisplayName + (targetClientId == SkipVoteTarget ? " 已投票跳过。" : " 已投票给 " + players[targetClientId].DisplayName + "。");
-            }
+            status = hasSecretVote
+                ? voter.DisplayName + " 秘密投票"
+                : voter.DisplayName + (targetClientId == SkipVoteTarget ? " 已投票跳过。" : " 已投票给 " + players[targetClientId].DisplayName + "。");
             AddCaseLog(status);
             syncManager?.OnVoteCast(voterClientId, targetClientId);
             PlayCue("vote");
 
-            if (votes.Count >= CountAlivePlayers())
+            // 所有存活玩家已投票 → 立即结算
+            if (votingService.AllVoted)
             {
                 ResolveVotes();
             }
@@ -1982,54 +1832,25 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            Dictionary<ulong, int> tally = new Dictionary<ulong, int>();
-            int skipVotes = 0;
-
-            foreach (ulong targetClientId in votes.Values)
-            {
-                if (targetClientId == SkipVoteTarget)
+            // 委托给 VotingService 进行计票和结果计算
+            var resolution = votingService != null
+                ? votingService.ResolveVotes()
+                : new Services.VotingService.VoteResolution
                 {
-                    skipVotes++;
-                    continue;
-                }
+                    EjectedClientId = SkipVoteTarget,
+                    IsTie = false,
+                    Tally = new Dictionary<ulong, int>(),
+                    SkipVotes = 0,
+                };
 
-                tally[targetClientId] = tally.TryGetValue(targetClientId, out int count) ? count + 1 : 1;
-            }
+            ulong ejectedClientId = resolution.EjectedClientId;
+            bool tied = resolution.IsTie;
+            var tally = resolution.Tally;
+            int skipVotes = resolution.SkipVotes;
 
-            // C2-2: Apply evidence chain accusation weight bonus (+2 per mid-strength evidence chain)
-            var accusedList = new List<ulong>(tally.Keys);
-            foreach (var accused in accusedList)
-            {
-                int bonus = GetAccusationWeightBonus(accused);
-                if (bonus > 0) tally[accused] += bonus;
-            }
-
-            ulong ejectedClientId = SkipVoteTarget;
-            int bestVotes = 0;
-            bool tied = false;
-
-            if (skipVotes > 0)
-            {
-                bestVotes = skipVotes;
-            }
-
-            foreach (KeyValuePair<ulong, int> pair in tally)
-            {
-                if (pair.Value > bestVotes)
-                {
-                    ejectedClientId = pair.Key;
-                    bestVotes = pair.Value;
-                    tied = false;
-                }
-                else if (pair.Value == bestVotes)
-                {
-                    tied = true;
-                }
-            }
-
-            votes.Clear();
             phaseTimer = 0f;
 
+            // 无人出局（skip/tie/无票）
             if (ejectedClientId == SkipVoteTarget || tied)
             {
                 syncManager?.OnMeetingResolved(SkipVoteTarget, tied, tally);
@@ -2055,6 +1876,7 @@ namespace GanglandUndercover.Online
                 }
 
                 players[ejectedClientId] = ejected;
+                int bestVotes = tally.TryGetValue(ejectedClientId, out int v) ? v : 0;
                 status = revealRoleOnEject
                     ? ejected.DisplayName + " 被投出局，身份是：" + OnlineMatchUtils.RoleName(ejected.PublicRole) + "。"
                     : ejected.DisplayName + " 被投出局，身份暂不公开。";
@@ -2235,6 +2057,7 @@ namespace GanglandUndercover.Online
             phaseTimer = 0f;
             taskService.ResetAllSabotageTimers();
             emergencyCooldownTimer = 0f;
+            SyncMeetingServiceFromController();
             aiActionGraceTimer = 0f;
             lastMeetingReason = "尚未召开会议。";
             lastVoteOutcome = "尚未投票。";
@@ -3294,6 +3117,15 @@ namespace GanglandUndercover.Online
             activeTaskCharge = 0f;
             submittingActiveTask = false;
             emergencyMeetingsLeft = 0;
+            _meetingCount = 0;
+            if (meetingService != null)
+            {
+                meetingService.OnMatchReset();
+            }
+            else
+            {
+                SyncMeetingServiceFromController();
+            }
             phaseTimer = 0f;
             resultSummary = "尚未结算。";
             matchElapsedSeconds = 0f;

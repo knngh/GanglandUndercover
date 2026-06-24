@@ -29,6 +29,8 @@ namespace GanglandUndercover.Online.Services
         [Tooltip("事件总线引用")]
         [SerializeField] private SimpleGameEventBus eventBus;
 
+        private SimpleGameEventBus subscribedEventBus;
+
         // ─── 冷却状态 ──────────────────────────────────────────
 
         /// <summary>各类型破坏的剩余活跃时间（秒）。> 0 表示该破坏正在生效。</summary>
@@ -80,18 +82,12 @@ namespace GanglandUndercover.Online.Services
 
         private void OnEnable()
         {
-            if (eventBus != null)
-            {
-                eventBus.Subscribe<TaskCompletedEvent>(OnTaskCompleted);
-            }
+            SubscribeToEventBus();
         }
 
         private void OnDisable()
         {
-            if (eventBus != null)
-            {
-                eventBus.Unsubscribe<TaskCompletedEvent>(OnTaskCompleted);
-            }
+            UnsubscribeFromEventBus();
         }
 
         // ─── 公开 API ──────────────────────────────────────────
@@ -102,7 +98,18 @@ namespace GanglandUndercover.Online.Services
         public void Initialize(OnlineMatchController matchController, IGameEventBus bus)
         {
             controller = matchController;
-            eventBus = bus as SimpleGameEventBus ?? SimpleGameEventBus.Instance;
+            SimpleGameEventBus nextBus = bus as SimpleGameEventBus ?? SimpleGameEventBus.Instance;
+            if (eventBus != nextBus)
+            {
+                UnsubscribeFromEventBus();
+                eventBus = nextBus;
+            }
+            else
+            {
+                eventBus = nextBus;
+            }
+
+            SubscribeToEventBus();
         }
 
         /// <summary>
@@ -260,11 +267,36 @@ namespace GanglandUndercover.Online.Services
             eventBus?.Publish(new SabotageResolvedEvent { Type = type });
         }
 
-        /// <summary>任务完成时检查是否修复对应变化的破坏。</summary>
+        private void SubscribeToEventBus()
+        {
+            if (eventBus == null || subscribedEventBus == eventBus)
+            {
+                return;
+            }
+
+            eventBus.Subscribe<TaskCompletedEvent>(OnTaskCompleted);
+            subscribedEventBus = eventBus;
+        }
+
+        private void UnsubscribeFromEventBus()
+        {
+            if (subscribedEventBus == null)
+            {
+                return;
+            }
+
+            subscribedEventBus.Unsubscribe<TaskCompletedEvent>(OnTaskCompleted);
+            subscribedEventBus = null;
+        }
+
+        /// <summary>任务完成时检查是否修复对应类型的破坏。</summary>
         private void OnTaskCompleted(TaskCompletedEvent evt)
         {
-            // TODO: 根据 taskId 映射到 SabotageType，调用 RepairSabotage
-            // 映射逻辑来自 OnlineMatchController.SabotageForTask()
+            SabotageType type = OnlineTaskService.SabotageForTask(evt.TaskIndex);
+            if (type != SabotageType.None)
+            {
+                RepairSabotage(type);
+            }
         }
 
         /// <summary>
@@ -272,34 +304,37 @@ namespace GanglandUndercover.Online.Services
         /// </summary>
         private float GetSabotageDuration(SabotageType type)
         {
-            // TODO: 接入 OnlineRuleSet 的具体配置字段
-            // 当前回退值与 OnlineTaskService 中的计时器逻辑保持一致
+            if (controller?.RuleSet != null)
+            {
+                switch (type)
+                {
+                    case SabotageType.Blackout:       return controller.RuleSet.BlackoutSeconds;
+                    case SabotageType.Lockdown:        return controller.RuleSet.LockdownSeconds;
+                    case SabotageType.Communications:  return controller.RuleSet.CommunicationJamSeconds;
+                    case SabotageType.EvidenceLeak:    return controller.RuleSet.EvidenceLeakSeconds;
+                    case SabotageType.PatrolAlert:     return controller.RuleSet.PatrolAlertSeconds;
+                }
+            }
+            // RuleSet 不可用时的回退值
             switch (type)
             {
-                case SabotageType.Blackout: return 30f;
-                case SabotageType.Lockdown: return 45f;
-                case SabotageType.Communications: return 40f;
-                case SabotageType.EvidenceLeak: return 35f;
-                case SabotageType.PatrolAlert: return 25f;
+                case SabotageType.Blackout: return 28f;
+                case SabotageType.Lockdown: return 32f;
+                case SabotageType.Communications: return 30f;
+                case SabotageType.EvidenceLeak: return 36f;
+                case SabotageType.PatrolAlert: return 30f;
                 default: return 30f;
             }
         }
 
         /// <summary>
         /// 获取破坏结束后的额外冷却时间。
+        /// 为基础持续时间的 50%，最低 10 秒。
         /// </summary>
         private float GetSabotageExtraCooldown(SabotageType type)
         {
-            // TODO: 接入 OnlineRuleSet 的具体配置字段
-            switch (type)
-            {
-                case SabotageType.Blackout: return 15f;
-                case SabotageType.Lockdown: return 20f;
-                case SabotageType.Communications: return 15f;
-                case SabotageType.EvidenceLeak: return 10f;
-                case SabotageType.PatrolAlert: return 10f;
-                default: return 15f;
-            }
+            float duration = GetSabotageDuration(type);
+            return Mathf.Max(10f, duration * 0.5f);
         }
     }
 }

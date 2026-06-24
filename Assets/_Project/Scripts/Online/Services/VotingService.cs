@@ -6,37 +6,58 @@ using GanglandUndercover.Core;
 namespace GanglandUndercover.Online.Services
 {
     /// <summary>
-    /// VotingService — 投票系统服务。
-    /// 负责投票发起、计票、淘汰判定、skip vote 处理、投票结果广播。
-    /// 从 OnlineMatchController.Gameplay.cs 的投票逻辑中提取。
-    /// 
+    /// VotingService — 投票系统服务（纯逻辑层）。
+    ///
     /// 职责：
     /// - 接收并记录玩家投票（含 skip vote）
-    /// - 计票并判定淘汰结果（含 tie / majority）
-    /// - 通过 IGameEventBus 发布 VoteSubmittedEvent / VoteResultEvent
-    /// - 与 MeetingService 衔接（会议结束 → 进入投票 → 投票结束 → 会议结束）
+    /// - 投票合法性验证
+    /// - 计票并计算淘汰结果（含 tie / majority / 证据链权重加成）
+    /// - 投票记录管理（清除、断连清理、快照恢复）
+    ///
+    /// 注意：本服务不执行任何游戏状态变更（如淘汰玩家、切换阶段）。
+    /// 所有副作用由 OnlineMatchController 在收到 VoteResolution 后处理。
     /// </summary>
     public sealed class VotingService : MonoBehaviour
     {
+        // ─── 结果类型 ──────────────────────────────────────────
+
+        /// <summary>投票结算结果（纯数据，无副作用）。</summary>
+        public struct VoteResolution
+        {
+            /// <summary>被淘汰玩家的 ClientId（SkipVoteTarget = 无人淘汰）。</summary>
+            public ulong EjectedClientId;
+            /// <summary>是否平局。</summary>
+            public bool IsTie;
+            /// <summary>每位被投玩家的得票数。</summary>
+            public Dictionary<ulong, int> Tally;
+            /// <summary>跳过票数。</summary>
+            public int SkipVotes;
+        }
+
         // ─── 配置引用 ──────────────────────────────────────────
 
         [Header("── 依赖引用 ──")]
-        [Tooltip("OnlineMatchController 引用，用于访问共享状态（players / ruleSet / votes 等）")]
+        [Tooltip("OnlineMatchController 引用，用于访问共享状态（players / ruleSet 等）")]
         [SerializeField] private OnlineMatchController controller;
 
         [Tooltip("事件总线引用，用于发布/订阅游戏事件")]
         [SerializeField] private SimpleGameEventBus eventBus;
 
+        private SimpleGameEventBus subscribedEventBus;
+
         // ─── 内部状态 ──────────────────────────────────────────
 
         /// <summary>本轮投票记录（voter → target，ulong.MaxValue 表示 skip）。</summary>
-        private readonly Dictionary<ulong, ulong> votes = new Dictionary<ulong, ulong>();
+        private Dictionary<ulong, ulong> votes = new Dictionary<ulong, ulong>();
 
         /// <summary>投票记录只读访问（供 OnlineMatchController 序列化快照）。</summary>
         public IReadOnlyDictionary<ulong, ulong> Votes => votes;
 
-        /// <summary>投票目标为 skip 的哨兵值（与 OnlineMatchController.SkipVoteTarget 保持一致）。</summary>
+        /// <summary>投票目标为 skip 的哨兵值。</summary>
         public const ulong SkipVoteTarget = ulong.MaxValue;
+
+        /// <summary>是否所有存活玩家都已投票。</summary>
+        public bool AllVoted => controller != null && votes.Count >= CountAlivePlayers();
 
         // ─── 生命周期 ──────────────────────────────────────────
 
@@ -50,18 +71,12 @@ namespace GanglandUndercover.Online.Services
 
         private void OnEnable()
         {
-            if (eventBus != null)
-            {
-                eventBus.Subscribe<MeetingCalledEvent>(OnMeetingCalled);
-            }
+            SubscribeToEventBus();
         }
 
         private void OnDisable()
         {
-            if (eventBus != null)
-            {
-                eventBus.Unsubscribe<MeetingCalledEvent>(OnMeetingCalled);
-            }
+            UnsubscribeFromEventBus();
         }
 
         // ─── 公开 API ──────────────────────────────────────────
@@ -72,30 +87,40 @@ namespace GanglandUndercover.Online.Services
         public void Initialize(OnlineMatchController matchController, IGameEventBus bus)
         {
             controller = matchController;
-            eventBus = bus as SimpleGameEventBus ?? SimpleGameEventBus.Instance;
+            SimpleGameEventBus nextBus = bus as SimpleGameEventBus ?? SimpleGameEventBus.Instance;
+            if (eventBus != nextBus)
+            {
+                UnsubscribeFromEventBus();
+                eventBus = nextBus;
+            }
+            else
+            {
+                eventBus = nextBus;
+            }
+
+            SubscribeToEventBus();
         }
 
         /// <summary>
-        /// 应用投票。由 OnlineMatchController.ApplyVote 或网络消息处理器调用。
-        /// 验证投票合法性后记录，并通过事件总线发布 VoteSubmittedEvent。
-        /// 若所有存活玩家已投票，自动触发 ResolveVotes。
+        /// 应用投票（纯逻辑，无副作用）。
+        /// 验证投票合法性后记录投票，发布 VoteSubmittedEvent。
+        /// 返回 true 表示投票被接受。
+        /// 注意：不自动触发 ResolveVotes，由 Controller 决定是否结算。
         /// </summary>
-        /// <param name="voterClientId">投票者 ClientId。</param>
-        /// <param name="targetClientId">目标 ClientId（ulong.MaxValue = skip）。</param>
-        public void ApplyVote(ulong voterClientId, ulong targetClientId)
+        public bool ApplyVote(ulong voterClientId, ulong targetClientId)
         {
-            if (controller == null) return;
+            if (controller == null) return false;
 
             // 仅在会议或投票阶段接受投票
             if (controller.Phase != OnlineMatchPhase.Meeting && controller.Phase != OnlineMatchPhase.Voting)
             {
-                return;
+                return false;
             }
 
             // 验证投票者合法性
             if (!controller.Players.TryGetValue(voterClientId, out OnlinePlayerState voter) || !voter.Alive)
             {
-                return;
+                return false;
             }
 
             // 验证目标合法性（skip 除外）
@@ -103,7 +128,7 @@ namespace GanglandUndercover.Online.Services
             {
                 if (!controller.Players.TryGetValue(targetClientId, out OnlinePlayerState target) || !target.Alive)
                 {
-                    return;
+                    return false;
                 }
             }
 
@@ -118,27 +143,31 @@ namespace GanglandUndercover.Online.Services
                 IsSkip = targetClientId == SkipVoteTarget,
             });
 
-            // 检查是否所有存活玩家已投票
-            int aliveCount = CountAlivePlayers();
-            if (votes.Count >= aliveCount)
-            {
-                ResolveVotes();
-            }
+            return true;
         }
 
         /// <summary>
-        /// 计票并判定淘汰结果。
+        /// 计票并计算淘汰结果（纯计算，无副作用）。
         /// 包含证据链权重加成（来自 EvidenceService 的指控数据）。
-        /// 结果通过 VoteResultEvent 发布。
+        /// 返回 VoteResolution 结构体，由 Controller 执行实际淘汰。
+        /// 调用后自动清除投票记录。
         /// </summary>
-        public void ResolveVotes()
+        public VoteResolution ResolveVotes()
         {
-            if (controller == null) return;
+            var empty = new VoteResolution
+            {
+                EjectedClientId = SkipVoteTarget,
+                IsTie = false,
+                Tally = new Dictionary<ulong, int>(),
+                SkipVotes = 0,
+            };
+
+            if (controller == null) return empty;
 
             // 仅在会议或投票阶段结算
             if (controller.Phase != OnlineMatchPhase.Voting && controller.Phase != OnlineMatchPhase.Meeting)
             {
-                return;
+                return empty;
             }
 
             Dictionary<ulong, int> tally = new Dictionary<ulong, int>();
@@ -195,33 +224,18 @@ namespace GanglandUndercover.Online.Services
                 ejectedClientId = SkipVoteTarget;
             }
 
-            // 构建投票计数数组
-            int[] voteCounts = new int[tally.Count + 1]; // +1 for skip
-            int idx = 0;
-            foreach (var kv in tally)
+            var result = new VoteResolution
             {
-                voteCounts[idx++] = kv.Value;
-            }
-            voteCounts[idx] = skipVotes;
-
-            // 淘汰被选中玩家
-            if (ejectedClientId != SkipVoteTarget)
-            {
-                if (controller.Players.TryGetValue(ejectedClientId, out OnlinePlayerState ejected))
-                {
-                    ejected.Alive = false;
-                    ejected.Input = Vector2.zero;
-                    controller.Players[ejectedClientId] = ejected;
-                }
-            }
-
-            // 发布投票结果事件
-            eventBus?.Publish(new VoteResultEvent
-            {
-                EjectedId = ejectedClientId,
+                EjectedClientId = ejectedClientId,
                 IsTie = tied,
-                VoteCounts = voteCounts,
-            });
+                Tally = new Dictionary<ulong, int>(tally),
+                SkipVotes = skipVotes,
+            };
+
+            // 清除投票记录（新一轮）
+            votes.Clear();
+
+            return result;
         }
 
         /// <summary>
@@ -259,12 +273,59 @@ namespace GanglandUndercover.Online.Services
             }
         }
 
+        /// <summary>
+        /// 绑定外部投票字典（由 OnlineMatchController 调用）。
+        /// 使 VotingService 与 Controller 共享同一份 votes 引用，
+        /// 确保反射访问 controller.votes 和 VotingService 读取到相同数据。
+        /// </summary>
+        internal void BindVotes(Dictionary<ulong, ulong> controllerVotes)
+        {
+            if (controllerVotes != null)
+            {
+                votes = controllerVotes;
+            }
+        }
+
+        /// <summary>
+        /// 从快照数据恢复投票记录（主机迁移 / 客户端同步用）。
+        /// </summary>
+        public void LoadVotes(IEnumerable<KeyValuePair<ulong, ulong>> snapshotVotes)
+        {
+            votes.Clear();
+            foreach (var kv in snapshotVotes)
+            {
+                votes[kv.Key] = kv.Value;
+            }
+        }
+
         // ─── 内部方法 ──────────────────────────────────────────
 
         /// <summary>会议开始时清空投票记录。</summary>
         private void OnMeetingCalled(MeetingCalledEvent evt)
         {
             ClearVotes();
+        }
+
+        private void SubscribeToEventBus()
+        {
+            if (eventBus == null || subscribedEventBus == eventBus)
+            {
+                return;
+            }
+
+            eventBus.Subscribe<MeetingCalledEvent>(OnMeetingCalled);
+            subscribedEventBus = eventBus;
+        }
+
+        private void UnsubscribeFromEventBus()
+        {
+            if (subscribedEventBus == null)
+            {
+                return;
+            }
+
+            subscribedEventBus.Unsubscribe<MeetingCalledEvent>(OnMeetingCalled);
+            subscribedEventBus = null;
         }
 
         /// <summary>统计存活玩家数。</summary>

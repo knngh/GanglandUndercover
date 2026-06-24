@@ -1,6 +1,6 @@
 # Gangland Undercover — KNOWN_ISSUES.md
 
-> **最后更新**: 2026-06-09 12:15 | **版本**: v0.2.0-dev
+> **最后更新**: 2026-06-24 11:05 | **版本**: v0.2.1-dev
 
 ---
 
@@ -24,17 +24,22 @@
 ### P2-2: Bot 不使用暗线通道
 - **修复**: OnlineBotController 添加 vent 寻路逻辑
 
-### P2-3: 双端恶意 Client 覆盖不足 ⏳
-- **影响**: EditMode 已覆盖 Task/Repair 越权拒绝、Chat/CharacterCustom payload 安全，但 Chat/Camera/CharacterCustom 仍缺真实双进程恶意消息注入测试
-- **修复**: 增加双进程或测试 harness，伪造 Chat/Camera/CharacterCustom 入站消息并断言服务端拒绝或安全转发
+### P2-3: Relay 真双进程恶意 Client 注入仍需实测 ⏳
+- **已关闭部分**: Chat 结构化 payload、ClientProfile 畸形/超长 payload、Camera alive/range/技能授权、CharacterCustom malformed/empty/oversized/owner 校验均已有 EditMode 或单进程 NGO PlayMode 门禁。`GanglandClientProfile` 畸形读取曾可触发异常，现已改为 bounded UTF-8 解析并忽略非法 payload。
+- **剩余影响**: 真实 Relay 双进程下的恶意 CharacterCustom/Chat/Camera 注入还没有独立进程级 harness，当前覆盖不能证明云 Relay 传输链路中的伪造客户端行为全部被服务端拒绝。
+- **下一步**: 扩展 `run-relay-twoprocess.sh` 或新增双进程测试角色，注入恶意 CharacterCustom/Chat/Camera 入站消息并断言服务端拒绝、截断或只向合法 owner 安全转发。
 
 ---
 
 ## 低优先级 (P3)
 
 ### P3-1: OnGUI 遗留代码
-### P3-2: 网络 Host 迁移测试不足
-### P3-3: CharacterCustom 转发行为仍需双端实测确认
+### P3-2: 网络 Host 迁移 election 测试不足
+- **已关闭部分**: PlayMode 已覆盖 Host 断线可见恢复提示；`MatchSnapshotService` 已覆盖玩家、任务、尸体、投票、阶段、倒计时和 `ReportCooldownTimer` 的 capture/restore。
+- **剩余影响**: 真实多客户端 Host migration election、房主重选后继续开局/会议/投票的端到端一致性仍未自动化验证。
+- **下一步**: 新增多客户端迁移场景，断开原 Host 后验证新 Host 接管、快照恢复、玩家状态和会议/投票继续一致。
+
+### P3-3: CharacterCustom Relay 转发行为仍需双端实测确认
 
 ---
 
@@ -64,3 +69,8 @@
 - ✅ P1-3 切片C: Modern Exteriors room-props 精选导入；金融/电房/证物库/诊所/夜市/后巷加入真实房间道具 sprite，尸体击杀现场与黑灯场景加入命名 VFX 门槛
 - ✅ P1-3 切片D: Modern Office room-props 精选导入；监控室、指挥点、证物库、诊所和舰内房间新增 16 个真实室内办公/医疗道具 sprite，room prop 门槛提升到 30
 - ✅ P1-3 切片E: Modern Interiors room-props 精选导入；海关、茶餐厅、夜市、金融、电房、天台、后巷、诊所、舰内各房间和舰桥新增医疗/安防/生活类真实室内道具 sprite，room prop 门槛提升到 75
+- ✅ PLAN8 PlayMode 回归门禁: 会议事件、尸体报案路径、快照恢复生命周期和断线释放回归已通过
+- ✅ PLAN9 恶意消息边界: Chat/ClientProfile/Camera/CharacterCustom 边界门禁已补齐，畸形 ClientProfile 不再触发异常
+- ✅ PLAN10 重连/Host 状态门禁: Host 断线恢复提示和快照恢复状态门禁已补齐，`ReportCooldownTimer` capture/restore 漏写已修复
+- ✅ PLAN11 Alpha pacing: 6/8/10 人角色配比、任务量、会议/投票/击杀/报案冷却和目标局长门禁已通过
+- ✅ PLAN12 完整验证: EditMode 115/115 PASS；PlayMode 11/13 PASS，2 ignored 为 Relay 双进程角色测试

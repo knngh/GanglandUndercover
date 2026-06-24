@@ -30,6 +30,7 @@ Assets/_Project/Art/ThirdParty/
 Assets/_Project/Resources/AssetStore/
 
 # Batchmode 验证产物（测试结果 / 日志），不入仓库
+/ci-logs/
 /test-results.xml
 /playmode-results.xml
 /unity-smoke.log

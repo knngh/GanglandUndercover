@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Text;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Netcode;
@@ -20,6 +21,7 @@ namespace GanglandUndercover.PlayTests
 
         private const string ClientStateMessage = "GanglandClientState";
         private const string ClientActionMessage = "GanglandClientAction";
+        private const string ClientProfileMessage = "GanglandClientProfile";
         private const string ServerSnapshotMessage = "GanglandServerSnapshot";
         private const string RoleAssignMessage = "GanglandRoleAssign";
         private const string ChatSendMessage = "GanglandChatSend";
@@ -103,6 +105,17 @@ namespace GanglandUndercover.PlayTests
             yield return WaitUntilOrFail(
                 () => GetPlayerReady(clientId) && Approximately(GetPlayerPosition(clientId), acceptedPosition),
                 "合法 ClientState 应通过真实 named-message 路径更新服务器玩家状态。");
+
+            SendClientProfileFromClient("超长玩家代号ABCDEFGHIJKLMNOPQRSTUV");
+            yield return WaitUntilOrFail(
+                () => GetPlayerDisplayName(clientId).Length <= 16 && GetPlayerDisplayName(clientId).StartsWith("超长玩家代号"),
+                "合法但过长的 ClientProfile 应被服务器截断为安全显示名。");
+
+            string stableDisplayName = GetPlayerDisplayName(clientId);
+            SendMalformedClientProfileFromClient();
+            yield return RunFrames(8);
+            Assert.AreEqual(stableDisplayName, GetPlayerDisplayName(clientId),
+                "畸形 ClientProfile payload 不应覆盖服务器玩家显示名。");
 
             Vector3 stablePosition = GetPlayerPosition(clientId);
             Vector2 stableInput = GetPlayerInput(clientId);
@@ -285,6 +298,27 @@ namespace GanglandUndercover.PlayTests
             _clientNetworkManager.CustomMessagingManager.SendNamedMessage(ClientActionMessage, NetworkManager.ServerClientId, writer);
         }
 
+        private void SendClientProfileFromClient(string displayName)
+        {
+            FastBufferWriter writer = new FastBufferWriter(512, Allocator.Temp);
+            try
+            {
+                WriteBoundedUtf8String(ref writer, displayName);
+                _clientNetworkManager.CustomMessagingManager.SendNamedMessage(ClientProfileMessage, NetworkManager.ServerClientId, writer);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+        }
+
+        private void SendMalformedClientProfileFromClient()
+        {
+            using FastBufferWriter writer = new FastBufferWriter(16, Allocator.Temp);
+            writer.WriteValueSafe(4096);
+            _clientNetworkManager.CustomMessagingManager.SendNamedMessage(ClientProfileMessage, NetworkManager.ServerClientId, writer);
+        }
+
         private void SendRoleAssignFromClient(int roleValue)
         {
             using FastBufferWriter writer = new FastBufferWriter(16, Allocator.Temp);
@@ -433,6 +467,12 @@ namespace GanglandUndercover.PlayTests
             return (bool)state.GetType().GetField("Ready").GetValue(state);
         }
 
+        private string GetPlayerDisplayName(ulong clientId)
+        {
+            object state = GetPlayerState(clientId);
+            return (string)state.GetType().GetField("DisplayName").GetValue(state);
+        }
+
         private void ClearVotes()
         {
             object votes = GetField("votes");
@@ -489,6 +529,16 @@ namespace GanglandUndercover.PlayTests
 
         private static Type RuntimeType(string fullName)
             => Type.GetType(fullName + ", " + RuntimeAssemblyName, throwOnError: true);
+
+        private static void WriteBoundedUtf8String(ref FastBufferWriter writer, string value)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+            writer.WriteValueSafe(bytes.Length);
+            if (bytes.Length > 0)
+            {
+                writer.WriteBytesSafe(bytes);
+            }
+        }
 
         private static bool Approximately(Vector3 actual, Vector3 expected)
             => Vector3.SqrMagnitude(actual - expected) < 0.0001f;

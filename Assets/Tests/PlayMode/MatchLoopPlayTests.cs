@@ -223,6 +223,93 @@ namespace GanglandUndercover.PlayTests
             Assert.IsTrue(shutdownButton.interactable, "Host 断开后离开房间按钮仍应可点，用于清理旧会话并返回主菜单。");
         }
 
+        [UnityTest]
+        public IEnumerator MeetingEvents_PublishDuringPlayModeEmergencyAndBodyReportPaths()
+        {
+            yield return null;
+
+            SetField("localPreviewMode", true);
+            SetPhase("Action");
+            SetField("emergencyMeetingsLeft", 1);
+            SetField("emergencyCooldownTimer", 0f);
+            SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+            SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+            InvokePrivate("SyncMeetingServiceFromController");
+            EventProbe emergencyProbe = AttachEventProbe();
+
+            InvokePublic("CallEmergencyMeeting", "玩家1");
+            yield return null;
+
+            Assert.AreEqual(1, emergencyProbe.MeetingCalledCount,
+                "PlayMode 下公开紧急会议路径也必须发布 MeetingCalledEvent。");
+            Assert.IsTrue(emergencyProbe.LastMeetingCalledIsEmergency);
+            Assert.AreEqual(0, emergencyProbe.BodyReportedCount);
+
+            SetPhase("Action");
+            SetField("emergencyCooldownTimer", 0f);
+            SetField("emergencyMeetingsLeft", 1);
+            SetKillSystemField("reportCooldownTimer", 0f);
+            ClearBodies();
+            SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+            SetPlayer(2UL, Vector3.right, alive: false, roleName: "Gang");
+            AddBody(7, 2UL, Vector3.zero, reported: false);
+            EventProbe reportProbe = AttachEventProbe();
+
+            object player = GetPlayerState(1UL);
+            InvokePrivate("TryReportOrEmergency", 1UL, player);
+            yield return null;
+
+            Assert.AreEqual(1, reportProbe.BodyReportedCount,
+                "PlayMode 下尸体报告路径必须发布 BodyReportedEvent。");
+            Assert.AreEqual(1UL, reportProbe.LastBodyReporterId);
+            Assert.AreEqual(2UL, reportProbe.LastBodyVictimId);
+            Assert.AreEqual(1, reportProbe.MeetingCalledCount);
+            Assert.IsFalse(reportProbe.LastMeetingCalledIsEmergency);
+            Assert.AreEqual(1UL, reportProbe.LastMeetingCallerId);
+        }
+
+        [UnityTest]
+        public IEnumerator SnapshotRestore_RestoresGameplayStateDuringPlayModeLifecycle()
+        {
+            yield return null;
+
+            SetField("matchStarted", true);
+            SetPhase("Voting");
+            SetPlayer(1UL, new Vector3(1f, 2f, 0f), alive: true, roleName: "Police");
+            SetPlayer(2UL, new Vector3(3f, 4f, 0f), alive: false, roleName: "Gang");
+            AddBody(4, 2UL, new Vector3(5f, 6f, 0f), reported: false);
+            AddVote(1UL, 2UL);
+            SetField("phaseTimer", 17f);
+            SetField("emergencyCooldownTimer", 9f);
+            SetKillSystemField("reportCooldownTimer", 3f);
+
+            object snapshot = InvokePublicWithResult("CaptureSnapshot");
+
+            ClearPlayers();
+            ClearBodies();
+            ClearVotes();
+            SetField("matchStarted", false);
+            SetPhase("Lobby");
+            SetField("phaseTimer", 0f);
+            SetField("emergencyCooldownTimer", 0f);
+            SetKillSystemField("reportCooldownTimer", 0f);
+
+            InvokePublic("RestoreFromSnapshot", snapshot);
+            yield return null;
+
+            Assert.IsTrue(GetBool("MatchStarted"), "PlayMode 生命周期下恢复快照后对局应保持已开始。");
+            AssertPhase("Voting", "PlayMode 生命周期下恢复快照后阶段应恢复。");
+            Assert.AreEqual(new Vector3(1f, 2f, 0f), GetPlayerPosition(1UL));
+            Assert.IsFalse(GetPlayerAlive(2UL), "死亡状态必须随快照恢复。");
+            Assert.AreEqual(1, GetCollectionCount(GetProp("Bodies")), "尸体列表必须随快照恢复。");
+            Assert.AreEqual(1, GetCollectionCount(GetField("votes")), "投票表必须随快照恢复。");
+            Assert.AreEqual(17f, GetFloat("PhaseTimer"), 0.001f);
+            Assert.AreEqual(9f, GetFloat("EmergencyCooldownTimer"), 0.001f);
+            Assert.AreEqual(3f, GetFloat("ReportCooldownTimer"), 0.001f);
+            Assert.IsTrue(CollectionContainsString(GetProp("CaseLog"), "主机迁移完成"),
+                "快照恢复应写入主机迁移完成案卷，便于断线恢复回溯。");
+        }
+
         // ──────────────────────────────────────────────────────────
         //  帧驱动辅助
         // ──────────────────────────────────────────────────────────
@@ -279,12 +366,156 @@ namespace GanglandUndercover.PlayTests
             fi.SetValue(_controller, value);
         }
 
+        private void SetPhase(string phaseName)
+        {
+            Type phaseType = RuntimeType("GanglandUndercover.Online.OnlineMatchPhase");
+            SetField("phase", Enum.Parse(phaseType, phaseName));
+        }
+
+        private EventProbe AttachEventProbe()
+        {
+            object bus = GetField("gameEventBus");
+            Assert.IsNotNull(bus, "gameEventBus 应在 PlayMode Awake 中初始化。");
+
+            EventProbe probe = new EventProbe();
+            Type meetingCalledType = RuntimeType("GanglandUndercover.Online.MeetingCalledEvent");
+            Type bodyReportedType = RuntimeType("GanglandUndercover.Online.BodyReportedEvent");
+            MethodInfo subscribe = bus.GetType().GetMethod("Subscribe");
+
+            subscribe.MakeGenericMethod(meetingCalledType)
+                .Invoke(bus, new[] { probe.CreateHandler(nameof(EventProbe.OnMeetingCalled), meetingCalledType) });
+            subscribe.MakeGenericMethod(bodyReportedType)
+                .Invoke(bus, new[] { probe.CreateHandler(nameof(EventProbe.OnBodyReported), bodyReportedType) });
+            return probe;
+        }
+
+        private void SetPlayer(ulong clientId, Vector3 position, bool alive, string roleName)
+        {
+            Type playerType = RuntimeType("GanglandUndercover.Online.OnlinePlayerState");
+            object player = Activator.CreateInstance(
+                playerType,
+                clientId,
+                "玩家" + clientId,
+                position,
+                true,
+                alive,
+                Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineRole"), roleName),
+                Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineProfession"), "Inspector"),
+                0,
+                false);
+
+            IDictionary players = (IDictionary)GetField("players");
+            players[clientId] = player;
+
+            IDictionary privateRoles = (IDictionary)GetField("privateRoles");
+            privateRoles[clientId] = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineRole"), roleName);
+        }
+
+        private void ClearPlayers()
+        {
+            ((IDictionary)GetField("players")).Clear();
+            ((IDictionary)GetField("privateRoles")).Clear();
+        }
+
+        private object GetPlayerState(ulong clientId)
+        {
+            object players = GetField("players");
+            MethodInfo tryGetValue = players.GetType().GetMethod("TryGetValue");
+            object[] args = { clientId, null };
+            bool found = (bool)tryGetValue.Invoke(players, args);
+            Assert.IsTrue(found, $"找不到玩家 {clientId}");
+            return args[1];
+        }
+
+        private Vector3 GetPlayerPosition(ulong clientId)
+        {
+            object player = GetPlayerState(clientId);
+            return (Vector3)player.GetType().GetField("Position").GetValue(player);
+        }
+
+        private bool GetPlayerAlive(ulong clientId)
+        {
+            object player = GetPlayerState(clientId);
+            return Convert.ToBoolean(player.GetType().GetField("Alive").GetValue(player));
+        }
+
+        private void AddBody(int bodyId, ulong victimClientId, Vector3 position, bool reported)
+        {
+            object bodies = GetBodiesList();
+            object body = Activator.CreateInstance(
+                RuntimeType("GanglandUndercover.Online.OnlineBodyState"),
+                bodyId,
+                victimClientId,
+                position,
+                reported);
+            Invoke(bodies, "Add", body);
+        }
+
+        private void ClearBodies()
+        {
+            object bodies = GetBodiesList();
+            Invoke(bodies, "Clear");
+        }
+
+        private object GetBodiesList()
+        {
+            InvokePrivate("EnsureRuntimeDependencies");
+            object killSystem = GetField("killSystem");
+            Assert.IsNotNull(killSystem, "killSystem 应在 PlayMode 中初始化。");
+            FieldInfo fi = killSystem.GetType().GetField(
+                "bodies",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(fi, "找不到 killSystem.bodies");
+            object bodies = fi.GetValue(killSystem);
+            Assert.IsNotNull(bodies, "killSystem.bodies 不应为 null。");
+            return bodies;
+        }
+
+        private void AddVote(ulong voterClientId, ulong targetClientId)
+        {
+            IDictionary votes = (IDictionary)GetField("votes");
+            votes[voterClientId] = targetClientId;
+        }
+
+        private void ClearVotes()
+        {
+            IDictionary votes = (IDictionary)GetField("votes");
+            votes.Clear();
+        }
+
+        private void SetKillSystemField(string name, object value)
+        {
+            object killSystem = GetField("killSystem");
+            Assert.IsNotNull(killSystem, "killSystem 应在 PlayMode Awake 中初始化。");
+            FieldInfo fi = killSystem.GetType().GetField(
+                name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(fi, $"找不到 killSystem 字段 {name}");
+            fi.SetValue(killSystem, value);
+        }
+
         private void Invoke(string method, params object[] args)
         {
             MethodInfo mi = _controllerType.GetMethod(method,
                 BindingFlags.Public | BindingFlags.Instance);
             Assert.IsNotNull(mi, $"找不到方法 {method}");
             mi.Invoke(_controller, args);
+        }
+
+        private void InvokePublic(string method, params object[] args)
+        {
+            MethodInfo mi = _controllerType.GetMethod(method,
+                BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(mi, $"找不到方法 {method}");
+            mi.Invoke(_controller, args);
+        }
+
+        private object InvokePublicWithResult(string method, params object[] args)
+        {
+            MethodInfo mi = _controllerType.GetMethod(method,
+                BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(mi, $"找不到方法 {method}");
+            return mi.Invoke(_controller, args);
         }
 
         private void InvokePrivate(string method, params object[] args)
@@ -372,7 +603,43 @@ namespace GanglandUndercover.PlayTests
         private static Type RuntimeType(string fullName)
             => Type.GetType(fullName + ", " + RuntimeAssemblyName, throwOnError: true);
 
+        private sealed class EventProbe
+        {
+            public int MeetingCalledCount { get; private set; }
+            public ulong LastMeetingCallerId { get; private set; }
+            public bool LastMeetingCalledIsEmergency { get; private set; }
+            public int BodyReportedCount { get; private set; }
+            public ulong LastBodyReporterId { get; private set; }
+            public ulong LastBodyVictimId { get; private set; }
+
+            public Delegate CreateHandler(string methodName, Type eventType)
+            {
+                MethodInfo method = GetType().GetMethod(methodName).MakeGenericMethod(eventType);
+                Type actionType = typeof(Action<>).MakeGenericType(eventType);
+                return Delegate.CreateDelegate(actionType, this, method);
+            }
+
+            public void OnMeetingCalled<T>(T evt) where T : struct
+            {
+                object boxedEvent = evt;
+                Type eventType = boxedEvent.GetType();
+                MeetingCalledCount++;
+                LastMeetingCallerId = Convert.ToUInt64(eventType.GetField("CallerId").GetValue(boxedEvent));
+                LastMeetingCalledIsEmergency = Convert.ToBoolean(eventType.GetField("IsEmergency").GetValue(boxedEvent));
+            }
+
+            public void OnBodyReported<T>(T evt) where T : struct
+            {
+                object boxedEvent = evt;
+                Type eventType = boxedEvent.GetType();
+                BodyReportedCount++;
+                LastBodyReporterId = Convert.ToUInt64(eventType.GetField("ReporterId").GetValue(boxedEvent));
+                LastBodyVictimId = Convert.ToUInt64(eventType.GetField("VictimId").GetValue(boxedEvent));
+            }
+        }
+
         private int GetInt(string name) => Convert.ToInt32(GetProp(name));
+        private float GetFloat(string name) => Convert.ToSingle(GetProp(name));
         private bool GetBool(string name) => (bool)GetProp(name);
         private string GetString(string name) => (string)GetProp(name);
         private string GetPhaseName() => GetProp("Phase").ToString();

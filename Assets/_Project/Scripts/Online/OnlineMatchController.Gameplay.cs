@@ -497,7 +497,8 @@ namespace GanglandUndercover.Online
             List<ulong> ids = new List<ulong>(players.Keys);
             foreach (ulong clientId in ids)
             {
-                if (GetPrivateRole(clientId) == OnlineRole.Gang)
+                OnlineRole role = GetPrivateRole(clientId);
+                if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                 {
                     OnlinePlayerState gangState = players[clientId];
                     gangState.Alive = false;
@@ -624,9 +625,71 @@ namespace GanglandUndercover.Online
             }
 
             taskService.Initialize(ruleSet, mapService);
+            EnsureT1Services();
             EnsureMiniGameBridge();
             EnsureCameraRig();
             EnsureCriticalTaskSystem();
+        }
+
+        /// <summary>
+        /// 确保 T1 服务组件存在并已初始化。
+        /// </summary>
+        private void EnsureT1Services()
+        {
+            // 事件总线
+            if (gameEventBus == null)
+            {
+                gameEventBus = GetComponent<SimpleGameEventBus>();
+                if (gameEventBus == null)
+                {
+                    gameEventBus = gameObject.AddComponent<SimpleGameEventBus>();
+                }
+            }
+
+            // VotingService
+            if (votingService == null)
+            {
+                votingService = GetComponent<Services.VotingService>();
+                if (votingService == null)
+                {
+                    votingService = gameObject.AddComponent<Services.VotingService>();
+                }
+            }
+            votingService.Initialize(this, gameEventBus);
+            votingService.BindVotes(votes);
+
+            // MeetingService
+            if (meetingService == null)
+            {
+                meetingService = GetComponent<Services.MeetingService>();
+                if (meetingService == null)
+                {
+                    meetingService = gameObject.AddComponent<Services.MeetingService>();
+                }
+            }
+            meetingService.Initialize(this, gameEventBus, votingService);
+
+            // EvidenceService
+            if (evidenceService == null)
+            {
+                evidenceService = GetComponent<Services.EvidenceService>();
+                if (evidenceService == null)
+                {
+                    evidenceService = gameObject.AddComponent<Services.EvidenceService>();
+                }
+            }
+            evidenceService.Initialize(this, gameEventBus);
+
+            // SabotageService
+            if (sabotageService == null)
+            {
+                sabotageService = GetComponent<Services.SabotageService>();
+                if (sabotageService == null)
+                {
+                    sabotageService = gameObject.AddComponent<Services.SabotageService>();
+                }
+            }
+            sabotageService.Initialize(this, gameEventBus);
         }
         private void EnsureMiniGameBridge()
         {
@@ -691,6 +754,11 @@ namespace GanglandUndercover.Online
             if (evidenceDossier == null)
             {
                 evidenceDossier = new EvidenceDossier(this);
+            }
+
+            if (snapshotService == null)
+            {
+                snapshotService = new MatchSnapshotService(this);
             }
         }
         private void EnsureBotController()
@@ -1089,6 +1157,7 @@ namespace GanglandUndercover.Online
                     // Phase 4: 小地图禁用
                     tacticalMapDisabled = true;
                     emergencyCooldownTimer = Mathf.Max(emergencyCooldownTimer, 30f);
+                    SyncMeetingServiceFromController();
                     break;
                 case SabotageType.EvidenceLeak:
                     status = taskName + " 泄露证据，证据链持续受损。";

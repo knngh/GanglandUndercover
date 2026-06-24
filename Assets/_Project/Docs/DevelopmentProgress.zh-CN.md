@@ -1,13 +1,14 @@
 # 港区潜线：开发进度表
 
-更新时间：2026-06-09 20:24
+更新时间：2026-06-24 11:05
 
-当前总体状态：联网玩法骨架已跑通，基线资源已冻结，M-A~M-E 阶段全部完成。当前版本支持本地/联机开局、AI 补位、行动、任务、会议、投票、破坏、重开；Lobby 支持房间创建/加入、规则调节、开局锁定/返回解锁；文本聊天支持四通道（会议/近距/全局/鬼魂）和安全过滤（HTML 清洗/屏蔽/举报）；设置支持音量/画质/窗口/色盲/按键/语言完整持久化。但还不是可商用发行版。
+当前总体状态：联网玩法骨架已跑通，基线资源已冻结，M-A~M-E 阶段全部完成。当前版本支持本地/联机开局、AI 补位、行动、任务、会议、投票、破坏、重开；Lobby 支持房间创建/加入、规则调节、开局锁定/返回解锁；文本聊天支持四通道（会议/近距/全局/鬼魂）和安全过滤（HTML 清洗/屏蔽/举报）；设置支持音量/画质/窗口/色盲/按键/语言完整持久化。2026-06-24 已补齐 PLAN8-PLAN12 的联机回归门禁、恶意消息边界、重连/Host 断线状态门禁、6-10 人 Alpha pacing 门禁和完整验证记录。但还不是可商用发行版，真实多进程 Host 迁移、Relay 恶意注入和内容资产化仍需继续推进。
 
 最近验证：
 
-- EditMode: 76/76 PASS (CoreSystemTests.cs) — 含聊天安全、Lobby 浏览器、房间锁定/密码/满员、世界构建、资产管线
-- PlayMode: 6/8 PASS (2 ignored: Relay 双进程) — 主循环全流程、断线释放、小游戏授权、恶意消息拒绝
+- EditMode: 115/115 PASS — `ci-logs/plan12-editmode-full-results.xml`；含 Alpha pacing、聊天安全、ClientProfile/CharacterCustom/Camera 边界、Lobby 浏览器、房间锁定/密码/满员、世界构建、资产管线
+- PlayMode: 11/13 PASS，2 ignored — `ci-logs/plan12-playmode-full-results.xml`；主循环、聊天多客户端、会议事件、快照恢复、Host 断线提示、断线释放、小游戏授权、恶意消息拒绝均通过；ignored 为 Relay 双进程角色测试，需设置 `GANGLAND_RELAY_ROLE`
+- PLAN8-PLAN11 定向门禁：会议事件/快照恢复、恶意 ClientProfile、CharacterCustom/Camera 授权、Host 断线可见恢复、6/8/10 人 Alpha pacing 均已单项通过
 - Relay 双进程云联调：`bash run-relay-twoprocess.sh` 于 `2026-06-09 15:02 PASS`，Host 创建房间码，Client 通过房间码加入
 - 烟测：`2026-05-04 20:25:52 PASS`
 - Stage1 截图：`Screenshots/stage1-vertical-slice.png` 于 `2026-05-04 19:45:45` 刷新
@@ -15,7 +16,7 @@
 - Stage1 prefab：`Assets/_Project/Prefabs/Stage1VerticalSliceWorld.prefab`
 - 资源清单：`Assets/_Project/Docs/AssetInventory.zh-CN.md`
 - HUD 稳定性：已补 `OnlineMatchHud.Refresh` 布局防线，烟测覆盖任务面板和会议面板布局完整性。
-- Relay 双进程云联调：`bash run-relay-twoprocess.sh` 于 `2026-06-09 15:02 PASS`，Host 创建房间码，Client 通过房间码加入，Host 观察到 `ConnectedClientCount=2`。
+- 测试矩阵：`output/test_coverage_matrix_20260624.md`
 
 ## 阶段总表
 
@@ -27,8 +28,8 @@
 | 第 2 阶段：角色与动画替换 | 2026-05-13 至 2026-05-19 | 25% | 进行中 | 已完成第一轮程序化角色状态层、击倒/报案/会议/投票反馈；下一步接正式角色 prefab/动画 |
 | 第 3 阶段：任务小游戏与任务模型 | 2026-05-20 至 2026-05-26 | 0% | 未开始 | 4 个正式任务小游戏、任务 prefab、破坏状态同步 |
 | 第 4 阶段：正式 UI 第一版 | 2026-05-27 至 2026-06-09 | 0% | 未开始 | 主菜单、房间、行动 HUD、大地图、会议、投票、结算 UI |
-| 第 5 阶段：联网服务与文本聊天 | 2026-06-10 至 2026-06-23 | 45% | 进行中 | Relay 房间码双进程已实测通过；Lobby 房间锁定/解锁/满员/密码已实现+EditMode 覆盖；文本聊天四通道+安全过滤+屏蔽/举报已完成；设置持久化已完成；下一步补断线重连、Lobby 房间列表真实集成、主菜单 UI 术语统一 |
-| 第 6 阶段：6-10 人可玩 Alpha | 2026-06-24 至 2026-07-21 | 0% | 未开始 | 8-12 分钟完整局、6-10 人规则、推理证据链 |
+| 第 5 阶段：联网服务与文本聊天 | 2026-06-10 至 2026-06-23 | 70% | 进行中 | Relay 房间码双进程已实测通过；Lobby 房间锁定/解锁/满员/密码已实现+EditMode 覆盖；文本聊天四通道+安全过滤+屏蔽/举报已完成；设置持久化已完成；PlayMode 已补聊天多客户端、会议事件、快照恢复、Host 断线提示和恶意消息门禁；下一步做真实多进程 Host 迁移、Relay 恶意注入和 Lobby 房间列表真实集成 |
+| 第 6 阶段：6-10 人可玩 Alpha | 2026-06-24 至 2026-07-21 | 15% | 进行中 | 6/8/10 人角色配比、任务量、会议/投票/冷却/胜负 pacing 已有 EditMode 门禁；下一步补 8-12 分钟完整局体验、推理证据链和内容节奏实测 |
 | 第 7 阶段：内容 Beta | 2026-07-22 至 2026-08-18 | 0% | 未开始 | 完整地图第一版、职业扩展、音频、新手引导、封闭测试 |
 | 第 8 阶段：发行候选准备 | 2026-08-19 至 2026-10-13 | 0% | 未开始 | 平台账号、隐私/麦克风/用户协议、举报封禁、公开测试构建 |
 
@@ -147,26 +148,26 @@
 3. 会议入座已经有位置和状态，但还需要角色转身、坐姿、发言状态和镜头调度。
 4. 角色表现还需要和正式免费/商店模型资源对接。
 
-## 当前进行阶段：第 2 阶段
+## 当前进行阶段：第 5/6 阶段交界
 
-计划日期：2026-05-13 至 2026-05-19
+计划日期：2026-06-24 起
 
-目标：
+本轮 PLAN8-PLAN12 已完成内容：
 
-1. 替换当前程序化人物比例和姿态，让行动视角里的角色更接近正式 2.5D 社交推理游戏。
-2. 做移动、交互、击倒、死亡、报案、会议入座的第一版可见反馈。
-3. 保持 Stage1 scene/prefab、在线闭环和 smoke 作为回归基线。
+1. PLAN8 PlayMode 回归：补会议事件、尸体报案路径、快照恢复生命周期和断线释放回归。
+2. PLAN9 恶意消息覆盖：补 Chat/ClientProfile/Camera/CharacterCustom 边界，畸形 ClientProfile 不再触发读取异常，CharacterCustom malformed/empty/owner 校验和 Camera alive/range/技能校验均有门禁。
+3. PLAN10 重连/Host 状态门禁：补 Host 断线可见恢复提示，快照恢复覆盖玩家、任务、尸体、投票和计时器，并修复 `ReportCooldownTimer` capture/restore 漏写。
+4. PLAN11 Alpha pacing：补 6/8/10 人角色阵营、任务量、证据目标、会议/投票/击杀/报案冷却和 8-12 分钟目标局长门禁。
+5. PLAN12 文档与完整验证：刷新进度表、已知问题和测试矩阵，完整 EditMode/PlayMode 已落到 `ci-logs/plan12-*.xml`。
 
-验收标准：
+验收结果：
 
-1. `Gangland/Run Smoke Tests` 通过。
-2. 行动视角内至少 8-10 名玩家/AI 有一致比例和可读角色状态。
-3. 击倒、死亡、会议入座不再只靠 UI 文本表达。
-4. Stage1 截图仍能看出港区街区、房间入口、任务点和 2.5D 行动视角。
+1. EditMode：115/115 PASS，0 failed，0 skipped。
+2. PlayMode：13 total，11 passed，0 failed，2 ignored；ignored 为 Relay 双进程 Host/Client 角色测试，需要专用环境变量分进程运行。
+3. 历史 Relay 双进程云联调：`2026-06-09 15:02 PASS`。
 
-下一步执行项：
+当前风险：
 
-1. 将当前程序化状态层沉淀为可替换角色 prefab 规范。
-2. 接入或制作统一角色 Animator Controller。
-3. 增加待机、移动、交互、击倒、死亡、报案、会议入座的动画状态机。
-4. 为会议发言、静音、投票、死亡玩家频道补齐场景内反馈。
+1. 真实多客户端 Host migration election 仍未自动化验证，当前只覆盖 Host 断线可见恢复和快照恢复。
+2. Relay 真双进程恶意 CharacterCustom/Chat 注入仍未跑，当前覆盖为 EditMode/单进程 NGO PlayMode harness。
+3. 6-10 人 Alpha 已有规则和 pacing 门禁，但 8-12 分钟完整局体验、内容节奏和正式资产表现仍需实测。

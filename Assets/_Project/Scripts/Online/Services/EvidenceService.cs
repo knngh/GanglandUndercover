@@ -29,6 +29,8 @@ namespace GanglandUndercover.Online.Services
         [Tooltip("事件总线引用")]
         [SerializeField] private SimpleGameEventBus eventBus;
 
+        private SimpleGameEventBus subscribedEventBus;
+
         // ─── 内部状态 ──────────────────────────────────────────
 
         /// <summary>当前证据分数（警方累计）。</summary>
@@ -49,13 +51,13 @@ namespace GanglandUndercover.Online.Services
         // ─── 公开只读属性 ──────────────────────────────────────
 
         /// <summary>当前证据分数。</summary>
-        public int EvidenceScore => evidenceScore;
+        public int EvidenceScore => ActiveEvidenceScore;
 
         /// <summary>证据目标值。</summary>
         public int EvidenceTarget
         {
-            get => evidenceTarget;
-            set => evidenceTarget = Mathf.Max(1, value);
+            get => ActiveEvidenceTarget;
+            set => SetActiveEvidenceTarget(value);
         }
 
         /// <summary>证据里程碑索引。</summary>
@@ -81,20 +83,12 @@ namespace GanglandUndercover.Online.Services
 
         private void OnEnable()
         {
-            if (eventBus != null)
-            {
-                eventBus.Subscribe<TaskCompletedEvent>(OnTaskCompleted);
-                eventBus.Subscribe<PlayerKilledEvent>(OnPlayerKilled);
-            }
+            SubscribeToEventBus();
         }
 
         private void OnDisable()
         {
-            if (eventBus != null)
-            {
-                eventBus.Unsubscribe<TaskCompletedEvent>(OnTaskCompleted);
-                eventBus.Unsubscribe<PlayerKilledEvent>(OnPlayerKilled);
-            }
+            UnsubscribeFromEventBus();
         }
 
         // ─── 公开 API ──────────────────────────────────────────
@@ -105,8 +99,19 @@ namespace GanglandUndercover.Online.Services
         public void Initialize(OnlineMatchController matchController, IGameEventBus bus)
         {
             controller = matchController;
-            eventBus = bus as SimpleGameEventBus ?? SimpleGameEventBus.Instance;
+            SimpleGameEventBus nextBus = bus as SimpleGameEventBus ?? SimpleGameEventBus.Instance;
+            if (eventBus != nextBus)
+            {
+                UnsubscribeFromEventBus();
+                eventBus = nextBus;
+            }
+            else
+            {
+                eventBus = nextBus;
+            }
+
             EnsureEvidenceChain();
+            SubscribeToEventBus();
         }
 
         /// <summary>
@@ -118,15 +123,25 @@ namespace GanglandUndercover.Online.Services
         {
             if (amount <= 0) return;
 
-            evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + amount);
+            OnlineTaskService activeTaskService = ActiveTaskService;
+            if (activeTaskService != null)
+            {
+                activeTaskService.AddEvidence(amount, "证据收集");
+                SyncEvidenceFromTaskService(activeTaskService);
+            }
+            else
+            {
+                evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + amount);
+            }
 
             eventBus?.Publish(new EvidenceCollectedEvent
             {
                 CollectorId = collectorId,
-                EvidenceIndex = evidenceScore,
+                EvidenceIndex = ActiveEvidenceScore,
             });
 
             UpdateEvidenceMilestone();
+            EvaluateControllerState();
         }
 
         /// <summary>
@@ -136,6 +151,15 @@ namespace GanglandUndercover.Online.Services
         public void SubtractEvidence(int amount)
         {
             if (amount <= 0) return;
+
+            OnlineTaskService activeTaskService = ActiveTaskService;
+            if (activeTaskService != null)
+            {
+                activeTaskService.ReduceEvidence(amount);
+                SyncEvidenceFromTaskService(activeTaskService);
+                return;
+            }
+
             evidenceScore = Mathf.Max(0, evidenceScore - amount);
         }
 
@@ -238,7 +262,28 @@ namespace GanglandUndercover.Online.Services
         {
             evidenceChain?.Clear();
             accusationTargets.Clear();
-            evidenceScore = 0;
+            SetActiveEvidenceScore(0);
+            evidenceMilestoneIndex = 0;
+        }
+
+        /// <summary>设置证据里程碑索引（快照恢复用）。</summary>
+        public void SetEvidenceMilestoneIndex(int value)
+        {
+            evidenceMilestoneIndex = value;
+        }
+
+        /// <summary>设置证据分数（快照恢复用），不触发里程碑检查。</summary>
+        public void SetEvidenceScore(int value)
+        {
+            SetActiveEvidenceScore(value);
+        }
+
+        /// <summary>完全重置证据状态（网络断开 / 回到大厅用）。</summary>
+        public void ResetState()
+        {
+            evidenceChain?.Clear();
+            accusationTargets.Clear();
+            SetActiveEvidenceScore(0);
             evidenceMilestoneIndex = 0;
         }
 
@@ -252,10 +297,114 @@ namespace GanglandUndercover.Online.Services
             }
         }
 
+        private OnlineTaskService ActiveTaskService => controller != null ? controller.taskService : null;
+
+        private int ActiveEvidenceScore
+        {
+            get
+            {
+                OnlineTaskService activeTaskService = ActiveTaskService;
+                return activeTaskService != null ? activeTaskService.EvidenceScore : evidenceScore;
+            }
+        }
+
+        private int ActiveEvidenceTarget
+        {
+            get
+            {
+                OnlineTaskService activeTaskService = ActiveTaskService;
+                if (activeTaskService != null && activeTaskService.EvidenceTarget > 0)
+                {
+                    return activeTaskService.EvidenceTarget;
+                }
+
+                return evidenceTarget;
+            }
+        }
+
+        private void SetActiveEvidenceTarget(int value)
+        {
+            evidenceTarget = Mathf.Max(1, value);
+
+            OnlineTaskService activeTaskService = ActiveTaskService;
+            if (activeTaskService == null)
+            {
+                return;
+            }
+
+            activeTaskService.EvidenceTarget = evidenceTarget;
+            SyncEvidenceFromTaskService(activeTaskService);
+        }
+
+        private void SetActiveEvidenceScore(int value)
+        {
+            evidenceScore = Mathf.Max(0, value);
+
+            OnlineTaskService activeTaskService = ActiveTaskService;
+            if (activeTaskService == null)
+            {
+                return;
+            }
+
+            activeTaskService.EvidenceScore = evidenceScore;
+            SyncEvidenceFromTaskService(activeTaskService);
+        }
+
+        private void SyncEvidenceFromTaskService(OnlineTaskService activeTaskService)
+        {
+            if (activeTaskService == null)
+            {
+                return;
+            }
+
+            evidenceScore = activeTaskService.EvidenceScore;
+            if (activeTaskService.EvidenceTarget > 0)
+            {
+                evidenceTarget = activeTaskService.EvidenceTarget;
+            }
+        }
+
+        private void EvaluateControllerState()
+        {
+            if (controller == null)
+            {
+                return;
+            }
+
+            controller.EvaluateWinConditions();
+            controller.BroadcastSnapshot();
+        }
+
+        private void SubscribeToEventBus()
+        {
+            if (eventBus == null || subscribedEventBus == eventBus)
+            {
+                return;
+            }
+
+            eventBus.Subscribe<TaskCompletedEvent>(OnTaskCompleted);
+            eventBus.Subscribe<PlayerKilledEvent>(OnPlayerKilled);
+            subscribedEventBus = eventBus;
+        }
+
+        private void UnsubscribeFromEventBus()
+        {
+            if (subscribedEventBus == null)
+            {
+                return;
+            }
+
+            subscribedEventBus.Unsubscribe<TaskCompletedEvent>(OnTaskCompleted);
+            subscribedEventBus.Unsubscribe<PlayerKilledEvent>(OnPlayerKilled);
+            subscribedEventBus = null;
+        }
+
         /// <summary>检查证据里程碑，触发达成事件。</summary>
         private void UpdateEvidenceMilestone()
         {
-            int milestone = CalculateMilestone(evidenceScore, evidenceTarget);
+            int score = ActiveEvidenceScore;
+            int target = ActiveEvidenceTarget;
+            int milestone = CalculateMilestone(score, target);
             if (milestone <= evidenceMilestoneIndex) return;
 
             evidenceMilestoneIndex = milestone;
@@ -265,8 +414,8 @@ namespace GanglandUndercover.Online.Services
             {
                 eventBus?.Publish(new EvidenceTargetReachedEvent
                 {
-                    Score = evidenceScore,
-                    Target = evidenceTarget,
+                    Score = score,
+                    Target = target,
                 });
             }
         }
@@ -286,14 +435,36 @@ namespace GanglandUndercover.Online.Services
         /// <summary>任务完成事件回调 → 增加证据。</summary>
         private void OnTaskCompleted(TaskCompletedEvent evt)
         {
-            // TODO: 根据 TaskIndex 计算证据增益量，调用 AddEvidence
-            // 增益量逻辑来自 OnlineMatchController.EvidenceGainFor()
+            if (controller == null) return;
+
+            // 查找完成任务的玩家以获取职业/角色加成
+            OnlineProfession profession = default;
+            OnlineRole role = OnlineRole.Unassigned;
+            if (controller.players.TryGetValue(evt.PlayerId, out OnlinePlayerState player))
+            {
+                profession = player.Profession;
+                role = player.PublicRole;
+            }
+
+            int gain = controller.taskService != null
+                ? controller.taskService.EvidenceGainFor(evt.TaskIndex, profession, role)
+                : 3;
+
+            AddEvidence(gain, evt.PlayerId);
         }
 
         /// <summary>玩家被击杀事件回调 → 注册血迹证据。</summary>
         private void OnPlayerKilled(PlayerKilledEvent evt)
         {
-            // TODO: 从 controller 获取击杀位置，调用 RegisterKillEvidence
+            if (controller == null) return;
+
+            Vector2 killPos = Vector2.zero;
+            if (controller.players.TryGetValue(evt.VictimId, out OnlinePlayerState victim))
+            {
+                killPos = victim.Position;
+            }
+
+            RegisterKillEvidence(killPos);
         }
     }
 }

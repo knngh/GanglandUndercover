@@ -19,6 +19,7 @@ namespace GanglandUndercover.Online
         private const int ChatMaxContentBytes = 4096;
         private const int ChatMaxNameBytes = 256;
         private const int ChatMaxIdBytes = 64;
+        private const int ClientProfileMaxNameBytes = 128;
         private const int ChatWriterCapacityBytes = ChatMaxContentBytes + 1024;
         private const float ServerChatSendCooldownSeconds = 5f;
         private const int MaxSnapshotPlayers = 64;
@@ -554,7 +555,7 @@ namespace GanglandUndercover.Online
             players.Clear();
             killSystem.bodies.Clear();
             caseLog.Clear();
-            votes.Clear();
+            if (votingService != null) votingService.ClearVotes(); else votes.Clear();
             privateRoles.Clear();
             killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
@@ -580,7 +581,16 @@ namespace GanglandUndercover.Online
             evidenceMilestoneIndex = 0;
             phaseTimer = 0f;
             taskService.ResetAllSabotageTimers();
-            emergencyCooldownTimer = 0f;
+            if (meetingService != null)
+            {
+                meetingService.ResetState();
+            }
+            else
+            {
+                emergencyCooldownTimer = 0f;
+                emergencyMeetingsLeft = 0;
+                _meetingCount = 0;
+            }
             aiActionGraceTimer = 0f;
             _cameraRig.SetSubject(LocalPreviewClientId);
             resultSummary = "尚未结算。";
@@ -703,7 +713,7 @@ namespace GanglandUndercover.Online
                 int aliveCount = CountAlivePlayers();
                 if ((phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
                     && aliveCount > 0
-                    && votes.Count >= aliveCount)
+                    && votingService != null && votingService.AllVoted)
                 {
                     ResolveVotes();
                     return;
@@ -771,20 +781,27 @@ namespace GanglandUndercover.Online
         // --- RemoveDisconnectedPlayerVotes ---
         private void RemoveDisconnectedPlayerVotes(ulong clientId)
         {
-            votes.Remove(clientId);
-
-            List<ulong> votersToClear = new List<ulong>();
-            foreach (KeyValuePair<ulong, ulong> vote in votes)
+            if (votingService != null)
             {
-                if (vote.Value == clientId)
-                {
-                    votersToClear.Add(vote.Key);
-                }
+                votingService.RemoveDisconnectedPlayerVotes(clientId);
             }
-
-            for (int i = 0; i < votersToClear.Count; i++)
+            else
             {
-                votes.Remove(votersToClear[i]);
+                votes.Remove(clientId);
+
+                List<ulong> votersToClear = new List<ulong>();
+                foreach (KeyValuePair<ulong, ulong> vote in votes)
+                {
+                    if (vote.Value == clientId)
+                    {
+                        votersToClear.Add(vote.Key);
+                    }
+                }
+
+                for (int i = 0; i < votersToClear.Count; i++)
+                {
+                    votes.Remove(votersToClear[i]);
+                }
             }
         }
 
@@ -873,9 +890,16 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            using FastBufferWriter writer = new FastBufferWriter(128, Unity.Collections.Allocator.Temp);
-            writer.WriteValueSafe(safeName);
-            networkManager.CustomMessagingManager.SendNamedMessage(ClientProfileMessage, NetworkManager.ServerClientId, writer);
+            FastBufferWriter writer = new FastBufferWriter(128, Unity.Collections.Allocator.Temp);
+            try
+            {
+                WriteClientProfilePayload(ref writer, safeName);
+                networkManager.CustomMessagingManager.SendNamedMessage(ClientProfileMessage, NetworkManager.ServerClientId, writer);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
         }
 
         // --- ReceiveClientState ---
@@ -900,7 +924,11 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            reader.ReadValueSafe(out string displayName);
+            if (!TryReadClientProfilePayload(ref reader, out string displayName))
+            {
+                return;
+            }
+
             ApplyClientProfile(senderClientId, displayName);
         }
 
@@ -1417,6 +1445,7 @@ namespace GanglandUndercover.Online
                 snapshotBlackoutTimer, snapshotLockdownTimer, snapshotCommunicationJamTimer,
                 snapshotEvidenceLeakTimer, snapshotEvidenceLeakAccumulator, snapshotPatrolAlertTimer);
             emergencyCooldownTimer = snapshotEmergencyCooldownTimer;
+            SyncMeetingServiceFromController();
             killSystem.reportCooldownTimer = snapshotReportCooldownTimer;
             aiActionGraceTimer = snapshotAiActionGraceTimer;
             matchElapsedSeconds = snapshotMatchElapsedSeconds;
@@ -1444,10 +1473,18 @@ namespace GanglandUndercover.Online
             killSystem.bodies.Clear();
             killSystem.bodies.AddRange(snapshotBodies);
 
-            votes.Clear();
-            foreach (KeyValuePair<ulong, ulong> pair in snapshotVotes)
+            // 委托 VotingService 恢复投票记录（共享字典，双向可见）
+            if (votingService != null)
             {
-                votes[pair.Key] = pair.Value;
+                votingService.LoadVotes(snapshotVotes);
+            }
+            else
+            {
+                votes.Clear();
+                foreach (KeyValuePair<ulong, ulong> pair in snapshotVotes)
+                {
+                    votes[pair.Key] = pair.Value;
+                }
             }
 
             caseLog.Clear();
@@ -1801,6 +1838,25 @@ namespace GanglandUndercover.Online
 
             content = ChatSystem.Sanitize(rawContent) ?? string.Empty;
             return !string.IsNullOrWhiteSpace(content);
+        }
+
+        // --- WriteClientProfilePayload ---
+        private static void WriteClientProfilePayload(ref FastBufferWriter writer, string displayName)
+        {
+            WriteBoundedUtf8String(ref writer, OnlineMatchUtils.LimitText(displayName, 16, "港区玩家"));
+        }
+
+        // --- TryReadClientProfilePayload ---
+        private static bool TryReadClientProfilePayload(ref FastBufferReader reader, out string displayName)
+        {
+            displayName = string.Empty;
+            if (!TryReadBoundedUtf8String(ref reader, ClientProfileMaxNameBytes, out string rawName))
+            {
+                return false;
+            }
+
+            displayName = OnlineMatchUtils.LimitText(rawName, 16, "港区玩家");
+            return !string.IsNullOrWhiteSpace(displayName);
         }
 
         // --- WriteChatBroadcastPayload ---

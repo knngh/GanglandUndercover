@@ -122,16 +122,16 @@ namespace GanglandUndercover.Online
             }
         }
 
-        /// <summary>快照序列化: 紧急任务状态</summary>
-        private void WriteCriticalTaskSnapshot(GameStateSnapshot snap)
+        /// <summary>快照序列化: 紧急任务状态（供 MatchSnapshotService 调用）</summary>
+        internal void WriteCriticalTaskSnapshot(GameStateSnapshot snap)
         {
             snap.CriticalTaskActive = _criticalTaskActive;
             snap.CriticalTaskType = (byte)_criticalTaskType;
             snap.CriticalTaskTimeRemaining = _criticalTaskTimeRemaining;
         }
 
-        /// <summary>快照反序列化: 紧急任务状态</summary>
-        private void ReadCriticalTaskSnapshot(GameStateSnapshot snap)
+        /// <summary>快照反序列化: 紧急任务状态（供 MatchSnapshotService 调用）</summary>
+        internal void ReadCriticalTaskSnapshot(GameStateSnapshot snap)
         {
             _criticalTaskActive = snap.CriticalTaskActive;
             _criticalTaskType = (CriticalTaskType)snap.CriticalTaskType;
