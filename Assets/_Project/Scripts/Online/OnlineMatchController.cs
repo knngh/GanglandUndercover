@@ -48,12 +48,8 @@ namespace GanglandUndercover.Online
         private const ulong LocalPreviewClientId = 0UL;
         private const string SurveillanceCameraPrefabResourcePath = "Network/OnlineSecurityCamera";
         private const string MiniGameBridgePrefabResourcePath = "Network/OnlineMiniGameBridge";
+        private const string CharacterCustomizerPrefabResourcePath = "Network/OnlineCharacterCustomizer";
         // Camera constants moved to OnlineCameraRig — use _cameraRig.Configure() for all camera setup.
-        private const float PlayerAliveVisualScale = 1.12f;
-        private const float PlayerDeadVisualScaleX = 1.04f;
-        private const float PlayerDeadVisualScaleY = 0.52f;
-
-
 
         internal readonly Dictionary<ulong, OnlinePlayerState> players = new Dictionary<ulong, OnlinePlayerState>();
         internal readonly List<OnlineTaskState> tasks = new List<OnlineTaskState>();
@@ -73,7 +69,27 @@ namespace GanglandUndercover.Online
 
         // C2: 证据链指证系统
         internal EvidenceDossier evidenceDossier;
-        public string MeetingEvidenceDossier => evidenceDossier?.MeetingEvidenceDossier() ?? "证据系统未就绪。";
+        public string MeetingEvidenceDossier => BuildMeetingEvidenceDossierText();
+
+        private string BuildMeetingEvidenceDossierText()
+        {
+            string chain = evidenceService != null
+                ? evidenceService.MeetingEvidenceDigest(LocalClientId())
+                : "证据系统未就绪。";
+            string dossier = evidenceDossier?.MeetingEvidenceDossier() ?? "暂无证据指向特定目标。";
+
+            if (string.IsNullOrWhiteSpace(chain))
+            {
+                return dossier;
+            }
+
+            if (string.IsNullOrWhiteSpace(dossier))
+            {
+                return chain;
+            }
+
+            return chain.TrimEnd() + "\n" + dossier;
+        }
 
         // C4: 内鬼隐藏目标追踪
         private readonly Dictionary<ulong, MoleObjective> _moleObjectives = new Dictionary<ulong, MoleObjective>();
@@ -83,12 +99,11 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<ulong, Vector3> playerVisualBaseScales = new Dictionary<ulong, Vector3>();
         private readonly Dictionary<int, GameObject> taskVisuals = new Dictionary<int, GameObject>();
         private readonly List<OnlineSecurityCamera> surveillanceCameras = new List<OnlineSecurityCamera>();
+        private readonly Dictionary<ulong, CharacterCustomizer> characterCustomizers = new Dictionary<ulong, CharacterCustomizer>();
         private readonly Dictionary<string, AudioClip> audioClips = new Dictionary<string, AudioClip>();
         private readonly List<Rect> solidObstacleRects = new List<Rect>();
         private readonly List<Rect> walkableRects = new List<Rect>();
         private readonly List<TextMesh> worldLabels = new List<TextMesh>();
-        private readonly Dictionary<string, GameObject> modelPrefabCache = new Dictionary<string, GameObject>();
-        private readonly Dictionary<string, Material> runtimeMeshMaterials = new Dictionary<string, Material>();
         private Sprite roundedRectSprite;
         private Sprite circleSprite;
         private Sprite softCircleSprite;
@@ -99,6 +114,7 @@ namespace GanglandUndercover.Online
         private UnityTransport transport;
         internal GameObject surveillanceCameraTemplate; // A1: NetworkPrefab 模板
         internal GameObject miniGameBridgeTemplate;
+        internal GameObject characterCustomizerTemplate;
         private UnityServiceBootstrap serviceBootstrap;
         public OnlineWorldBuilder WorldBuilder;
         private OnlineWorldBuilder worldBuilder
@@ -156,6 +172,7 @@ namespace GanglandUndercover.Online
         [SerializeField] public Services.SabotageService sabotageService;
         [SerializeField] public Services.EvidenceService evidenceService;
         [SerializeField] public Services.MeetingService meetingService;
+        [SerializeField] public Services.MinigameService minigameService;
         [SerializeField] public SimpleGameEventBus gameEventBus;
         [Header("M6 地图布局")]
         [SerializeField] private Map.MapLayoutData mapLayoutData;
@@ -190,20 +207,19 @@ namespace GanglandUndercover.Online
         internal float emergencyCooldownTimer;
         internal float aiActionGraceTimer;
         internal float matchElapsedSeconds;
-        private int activeTaskId = -1;
-        private int activeTaskStep;
-        private int activeTaskMistakes;
         internal int evidenceMilestoneIndex;
-        private float activeTaskCharge;
-        private float activeTaskFeedbackTimer;
-        private bool activeTaskStepOneDone;
-        private bool activeTaskStepTwoDone;
-        private bool activeTaskStepThreeDone;
-        private bool activeTaskFeedbackPositive;
-        private bool submittingActiveTask;
-        // Task#7：现场任务接入真·Among Us 风格小游戏（连线/刷卡/记忆/扫描…共 11 种）。
-        // 非空时由小游戏自建的 ScreenSpaceOverlay Canvas 接管交互，OnGUI 经典任务面板让位。
-        private GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase activeMiniGame;
+        // 活动任务 / 迷你游戏状态已迁移到 Services.MinigameService（以下为只读代理属性）
+        private int activeTaskId => minigameService != null ? minigameService.ActiveTaskId : -1;
+        private int activeTaskStep => minigameService != null ? minigameService.ActiveTaskStep : 0;
+        private int activeTaskMistakes => minigameService != null ? minigameService.ActiveTaskMistakes : 0;
+        private float activeTaskCharge => minigameService != null ? minigameService.ActiveTaskCharge : 0f;
+        private float activeTaskFeedbackTimer => minigameService != null ? minigameService.ActiveTaskFeedbackTimer : 0f;
+        private bool activeTaskStepOneDone => minigameService != null && minigameService.ActiveTaskStepOneDone;
+        private bool activeTaskStepTwoDone => minigameService != null && minigameService.ActiveTaskStepTwoDone;
+        private bool activeTaskStepThreeDone => minigameService != null && minigameService.ActiveTaskStepThreeDone;
+        private bool activeTaskFeedbackPositive => minigameService != null && minigameService.ActiveTaskFeedbackPositive;
+        private bool submittingActiveTask => minigameService != null && minigameService.SubmittingActiveTask;
+        private GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase activeMiniGame => minigameService?.ActiveMiniGame;
         private OnlineCameraRig _cameraRig;
         private bool relayOperationInProgress;
         // currentCameraSubjectId moved to OnlineCameraRig; use _cameraRig.SetSubject() / _cameraRig.CurrentSubjectId
@@ -228,8 +244,7 @@ namespace GanglandUndercover.Online
         /// <summary>NGO 是否已建立监听（Host）或已连接（Client）。</summary>
         /// <summary>Task#7：当前是否有现场小游戏在前台（供联机自动化断言小游戏确实接入）。</summary>
         /// <summary>Task#7：当前激活小游戏的类型名（WireTask/KeypadTask…），无则空串。</summary>
-        public string ActiveMiniGameName => activeMiniGame != null ? activeMiniGame.GetType().Name : string.Empty;
-        /// <summary>Task#7：当前正在处理的任务 Id（无则 -1）。</summary>
+        public string ActiveMiniGameName => minigameService != null ? minigameService.ActiveMiniGameName : string.Empty;
 
         // ── M7.1 Relay 公开 API ───────────────────────────────
         /// <summary>Relay 状态变化事件（供 LobbyController 订阅）</summary>
@@ -286,11 +301,6 @@ namespace GanglandUndercover.Online
         public int BlackoutVfxCount => CountNamedWorldObjects("Blackout VFX");
         public int FreeCharacterAdapterCount => CountNamedWorldObjects("FreeCharacterAdapter");
         public int StageTwoCharacterStateLayerCount => CountNamedWorldObjects("Stage2 Character");
-        internal void DecrementEmergencyMeetings()
-        {
-            emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-            SyncMeetingServiceFromController();
-        }
         internal void SyncMeetingStateFromService(int meetingsLeft, float cooldownTimer)
         {
             emergencyMeetingsLeft = Mathf.Max(0, meetingsLeft);
@@ -302,9 +312,50 @@ namespace GanglandUndercover.Online
             _meetingCount = 0;
         }
 
+        internal void RestoreMeetingCountFromSnapshot(int meetingCount)
+        {
+            _meetingCount = Mathf.Max(0, meetingCount);
+        }
+
         internal void SyncMeetingServiceFromController()
         {
-            meetingService?.SyncStateFromController(emergencyMeetingsLeft, emergencyCooldownTimer, _meetingCount);
+            meetingService?.SyncMeetingsAndCooldown(emergencyMeetingsLeft, emergencyCooldownTimer);
+        }
+
+        internal void SyncMeetingSnapshotToService()
+        {
+            meetingService?.SyncSnapshotStateFromController(
+                emergencyMeetingsLeft,
+                emergencyCooldownTimer,
+                _meetingCount,
+                lastMeetingReason);
+        }
+
+        /// <summary>从 MeetingService 回写 meetingsLeft/cooldownTimer 到 controller 字段（service 为这两项的权威源）。</summary>
+        internal void SyncMeetingServiceToController()
+        {
+            if (meetingService == null) return;
+            emergencyMeetingsLeft = meetingService.EmergencyMeetingsLeft;
+            emergencyCooldownTimer = meetingService.EmergencyCooldownTimer;
+        }
+
+        /// <summary>从 EvidenceService 回写证据状态到 controller 镜像字段（供快照序列化 / HUD 读取）。</summary>
+        internal void SyncEvidenceStateFromService(int score, int target, int milestoneIndex, string lastEvent)
+        {
+            // controller 镜像字段保持同步，供 Network 序列化和 HUD 读取
+            // evidenceScore / evidenceTarget 通过 taskService 属性代理，此处仅更新 milestoneIndex 和 lastEvidenceEvent
+            evidenceMilestoneIndex = milestoneIndex;
+            lastEvidenceEvent = lastEvent ?? string.Empty;
+        }
+
+        internal void SyncEvidenceServiceFromController()
+        {
+            if (evidenceService == null) return;
+            evidenceService.LoadSnapshotState(
+                taskService.EvidenceScore,
+                taskService.EvidenceTarget,
+                evidenceMilestoneIndex,
+                lastEvidenceEvent);
         }
 
         internal void SyncMeetingStartedWithService(string reason, ulong callerId, bool isEmergency)
@@ -312,7 +363,6 @@ namespace GanglandUndercover.Online
             meetingService?.SyncMeetingStartedFromController(
                 emergencyMeetingsLeft,
                 emergencyCooldownTimer,
-                _meetingCount,
                 reason,
                 callerId,
                 isEmergency);
@@ -437,26 +487,23 @@ namespace GanglandUndercover.Online
                 intelBoardOpen = !intelBoardOpen;
             }
 
-            if (activeTaskId >= 0)
+            if (minigameService != null && minigameService.HasActiveTask)
             {
                 // 小游戏接管时（activeMiniGame 非空）由其自己的 UI 处理输入，
                 // 不再走 OnGUI 经典蓄力面板的键盘输入。
-                if (activeMiniGame == null)
+                if (!minigameService.HasActiveMiniGame)
                 {
                     ReadActiveTaskInput();
                 }
             }
-            else if (activeMiniGame != null)
+            else if (minigameService != null)
             {
-                // 任务在别处被重置（阶段切换/死亡/会议等共 12 处把 activeTaskId 置 -1），
-                // 这里统一回收悬挂的小游戏对象，无需逐点修改各重置位。
-                DestroyActiveMiniGame();
+                // 任务在别处被重置（阶段切换/死亡/会议等），
+                // 这里统一回收悬挂的小游戏对象。
+                minigameService.CollectOrphanedMiniGame();
             }
 
-            if (activeTaskFeedbackTimer > 0f)
-            {
-                activeTaskFeedbackTimer = Mathf.Max(0f, activeTaskFeedbackTimer - Time.deltaTime);
-            }
+            minigameService?.Tick(Time.deltaTime);
 
             if (!IsOnline)
             {
@@ -484,22 +531,10 @@ namespace GanglandUndercover.Online
             TickCharacterAnimators();
         }
 
-        private static readonly int AnimSpeedHash = Animator.StringToHash("Speed");
-        private static readonly int AnimDeadHash  = Animator.StringToHash("Dead");
-        private static readonly int AnimActionHash = Animator.StringToHash("Action");
-
-
-
-
-
         /// <summary>
         /// A1 修复：创建并注册监控摄像头 NetworkPrefab 模板。
         /// 必须在 NetworkManager.StartHost() 前调用。
         /// </summary>
-
-
-
-
         private void OnDestroy()
         {
             CleanupJoinedLobbySession();
@@ -720,7 +755,7 @@ namespace GanglandUndercover.Online
 
         public void RequestTaskStep(int input)
         {
-            if (activeTaskId >= 0)
+            if (minigameService != null && minigameService.HasActiveTask)
             {
                 ResolveActiveTaskStep(input);
             }
@@ -728,28 +763,19 @@ namespace GanglandUndercover.Online
 
         public void RequestCancelActiveTask()
         {
-            if (activeTaskId < 0)
+            if (minigameService == null || !minigameService.HasActiveTask)
             {
                 return;
             }
 
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-            status = "已退出任务面板。";
+            minigameService.Cancel();
         }
 
         public void RequestChargeActiveTask()
         {
-            if (activeTaskId >= 0)
+            if (minigameService != null && minigameService.HasActiveTask)
             {
-                activeTaskCharge = Mathf.Min(1f, activeTaskCharge + Time.deltaTime * OnlineMatchUtils.TaskChargeRate(activeTaskId));
+                minigameService.AddCharge(Time.deltaTime);
             }
         }
 
@@ -795,7 +821,7 @@ namespace GanglandUndercover.Online
 
         private void ReadLocalActions()
         {
-            if (activeTaskId >= 0)
+            if (minigameService != null && minigameService.HasActiveTask)
             {
                 return;
             }
@@ -858,18 +884,15 @@ namespace GanglandUndercover.Online
         private void TickHostSimulation()
         {
             float deltaTime = Time.deltaTime;
-            taskService.TickSabotageTimers(deltaTime);
             sabotageService?.Tick(deltaTime);
 
             // Phase 2.4: 紧急任务触发检查与同步
             TickCriticalTaskTriggers();
             TickCriticalTaskSync();
 
-            if (emergencyCooldownTimer > 0f)
-            {
-                emergencyCooldownTimer = Mathf.Max(0f, emergencyCooldownTimer - deltaTime);
-                SyncMeetingServiceFromController();
-            }
+            // Phase 2.1: MeetingService 为紧急冷却权威源，controller 字段保持镜像
+            meetingService?.Tick(deltaTime);
+            SyncMeetingServiceToController();
 
             if (killSystem != null)
                 killSystem.TickReportCooldown(deltaTime);
@@ -1017,22 +1040,15 @@ namespace GanglandUndercover.Online
             }
 
             BuildDefaultTasks();
-            killSystem.bodies.Clear();
+            killSystem.Reset();
             votes.Clear();
             caseLog.Clear();
             privateRoles.Clear();
-            killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
             serverChatLastSendTimes.Clear();
             _botController?.ClearVoteTimers();
-            killSystem.nextBodyId = 0;
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-            submittingActiveTask = false;
-            taskService.EvidenceScore = 0;
+            minigameService?.ResetFull();
+            evidenceService?.ResetEvidence(ruleSet != null ? ruleSet.DefaultEvidenceTarget : 42);
             lastMeetingReason = "尚未召开会议。";
             lastVoteOutcome = "尚未投票。";
             lastEvidenceEvent = "专案启动，证据链待闭合。";
@@ -1302,7 +1318,7 @@ namespace GanglandUndercover.Online
                 nearestTask.Sabotaged = true;
                 nearestTask.Completed = false;
                 nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
-                taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - OnlineMatchUtils.SabotageEvidencePenalty(sabotageType));
+                evidenceService?.SubtractEvidence(OnlineMatchUtils.SabotageEvidencePenalty(sabotageType));
                 string actorLabel = role == OnlineRole.Mole ? "线人" : "黑帮";
                 status = actorLabel + "秘密破坏了 " + nearestTask.Name + "。";
                 lastSabotageEvent = status + " 影响: " + OnlineMatchUtils.SabotageName(sabotageType);
@@ -1328,7 +1344,7 @@ namespace GanglandUndercover.Online
             }
             else
             {
-                if (!player.IsBot && !submittingActiveTask && miniGameBridge != null && miniGameBridge.IsSpawned)
+                if (!player.IsBot && !(minigameService != null && minigameService.SubmittingActiveTask) && miniGameBridge != null && miniGameBridge.IsSpawned)
                 {
                     if (nearestTask.Sabotaged)
                     {
@@ -1342,7 +1358,7 @@ namespace GanglandUndercover.Online
                     return;
                 }
 
-                if (senderClientId == LocalClientId() && !player.IsBot && !submittingActiveTask)
+                if (senderClientId == LocalClientId() && !player.IsBot && !(minigameService != null && minigameService.SubmittingActiveTask))
                 {
                     BeginActiveTask(nearestTask.Id); // 降级到旧 OnGUI 任务
                     return;
@@ -1364,12 +1380,11 @@ namespace GanglandUndercover.Online
                     if (nearestTask.Progress >= nearestTask.RequiredProgress)
                     {
                         nearestTask.Completed = true;
-                        taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + EvidenceGainFor(nearestTask.Id, player.Profession, role));
+                        int gain = EvidenceGainFor(nearestTask.Id, player.Profession, role);
+                        evidenceService?.AddEvidence(gain, nearestTask.Name + " 完成，证据链推进。");
                         player.Suspicion = Mathf.Max(0, player.Suspicion - 1);
                         players[senderClientId] = player;
                         status = nearestTask.Name + " 完成，证据链推进。";
-                        lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
-                        UpdateEvidenceMilestone();
                         AddCaseLog(status);
                         PlayCue("task");
                         syncManager?.OnTaskCompletedLocally(senderClientId, nearestTask.Id);
@@ -1486,10 +1501,8 @@ namespace GanglandUndercover.Online
                     status = player.DisplayName + " 发起重点盘问，案情板标记最高嫌疑。";
                     break;
                 case OnlineProfession.Forensics:
-                    taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + 1);
+                    evidenceService?.AddEvidence(1, player.DisplayName + " 快速鉴证，证据链 +1。");
                     status = player.DisplayName + " 快速鉴证，证据链 +1。";
-                    lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
-                    UpdateEvidenceMilestone();
                     break;
                 case OnlineProfession.Tech:
                     taskService.RepairSabotageEffect(SabotageType.Blackout);
@@ -1498,15 +1511,14 @@ namespace GanglandUndercover.Online
                     break;
                 case OnlineProfession.UndercoverAgent:
                     // C3: 证据≥75%时可以背叛黑帮（切换公开身份为警察）
-                    if (taskService.EvidenceScore >= Mathf.CeilToInt(taskService.EvidenceTarget * 0.75f)
+                    if (evidenceService != null && evidenceService.EvidenceScore >= Mathf.CeilToInt(evidenceService.EvidenceTarget * 0.75f)
                         && player.PublicRole != OnlineRole.Police)
                     {
                         // 背叛：公开身份切警察，证据+3，黑帮全员被标记
                         player.PublicRole = OnlineRole.Police;
                         player.Suspicion -= 2;
-                        taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + 3);
+                        evidenceService.AddEvidence(3, "卧底背叛！" + player.DisplayName + " 当众背叛黑帮！");
                         status = player.DisplayName + " 当众背叛黑帮！已转为警方证人，全员黑帮嫌疑+2。";
-                        lastEvidenceEvent = "卧底背叛！" + status + " 证据 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
                         // 标记所有黑帮侧（Gang + Mole）
                         foreach (var kv in players)
                         {
@@ -1518,16 +1530,13 @@ namespace GanglandUndercover.Online
                                 players[kv.Key] = s;
                             }
                         }
-                        UpdateEvidenceMilestone();
                     }
                     else
                     {
-                        taskService.EvidenceScore = Mathf.Min(taskService.EvidenceTarget, taskService.EvidenceScore + 2);
+                        evidenceService?.AddEvidence(2, player.DisplayName + " 秘密上传线报，证据链 +2 但暴露风险上升。");
                         player.Suspicion += 2;
                         status = player.DisplayName + " 秘密上传线报，证据链 +2 但暴露风险上升。";
-                        lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
                     }
-                    UpdateEvidenceMilestone();
                     break;
                 case OnlineProfession.Enforcer:
                     if (role == OnlineRole.Gang || role == OnlineRole.Mole)
@@ -1545,7 +1554,7 @@ namespace GanglandUndercover.Online
                     break;
                 case OnlineProfession.Fixer:
                     RepairSabotagedTasks(2);
-                    taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - 1);
+                    evidenceService?.SubtractEvidence(1);
                     status = player.DisplayName + " 篡改现场，修复表象但证据链被污染。";
                     break;
                 case OnlineProfession.Driver:
@@ -1592,7 +1601,7 @@ namespace GanglandUndercover.Online
                     else
                     {
                         // Sabotage Intel: secretly reduce EvidenceScore by 2
-                        taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - 2);
+                        evidenceService?.SubtractEvidence(2);
                         // All Gang players including self get suspicion -1 (covering tracks)
                         player.Suspicion = Mathf.Max(0, player.Suspicion - 1);
                         foreach (var kv in players)
@@ -1610,7 +1619,6 @@ namespace GanglandUndercover.Online
                         player.AbilityCooldown = 20f;
                         status = player.DisplayName + " 暗中破坏情报，证据链 -2。";
                         lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
-                        UpdateEvidenceMilestone();
                     }
 
                     break;
@@ -1657,9 +1665,20 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void CallEmergencyMeeting(string callerDisplayName)
         {
-            if (emergencyMeetingsLeft <= 0 || emergencyCooldownTimer > 0f) return;
-            emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-            emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
+            if (meetingService != null)
+            {
+                if (!meetingService.ConsumeEmergencyMeeting(callerDisplayName, 0UL))
+                {
+                    return;
+                }
+                SyncMeetingServiceToController();
+            }
+            else
+            {
+                if (emergencyMeetingsLeft <= 0 || emergencyCooldownTimer > 0f) return;
+                emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
+                emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
+            }
             BeginMeeting(callerDisplayName + " 按下警署紧急铃", 0UL, isEmergency: true);
             BroadcastSnapshot();
         }
@@ -1697,30 +1716,48 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (emergencyMeetingsLeft <= 0)
+            // Phase 2.1: 委托 MeetingService 处理紧急会议判定（次数/冷却/范围校验 + 状态变更）
+            if (meetingService != null)
             {
-                status = "紧急会议次数已用完，只能通过发现尸体报案。";
-                BroadcastSnapshot();
-                return;
-            }
-
-            if (emergencyCooldownTimer > 0f)
-            {
-                status = "紧急会议冷却中：" + Mathf.CeilToInt(emergencyCooldownTimer) + "s。";
-                BroadcastSnapshot();
-                return;
-            }
-
-            if (Vector3.Distance(player.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRangeFor(players.Count))
-            {
-                emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-                emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
+                if (!meetingService.TryReportOrEmergency(senderClientId, player))
+                {
+                    status = "附近没有尸体，也不在紧急铃范围内。";
+                    BroadcastSnapshot();
+                    return;
+                }
+                // 服务已通过 SyncControllerMeetingState 回写 controller 字段
+                SyncMeetingServiceToController();
                 BeginMeeting(player.DisplayName + " 按下警署紧急铃", senderClientId, isEmergency: true);
-                BroadcastSnapshot();
-                return;
             }
+            else
+            {
+                if (emergencyMeetingsLeft <= 0)
+                {
+                    status = "紧急会议次数已用完，只能通过发现尸体报案。";
+                    BroadcastSnapshot();
+                    return;
+                }
 
-            status = "附近没有尸体，也不在紧急铃范围内。";
+                if (emergencyCooldownTimer > 0f)
+                {
+                    status = "紧急会议冷却中：" + Mathf.CeilToInt(emergencyCooldownTimer) + "s。";
+                    BroadcastSnapshot();
+                    return;
+                }
+
+                if (Vector3.Distance(player.Position, mapService.ScaleMapPosition(Vector3.zero)) <= ruleSet.ReportRangeFor(players.Count))
+                {
+                    emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
+                    emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
+                    BeginMeeting(player.DisplayName + " 按下警署紧急铃", senderClientId, isEmergency: true);
+                }
+                else
+                {
+                    status = "附近没有尸体，也不在紧急铃范围内。";
+                    BroadcastSnapshot();
+                    return;
+                }
+            }
             BroadcastSnapshot();
         }
 
@@ -1730,15 +1767,7 @@ namespace GanglandUndercover.Online
             phaseTimer = ruleSet.MeetingIntroSecondsFor(players.Count);
             taskService.RepairSabotageEffect(SabotageType.Blackout);
             killSystem.reportCooldownTimer = ruleSet.ReportCooldownSecondsFor(players.Count);
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
+            minigameService?.Reset();
             votingService?.ClearVotes();
             lastMeetingReason = reason;
 
@@ -1759,6 +1788,7 @@ namespace GanglandUndercover.Online
             status = reason + "。进入会议。";
             AddCaseLog(status);
             _meetingCount++;
+            meetingService?.SetMeetingMetadata(reason, callerId, isEmergency);
             SyncMeetingStartedWithService(reason, callerId, isEmergency);
             PublishMeetingCalledEvent(callerId, isEmergency);
             syncManager?.OnMeetingBegan(reason, phase);
@@ -2033,9 +2063,15 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            float hardLimitSeconds = ruleSet != null ? ruleSet.MatchHardLimitSeconds : 1200f;
+            if (matchElapsedSeconds < hardLimitSeconds)
+            {
+                return;
+            }
+
             // 优先让 VictoryBridge 做超时判定
             if (syncManager != null && syncManager.TryTimeLimitEvaluation(
-                matchElapsedSeconds, ruleSet.MatchHardLimitSeconds, taskService.EvidenceScore, taskService.EvidenceTarget, tasks, out string bridgeResult))
+                matchElapsedSeconds, hardLimitSeconds, taskService.EvidenceScore, taskService.EvidenceTarget, tasks, out string bridgeResult))
             {
                 SetResult(bridgeResult);
                 return;
@@ -2063,10 +2099,7 @@ namespace GanglandUndercover.Online
             lastVoteOutcome = "尚未投票。";
             lastEvidenceEvent = "尚未取得关键证据。";
             lastSabotageEvent = "尚未发生破坏。";
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            submittingActiveTask = false;
+            minigameService?.ResetFull();
             status = resultStatus;
 
             // C4: 评估内鬼隐藏目标 — 存活至≤3人
@@ -2664,7 +2697,7 @@ namespace GanglandUndercover.Online
 
         private int EvidenceGainFor(int taskId, OnlineProfession profession, OnlineRole role)
         {
-            int gain = OnlineMatchUtils.TaskEvidenceValue(taskId);
+            int gain = Services.EvidenceService.TaskEvidenceValue(taskId);
 
             if (profession == OnlineProfession.Forensics)
             {
@@ -3095,14 +3128,13 @@ namespace GanglandUndercover.Online
             localRole = OnlineRole.Unassigned;
             privateRoles.Clear();
             votes.Clear();
-            killSystem.bodies.Clear();
-            killSystem.killCooldowns.Clear();
+            killSystem.Reset();
             abilityCooldowns.Clear();
             serverChatLastSendTimes.Clear();
             _botController?.Clear();
             migrationManager?.ResetState();
             BuildDefaultTasks();
-            taskService.EvidenceScore = 0;
+            evidenceService?.ResetEvidence(ruleSet != null ? ruleSet.DefaultEvidenceTarget : 42);
             evidenceMilestoneIndex = 0;
             lastMeetingReason = "尚未召开会议。";
             lastVoteOutcome = "尚未投票。";
@@ -3112,10 +3144,7 @@ namespace GanglandUndercover.Online
             emergencyCooldownTimer = 0f;
             aiActionGraceTimer = 0f;
             evidenceMilestoneIndex = 0;
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            submittingActiveTask = false;
+            minigameService?.ResetFull();
             emergencyMeetingsLeft = 0;
             _meetingCount = 0;
             if (meetingService != null)

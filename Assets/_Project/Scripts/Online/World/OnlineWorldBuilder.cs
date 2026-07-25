@@ -81,6 +81,7 @@ namespace GanglandUndercover.Online
         public int LimeZuLandmarkSpriteElementCount => _limeZuLandmarkSpriteElementCount;
         public int LimeZuTaskEventFeedbackSpriteElementCount => _limeZuTaskEventFeedbackSpriteElementCount;
         public int LimeZuRoomPropSpriteElementCount => _limeZuRoomPropSpriteElementCount;
+        public int RuntimeMapPropSpriteElementCount => _runtimeMapPropSpriteElementCount;
         public string FloorTileResourcePath => FloorTileResourcePathInternal;
         public string WallTileResourcePath => WallTileResourcePathInternal;
 
@@ -91,6 +92,7 @@ namespace GanglandUndercover.Online
         private int _limeZuLandmarkSpriteElementCount;
         private int _limeZuTaskEventFeedbackSpriteElementCount;
         private int _limeZuRoomPropSpriteElementCount;
+        private int _runtimeMapPropSpriteElementCount;
 
         private enum LimeZuVisualCounter
         {
@@ -557,12 +559,20 @@ namespace GanglandUndercover.Online
             _limeZuLandmarkSpriteElementCount = 0;
             _limeZuTaskEventFeedbackSpriteElementCount = 0;
             _limeZuRoomPropSpriteElementCount = 0;
+            _runtimeMapPropSpriteElementCount = 0;
         }
 
         private static bool IsRuntimeLimeZuResource(string resourcePath)
         {
             return !string.IsNullOrEmpty(resourcePath)
                 && resourcePath.IndexOf("Sprites/Tilesets/LimeZu/", StringComparison.Ordinal) >= 0;
+        }
+
+        private static bool IsRuntimeMapPropResource(string resourcePath)
+        {
+            return !string.IsNullOrEmpty(resourcePath)
+                && (resourcePath.IndexOf("Sprites/Tilesets/Harbour/props/", StringComparison.Ordinal) >= 0
+                    || resourcePath.IndexOf("Sprites/Tilesets/KowloonWalledCity/props/", StringComparison.Ordinal) >= 0);
         }
 
         private void CountLimeZuSpriteUse(string resourcePath, LimeZuVisualCounter counter)
@@ -589,6 +599,14 @@ namespace GanglandUndercover.Online
                 case LimeZuVisualCounter.RoomProp:
                     _limeZuRoomPropSpriteElementCount++;
                     break;
+            }
+        }
+
+        private void CountRuntimeMapPropUse(string resourcePath)
+        {
+            if (IsRuntimeMapPropResource(resourcePath))
+            {
+                _runtimeMapPropSpriteElementCount++;
             }
         }
 
@@ -667,6 +685,23 @@ namespace GanglandUndercover.Online
         {
             return CreateLimeZuRoomProp(propName, sprite, resourcePath, basePosition + offset,
                 scale, Color.white, rotationDegrees, solid);
+        }
+
+        private GameObject CreateRuntimeMapProp(string propName, Sprite sprite, string resourcePath, Vector3 position,
+            Vector3 scale, Color color, float rotationDegrees = 0f, bool solid = false)
+        {
+            GameObject prop = CreateShapeProp(propName, sprite, position, scale, color);
+            prop.transform.rotation = Quaternion.Euler(0f, 0f, rotationDegrees);
+            SetSortingFromZ(prop);
+
+            if (solid)
+            {
+                RegisterSolidObstacle(position, scale);
+                AttachPhysicsCollider(prop, scale, false);
+            }
+
+            CountRuntimeMapPropUse(resourcePath);
+            return prop;
         }
 
         public static Sprite CreateRoundedRectSprite(string spriteName, int size, int radius)
@@ -2843,15 +2878,13 @@ namespace GanglandUndercover.Online
 
         private void CreateVentGrate(string name, Vector3 position)
         {
-            Color vent = new Color(0.04f, 0.055f, 0.06f, 1f);
-            Color slit = new Color(0.42f, 0.48f, 0.48f, 1f);
             CreateModelProp(name + " CC0 Vent", name.Contains("主") ? "Props/Prop_Vent_Big.fbx" : "Props/Prop_Vent_Small.fbx", position + new Vector3(0f, 0f, 0.08f), new Vector3(0.48f, 0.48f, 0.14f), 0f);
-            CreateShapeProp(name, CircleSprite, position, new Vector3(0.32f, 0.32f, 0.06f), vent);
-
-            for (int i = 0; i < 3; i++)
-            {
-                CreateProp(name + " 格栅 " + i, position + new Vector3(0f, -0.08f + i * 0.08f, 0.03f), new Vector3(0.22f, 0.025f, 0.04f), slit);
-            }
+            bool rusted = name.IndexOf("东", StringComparison.Ordinal) >= 0
+                || name.IndexOf("右", StringComparison.Ordinal) >= 0
+                || name.EndsWith("B", StringComparison.Ordinal);
+            Sprite sprite = rusted ? Sprite2DAssetCache.KowloonVentIcon : Sprite2DAssetCache.VentIcon;
+            string resourcePath = rusted ? Sprite2DAssetCache.KowloonVentIconResourcePath : Sprite2DAssetCache.VentIconResourcePath;
+            CreateRuntimeMapProp("地图小件 " + name + " 实物通风口", sprite, resourcePath, position, new Vector3(0.42f, 0.42f, 0.06f), Color.white);
         }
 
         private void CreateSharedCityProps()
@@ -3835,17 +3868,14 @@ namespace GanglandUndercover.Online
 
         private void CreateContainerRack(Vector3 center, int seed)
         {
-            Color[] colors =
-            {
-                new Color(0.08f, 0.26f, 0.52f, 1f),
-                new Color(0.58f, 0.14f, 0.1f, 1f),
-                new Color(0.78f, 0.55f, 0.08f, 1f),
-                new Color(0.12f, 0.4f, 0.2f, 1f)
-            };
-
             for (int i = 0; i < 3; i++)
             {
-                CreateSolidProp("货柜舱迷你货柜 " + seed + "-" + i, center + new Vector3(-0.42f + i * 0.42f, 0f, 0f), new Vector3(0.34f, 0.24f, 0.18f), colors[(seed + i) % colors.Length]);
+                bool oldCrate = (seed + i) % 2 == 1;
+                Sprite sprite = oldCrate ? Sprite2DAssetCache.PropKowloonCrate : Sprite2DAssetCache.PropCrate;
+                string resourcePath = oldCrate ? Sprite2DAssetCache.KowloonPropCrateResourcePath : Sprite2DAssetCache.PropCrateResourcePath;
+                CreateRuntimeMapProp("地图小件 货柜舱迷你货柜 " + seed + "-" + i, sprite, resourcePath,
+                    center + new Vector3(-0.42f + i * 0.42f, 0f, 0f), new Vector3(0.34f, 0.24f, 0.18f),
+                    Color.white, i % 2 == 0 ? -3f : 4f, true);
             }
         }
 
@@ -5656,6 +5686,13 @@ namespace GanglandUndercover.Online
                 CreateModelProp("CC0 " + room.Name + " 墙面窄灯", "Props/Prop_Light_Small.fbx", room.Center + new Vector3(-halfWidth + 0.4f, halfHeight - 0.28f, 0.26f), new Vector3(0.18f, 0.18f, 0.16f), 0f);
                 CreateMeshBoxProp("屋顶 " + room.Name + " 门牌背光", room.Center + new Vector3(halfWidth * 0.18f, halfHeight - 0.3f, 0.31f), new Vector3(Mathf.Min(0.72f, room.Size.x * 0.22f), 0.04f, 0.08f), label);
                 CreateMeshBoxProp("2.5D 建筑体 " + room.Name + " 小型通风百叶", room.Center + new Vector3(halfWidth - 0.32f, halfHeight - 0.12f, 0.36f), new Vector3(0.28f, 0.035f, 0.13f), new Color(0.04f, 0.055f, 0.06f, 1f));
+                bool rustedVent = room.Label.IndexOf("黑市", StringComparison.Ordinal) >= 0
+                    || room.Label.IndexOf("后巷", StringComparison.Ordinal) >= 0;
+                Sprite ventSprite = rustedVent ? Sprite2DAssetCache.KowloonVentIcon : Sprite2DAssetCache.VentIcon;
+                string ventPath = rustedVent ? Sprite2DAssetCache.KowloonVentIconResourcePath : Sprite2DAssetCache.VentIconResourcePath;
+                CreateRuntimeMapProp("地图小件 " + room.Name + " 房间百叶贴图", ventSprite, ventPath,
+                    room.Center + new Vector3(halfWidth - 0.32f, halfHeight - 0.12f, 0.38f),
+                    new Vector3(0.28f, 0.28f, 0.08f), Color.white, rustedVent ? -4f : 0f);
 
                 for (int i = 0; i < 3; i++)
                 {
@@ -5683,23 +5720,32 @@ namespace GanglandUndercover.Online
 
         private void CreateCorridorServiceProps()
         {
-            Color metal = new Color(0.08f, 0.1f, 0.11f, 1f);
             Color screen = new Color(0.06f, 0.62f, 0.78f, 1f);
             Color warning = new Color(0.86f, 0.66f, 0.08f, 1f);
 
             for (int i = 0; i < 5; i++)
             {
                 float x = -5.4f + i * 2.7f;
-                CreateSolidProp("主走廊壁柜 " + i, new Vector3(x, 0.58f, 0.07f), new Vector3(0.32f, 0.22f, 0.2f), metal);
+                CreateRuntimeMapProp("地图小件 主走廊壁柜 " + i, Sprite2DAssetCache.PropKowloonCrate,
+                    Sprite2DAssetCache.KowloonPropCrateResourcePath, new Vector3(x, 0.58f, 0.07f),
+                    new Vector3(0.32f, 0.22f, 0.2f), Color.white, i % 2 == 0 ? -2f : 2f, true);
                 CreateProp("主走廊壁柜屏 " + i, new Vector3(x, 0.72f, 0.2f), new Vector3(0.22f, 0.04f, 0.06f), screen);
-                CreateSolidProp("下层走廊补给箱 " + i, new Vector3(-5.2f + i * 2.55f, -4.42f, 0.07f), new Vector3(0.42f, 0.2f, 0.18f), i % 2 == 0 ? warning : metal);
+                Sprite supplySprite = i % 2 == 0 ? Sprite2DAssetCache.PropCrate : Sprite2DAssetCache.PropBarrel;
+                string supplyPath = i % 2 == 0 ? Sprite2DAssetCache.PropCrateResourcePath : Sprite2DAssetCache.PropBarrelResourcePath;
+                CreateRuntimeMapProp("地图小件 下层走廊补给箱 " + i, supplySprite, supplyPath,
+                    new Vector3(-5.2f + i * 2.55f, -4.42f, 0.07f), new Vector3(0.42f, 0.28f, 0.18f),
+                    Color.white, i % 2 == 0 ? 3f : -4f, true);
             }
 
             for (int i = 0; i < 4; i++)
             {
                 float y = -2.5f + i * 1.45f;
-                CreateSolidProp("左竖连廊封控箱 " + i, new Vector3(-7.45f, y, 0.07f), new Vector3(0.22f, 0.34f, 0.18f), metal);
-                CreateSolidProp("右竖连廊封控箱 " + i, new Vector3(7.65f, y, 0.07f), new Vector3(0.22f, 0.34f, 0.18f), metal);
+                CreateRuntimeMapProp("地图小件 左竖连廊封控箱 " + i, Sprite2DAssetCache.PropCrate,
+                    Sprite2DAssetCache.PropCrateResourcePath, new Vector3(-7.45f, y, 0.07f),
+                    new Vector3(0.26f, 0.34f, 0.18f), Color.white, 90f, true);
+                CreateRuntimeMapProp("地图小件 右竖连廊封控箱 " + i, Sprite2DAssetCache.PropKowloonCrate,
+                    Sprite2DAssetCache.KowloonPropCrateResourcePath, new Vector3(7.65f, y, 0.07f),
+                    new Vector3(0.26f, 0.34f, 0.18f), Color.white, -90f, true);
             }
 
             CreateProp("主走廊红色警戒条", new Vector3(2.2f, 0.52f, 0.08f), new Vector3(1.2f, 0.08f, 0.08f), new Color(0.86f, 0.08f, 0.06f, 1f));

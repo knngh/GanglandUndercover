@@ -15,6 +15,8 @@ namespace GanglandUndercover.Online
         private const string LobbyPropertyRelayCode = "relayCode";
         private const string LobbyPropertyMap = "map";
         private const string LobbyPropertyRules = "rules";
+        private const string LobbyPropertyHostMigration = "hostMigration";
+        private const string LobbyHostMigrationValue = "relay-replacement";
         private const string LocalRelayLobbyRoomId = "local-relay-host";
 
         private readonly List<LobbyRoomCandidate> lobbyRoomCandidates = new List<LobbyRoomCandidate>();
@@ -34,6 +36,31 @@ namespace GanglandUndercover.Online
         public bool LobbyPublishInProgress => lobbyPublishInProgress;
         public bool LobbyJoinInProgress => lobbyJoinInProgress;
         public string LobbyBrowserStatus => lobbyBrowserStatus;
+        public bool HasDetectedHostMigrationRelayRoom
+        {
+            get
+            {
+                if (!TryGetSelectedLobbyRoom(out LobbyRoomCandidate room))
+                {
+                    return false;
+                }
+
+                LobbyRoomSessionJoin join = BuildHostMigrationRelayRoomSessionJoin(
+                    disconnectedNetworkSession,
+                    roomName,
+                    room.Id,
+                    room.Name,
+                    room.RelayCode,
+                    room.PlayerCount,
+                    room.MaxPlayers,
+                    room.IsLocked,
+                    room.HasPassword,
+                    room.IsHostMigration,
+                    room.Id == LocalRelayLobbyRoomId);
+                return join.CanJoinRelay;
+            }
+        }
+
         public string LobbyBrowserSummary => BuildLobbyBrowserSummary(
             lobbyBrowserStatus,
             lobbyBrowserRefreshInProgress,
@@ -49,7 +76,17 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            _ = PublishRelayLobbySessionAsync();
+            _ = PublishRelayLobbySessionAsync(false);
+        }
+
+        private void RequestPublishRelayMigrationLobbySession()
+        {
+            if (lobbyPublishInProgress)
+            {
+                return;
+            }
+
+            _ = PublishRelayLobbySessionAsync(true);
         }
 
         public void RequestRefreshLobbyRooms()
@@ -64,14 +101,12 @@ namespace GanglandUndercover.Online
 
         public void RequestJoinSelectedLobbyRoom()
         {
-            if (selectedLobbyRoomIndex < 0 || selectedLobbyRoomIndex >= lobbyRoomCandidates.Count)
+            if (!TryGetSelectedLobbyRoom(out LobbyRoomCandidate room))
             {
                 lobbyBrowserStatus = "请先刷新并选择一个 Lobby 房间。";
                 status = lobbyBrowserStatus;
                 return;
             }
-
-            LobbyRoomCandidate room = lobbyRoomCandidates[selectedLobbyRoomIndex];
 
             if (IsOnline)
             {
@@ -90,11 +125,67 @@ namespace GanglandUndercover.Online
                 room.Id == LocalRelayLobbyRoomId);
 
             lobbyBrowserStatus = "已选择 Lobby 房间：" + room.Name + "。";
+            BeginLobbyRoomJoin(join, room.Name);
+        }
 
+        public void RequestJoinDetectedHostMigrationRelayRoom()
+        {
+            if (!TryGetSelectedLobbyRoom(out LobbyRoomCandidate room))
+            {
+                lobbyBrowserStatus = "请先刷新 Lobby 房间列表，等待 Host migration 新 Relay 房间。";
+                status = lobbyBrowserStatus;
+                return;
+            }
+
+            if (IsOnline)
+            {
+                lobbyBrowserStatus = "已在房间内，需先离开当前房间。";
+                status = lobbyBrowserStatus;
+                return;
+            }
+
+            LobbyRoomSessionJoin join = BuildHostMigrationRelayRoomSessionJoin(
+                disconnectedNetworkSession,
+                roomName,
+                room.Id,
+                room.Name,
+                room.RelayCode,
+                room.PlayerCount,
+                room.MaxPlayers,
+                room.IsLocked,
+                room.HasPassword,
+                room.IsHostMigration,
+                room.Id == LocalRelayLobbyRoomId);
+
+            if (!join.CanJoinRelay)
+            {
+                lobbyBrowserStatus = join.StatusText;
+                status = join.StatusText;
+                return;
+            }
+
+            lobbyBrowserStatus = "正在加入 Host migration 新 Relay 房间：" + room.Name + "。";
+            BeginLobbyRoomJoin(join, room.Name);
+        }
+
+        private bool TryGetSelectedLobbyRoom(out LobbyRoomCandidate room)
+        {
+            if (selectedLobbyRoomIndex < 0 || selectedLobbyRoomIndex >= lobbyRoomCandidates.Count)
+            {
+                room = default(LobbyRoomCandidate);
+                return false;
+            }
+
+            room = lobbyRoomCandidates[selectedLobbyRoomIndex];
+            return true;
+        }
+
+        private void BeginLobbyRoomJoin(LobbyRoomSessionJoin join, string roomNameValue)
+        {
             if (join.CanJoinSession)
             {
                 SetRelayJoinInput(join.RelayCode);
-                _ = JoinLobbyRoomSessionThenRelayAsync(join, room.Name);
+                _ = JoinLobbyRoomSessionThenRelayAsync(join, roomNameValue);
                 return;
             }
 
@@ -185,7 +276,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private async Task PublishRelayLobbySessionAsync()
+        private async Task PublishRelayLobbySessionAsync(bool hostMigrationSession)
         {
             string safeRelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayJoinCode);
             if (string.IsNullOrWhiteSpace(safeRelayCode))
@@ -224,12 +315,13 @@ namespace GanglandUndercover.Online
                 }
 
                 string rules = CurrentLobbyRuleSummary();
-                SessionOptions options = BuildRelayLobbySessionOptions(
+                SessionOptions options = BuildRelayLobbySessionOptionsCore(
                     roomName,
                     roomMaxPlayers,
                     safeRelayCode,
                     ActiveMapTypeLobbyLabel(),
-                    rules);
+                    rules,
+                    hostMigrationSession);
 
                 IHostSession createdSession = await MultiplayerService.Instance.CreateSessionAsync(options);
                 if (publishGeneration != lobbyPublishGeneration)
@@ -301,10 +393,23 @@ namespace GanglandUndercover.Online
                     }
                 }
 
-                selectedLobbyRoomIndex = lobbyRoomCandidates.Count > 0 ? 0 : -1;
-                lobbyBrowserStatus = lobbyRoomCandidates.Count == 0
-                    ? "Lobby 房间列表为空。"
-                    : "Lobby 房间列表已刷新：" + lobbyRoomCandidates.Count + " 间。";
+                int migrationRoomIndex = disconnectedNetworkSession
+                    ? FindHostMigrationRelayRoomIndex(lobbyRoomCandidates, roomName)
+                    : -1;
+                selectedLobbyRoomIndex = migrationRoomIndex >= 0
+                    ? migrationRoomIndex
+                    : lobbyRoomCandidates.Count > 0 ? 0 : -1;
+                if (migrationRoomIndex >= 0)
+                {
+                    lobbyBrowserStatus = "发现 Host migration 新 Relay 房间："
+                        + lobbyRoomCandidates[migrationRoomIndex].RelayCode + "。";
+                }
+                else
+                {
+                    lobbyBrowserStatus = lobbyRoomCandidates.Count == 0
+                        ? "Lobby 房间列表为空。"
+                        : "Lobby 房间列表已刷新：" + lobbyRoomCandidates.Count + " 间。";
+                }
             }
             catch (Exception exception)
             {
@@ -465,6 +570,39 @@ namespace GanglandUndercover.Online
             string mapNameValue,
             string ruleSummaryValue)
         {
+            return BuildRelayLobbySessionOptionsCore(
+                roomNameValue,
+                maxPlayersValue,
+                relayCodeValue,
+                mapNameValue,
+                ruleSummaryValue,
+                false);
+        }
+
+        private static SessionOptions BuildRelayMigrationLobbySessionOptions(
+            string roomNameValue,
+            int maxPlayersValue,
+            string relayCodeValue,
+            string mapNameValue,
+            string ruleSummaryValue)
+        {
+            return BuildRelayLobbySessionOptionsCore(
+                roomNameValue,
+                maxPlayersValue,
+                relayCodeValue,
+                mapNameValue,
+                ruleSummaryValue,
+                true);
+        }
+
+        private static SessionOptions BuildRelayLobbySessionOptionsCore(
+            string roomNameValue,
+            int maxPlayersValue,
+            string relayCodeValue,
+            string mapNameValue,
+            string ruleSummaryValue,
+            bool hostMigrationSession)
+        {
             return new SessionOptions
             {
                 Type = LobbySessionTypeValue,
@@ -472,7 +610,11 @@ namespace GanglandUndercover.Online
                 MaxPlayers = Mathf.Max(1, maxPlayersValue),
                 IsPrivate = false,
                 IsLocked = false,
-                SessionProperties = BuildRelayLobbySessionProperties(relayCodeValue, mapNameValue, ruleSummaryValue)
+                SessionProperties = BuildRelayLobbySessionPropertiesCore(
+                    relayCodeValue,
+                    mapNameValue,
+                    ruleSummaryValue,
+                    hostMigrationSession)
             };
         }
 
@@ -489,7 +631,16 @@ namespace GanglandUndercover.Online
             string mapNameValue,
             string ruleSummaryValue)
         {
-            return new Dictionary<string, SessionProperty>
+            return BuildRelayLobbySessionPropertiesCore(relayCodeValue, mapNameValue, ruleSummaryValue, false);
+        }
+
+        private static Dictionary<string, SessionProperty> BuildRelayLobbySessionPropertiesCore(
+            string relayCodeValue,
+            string mapNameValue,
+            string ruleSummaryValue,
+            bool hostMigrationSession)
+        {
+            Dictionary<string, SessionProperty> properties = new Dictionary<string, SessionProperty>
             {
                 {
                     LobbyPropertyGameType,
@@ -508,6 +659,15 @@ namespace GanglandUndercover.Online
                     new SessionProperty(OnlineMatchUtils.LimitText(ruleSummaryValue, 28, "默认规则"), VisibilityPropertyOptions.Public)
                 }
             };
+
+            if (hostMigrationSession)
+            {
+                properties[LobbyPropertyHostMigration] = new SessionProperty(
+                    LobbyHostMigrationValue,
+                    VisibilityPropertyOptions.Public);
+            }
+
+            return properties;
         }
 
         private static LobbyRoomCandidate FromSessionInfo(ISessionInfo session)
@@ -515,6 +675,7 @@ namespace GanglandUndercover.Online
             string relayCode = GetSessionProperty(session.Properties, LobbyPropertyRelayCode);
             string map = GetSessionProperty(session.Properties, LobbyPropertyMap);
             string rules = GetSessionProperty(session.Properties, LobbyPropertyRules);
+            string migration = GetSessionProperty(session.Properties, LobbyPropertyHostMigration);
             int maxPlayers = Mathf.Max(1, session.MaxPlayers);
             int playerCount = Mathf.Clamp(maxPlayers - session.AvailableSlots, 0, maxPlayers);
 
@@ -527,7 +688,8 @@ namespace GanglandUndercover.Online
                 session.HasPassword,
                 map,
                 rules,
-                relayCode);
+                relayCode,
+                IsHostMigrationSessionValue(migration));
         }
 
         private void UpsertLocalRelayLobbyRoom()
@@ -556,7 +718,8 @@ namespace GanglandUndercover.Online
                 false,
                 ActiveMapTypeLobbyLabel(),
                 rules,
-                safeRelayCode));
+                safeRelayCode,
+                false));
             selectedLobbyRoomIndex = 0;
 
             if (!string.IsNullOrWhiteSpace(publishedLobbySessionCode))
@@ -632,6 +795,57 @@ namespace GanglandUndercover.Online
             return new LobbyRoomSessionJoin(safeSessionId, safeRelayCode, true, canJoinSession, statusText);
         }
 
+        private static LobbyRoomSessionJoin BuildHostMigrationRelayRoomSessionJoin(
+            bool hasDisconnectedNetworkSession,
+            string expectedRoomNameValue,
+            string sessionIdValue,
+            string candidateRoomNameValue,
+            string relayCodeValue,
+            int playerCountValue,
+            int maxPlayersValue,
+            bool isLocked,
+            bool hasPassword,
+            bool isHostMigration,
+            bool allowLocalPreview)
+        {
+            if (!hasDisconnectedNetworkSession)
+            {
+                return new LobbyRoomSessionJoin(
+                    sessionIdValue,
+                    relayCodeValue,
+                    false,
+                    false,
+                    "当前没有断线恢复会话，不能加入 Host migration 房间。");
+            }
+
+            if (!IsHostMigrationRelayCandidate(
+                    expectedRoomNameValue,
+                    candidateRoomNameValue,
+                    relayCodeValue,
+                    playerCountValue,
+                    maxPlayersValue,
+                    isLocked,
+                    hasPassword,
+                    isHostMigration ? LobbyHostMigrationValue : string.Empty))
+            {
+                return new LobbyRoomSessionJoin(
+                    sessionIdValue,
+                    relayCodeValue,
+                    false,
+                    false,
+                    "请选择同房间且可加入的 Host migration 新 Relay 房间。");
+            }
+
+            return BuildLobbyRoomSessionJoin(
+                sessionIdValue,
+                relayCodeValue,
+                playerCountValue,
+                maxPlayersValue,
+                isLocked,
+                hasPassword,
+                allowLocalPreview);
+        }
+
         private static string BuildLobbyPublishStatus(bool publishInProgress, bool published, string sessionCode)
         {
             if (publishInProgress)
@@ -691,7 +905,7 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < count; i++)
             {
                 LobbyRoomCandidate room = rooms[i];
-                builder.Append(BuildLobbyRoomLine(
+                builder.Append(BuildLobbyRoomLineCore(
                     i + 1,
                     room.Name,
                     room.PlayerCount,
@@ -700,7 +914,8 @@ namespace GanglandUndercover.Online
                     room.HasPassword,
                     room.MapName,
                     room.RuleSummary,
-                    room.RelayCode));
+                    room.RelayCode,
+                    room.IsHostMigration));
 
                 if (i < count - 1)
                 {
@@ -722,6 +937,31 @@ namespace GanglandUndercover.Online
             string ruleSummaryValue,
             string relayCodeValue)
         {
+            return BuildLobbyRoomLineCore(
+                displayIndex,
+                roomNameValue,
+                playerCountValue,
+                maxPlayersValue,
+                isLocked,
+                hasPassword,
+                mapNameValue,
+                ruleSummaryValue,
+                relayCodeValue,
+                false);
+        }
+
+        private static string BuildLobbyRoomLineCore(
+            int displayIndex,
+            string roomNameValue,
+            int playerCountValue,
+            int maxPlayersValue,
+            bool isLocked,
+            bool hasPassword,
+            string mapNameValue,
+            string ruleSummaryValue,
+            string relayCodeValue,
+            bool isHostMigration)
+        {
             int maxPlayers = Mathf.Max(1, maxPlayersValue);
             int playerCount = Mathf.Clamp(playerCountValue, 0, maxPlayers);
             string safeName = OnlineMatchUtils.LimitText(roomNameValue, 24, "未命名房间");
@@ -736,7 +976,68 @@ namespace GanglandUndercover.Online
                 + " | " + joinState
                 + " | " + safeMap
                 + " | " + safeRules
-                + (string.IsNullOrEmpty(safeRelayCode) ? string.Empty : " | Relay " + safeRelayCode);
+                + (string.IsNullOrEmpty(safeRelayCode) ? string.Empty : " | Relay " + safeRelayCode)
+                + (isHostMigration ? " | Host迁移" : string.Empty);
+        }
+
+        private static bool IsHostMigrationRelayCandidate(
+            string expectedRoomNameValue,
+            string candidateRoomNameValue,
+            string relayCodeValue,
+            int playerCountValue,
+            int maxPlayersValue,
+            bool isLocked,
+            bool hasPassword,
+            string migrationValue)
+        {
+            string expectedRoomName = OnlineMatchUtils.LimitText(expectedRoomNameValue, 24, "未命名房间");
+            string candidateRoomName = OnlineMatchUtils.LimitText(candidateRoomNameValue, 24, "未命名房间");
+            string safeRelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayCodeValue);
+            int maxPlayers = Mathf.Max(1, maxPlayersValue);
+            int playerCount = Mathf.Clamp(playerCountValue, 0, maxPlayers);
+
+            return IsHostMigrationSessionValue(migrationValue)
+                && !string.IsNullOrWhiteSpace(expectedRoomName)
+                && string.Equals(expectedRoomName, candidateRoomName, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(safeRelayCode)
+                && !isLocked
+                && !hasPassword
+                && playerCount < maxPlayers;
+        }
+
+        private static int FindHostMigrationRelayRoomIndex(List<LobbyRoomCandidate> rooms, string expectedRoomNameValue)
+        {
+            if (rooms == null || rooms.Count == 0)
+            {
+                return -1;
+            }
+
+            for (int i = 0; i < rooms.Count; i++)
+            {
+                LobbyRoomCandidate room = rooms[i];
+                if (IsHostMigrationRelayCandidate(
+                    expectedRoomNameValue,
+                    room.Name,
+                    room.RelayCode,
+                    room.PlayerCount,
+                    room.MaxPlayers,
+                    room.IsLocked,
+                    room.HasPassword,
+                    room.IsHostMigration ? LobbyHostMigrationValue : string.Empty))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static bool IsHostMigrationSessionValue(string migrationValue)
+        {
+            return string.Equals(
+                string.IsNullOrWhiteSpace(migrationValue) ? string.Empty : migrationValue.Trim(),
+                LobbyHostMigrationValue,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static string RoomJoinState(int playerCount, int maxPlayers, bool isLocked, bool hasPassword, string relayCode)
@@ -805,6 +1106,7 @@ namespace GanglandUndercover.Online
             public readonly string MapName;
             public readonly string RuleSummary;
             public readonly string RelayCode;
+            public readonly bool IsHostMigration;
 
             public LobbyRoomCandidate(
                 string id,
@@ -815,7 +1117,8 @@ namespace GanglandUndercover.Online
                 bool hasPassword,
                 string mapName,
                 string ruleSummary,
-                string relayCode)
+                string relayCode,
+                bool isHostMigration = false)
             {
                 Id = string.IsNullOrWhiteSpace(id) ? string.Empty : id.Trim();
                 Name = string.IsNullOrWhiteSpace(name) ? "未命名房间" : name.Trim();
@@ -826,6 +1129,7 @@ namespace GanglandUndercover.Online
                 MapName = string.IsNullOrWhiteSpace(mapName) ? "地图待定" : mapName.Trim();
                 RuleSummary = string.IsNullOrWhiteSpace(ruleSummary) ? "默认规则" : ruleSummary.Trim();
                 RelayCode = OnlineMatchUtils.CleanRelayJoinInput(relayCode);
+                IsHostMigration = isHostMigration;
             }
         }
     }

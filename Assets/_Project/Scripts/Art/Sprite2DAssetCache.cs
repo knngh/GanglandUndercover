@@ -31,7 +31,7 @@ namespace GanglandUndercover.Art
         // ══════════════════════════════════════════════════════
         // 道具（32×32）
         // ══════════════════════════════════════════════════════
-        public static Sprite PropCrate, PropBarrel, PropDesk, PropCabinet, PropEvidenceBox;
+        public static Sprite PropCrate, PropBarrel, PropKowloonCrate, PropDesk, PropCabinet, PropEvidenceBox;
         public static Sprite LandmarkOfficeSign1, LandmarkOfficeSign2, LandmarkMailbox, LandmarkTruckFront;
         public static Sprite LandmarkUmbrella, LandmarkTinyTable, LandmarkPackage, LandmarkAirDuct;
         public static Sprite LandmarkDoorOpen, LandmarkPottedPlant;
@@ -53,8 +53,13 @@ namespace GanglandUndercover.Art
         public static Sprite InteriorRoomPropJailLockerFull, InteriorRoomPropMuseumLaserHorizontal;
         public static Sprite InteriorRoomPropTrapdoor, InteriorRoomPropTicketMachine;
         public static Sprite InteriorRoomPropHospitalTvReportage, InteriorRoomPropFishCuttingSink;
-        public static Sprite VentIcon, CameraIcon;
+        public static Sprite VentIcon, KowloonVentIcon, CameraIcon;
 
+        public const string HarbourPropCrateWoodPath = "Sprites/Tilesets/Harbour/props/tile_crate_wood";
+        public const string HarbourPropBarrelOilPath = "Sprites/Tilesets/Harbour/props/tile_barrel_oil";
+        public const string HarbourPropVentBackalleyPath = "Sprites/Tilesets/Harbour/props/tile_vent_backalley";
+        public const string KowloonPropCrateOldPath = "Sprites/Tilesets/KowloonWalledCity/props/tile_crate_old";
+        public const string KowloonPropVentRustPath = "Sprites/Tilesets/KowloonWalledCity/props/tile_vent_rust";
         public const string LimeZuInteriorFloorTilePath = "Sprites/Tilesets/LimeZu/Interiors/floors/room-builder-floors-16";
         public const string LimeZuExteriorFloorTilePath = "Sprites/Tilesets/LimeZu/Exteriors/floors/asphalt-48-a";
         public const string LimeZuInteriorWallTilePath = "Sprites/Tilesets/LimeZu/Interiors/walls/room-builder-walls-16";
@@ -116,6 +121,9 @@ namespace GanglandUndercover.Art
         public static string FloorTileAltResourcePath { get; private set; } = string.Empty;
         public static string CorridorTileResourcePath { get; private set; } = string.Empty;
         public static string WallBlockResourcePath { get; private set; } = string.Empty;
+        public static string PropCrateResourcePath { get; private set; } = string.Empty;
+        public static string PropBarrelResourcePath { get; private set; } = string.Empty;
+        public static string KowloonPropCrateResourcePath { get; private set; } = string.Empty;
         public static string PropDeskResourcePath { get; private set; } = string.Empty;
         public static string PropCabinetResourcePath { get; private set; } = string.Empty;
         public static string PropEvidenceBoxResourcePath { get; private set; } = string.Empty;
@@ -171,6 +179,8 @@ namespace GanglandUndercover.Art
         public static string InteriorRoomPropTicketMachineResourcePath { get; private set; } = string.Empty;
         public static string InteriorRoomPropHospitalTvReportageResourcePath { get; private set; } = string.Empty;
         public static string InteriorRoomPropFishCuttingSinkResourcePath { get; private set; } = string.Empty;
+        public static string VentIconResourcePath { get; private set; } = string.Empty;
+        public static string KowloonVentIconResourcePath { get; private set; } = string.Empty;
 
         // ══════════════════════════════════════════════════════
         // VFX / 特效
@@ -211,8 +221,12 @@ namespace GanglandUndercover.Art
             WallBlockResourcePath = wallBlockPath;
 
             // ─── 道具 ───
-            PropCrate      = DrawCrate(32);
-            PropBarrel     = DrawBarrel(32);
+            PropCrate      = LoadRuntimeTile(HarbourPropCrateWoodPath, out var propCratePath) ?? DrawCrate(32);
+            PropCrateResourcePath = propCratePath;
+            PropBarrel     = LoadRuntimeTile(HarbourPropBarrelOilPath, out var propBarrelPath) ?? DrawBarrel(32);
+            PropBarrelResourcePath = propBarrelPath;
+            PropKowloonCrate = LoadRuntimeTile(KowloonPropCrateOldPath, out var kowloonPropCratePath) ?? PropCrate;
+            KowloonPropCrateResourcePath = kowloonPropCratePath;
             PropDesk       = LoadRuntimeTile(LimeZuOfficePropsTilePath, out var propDeskPath) ?? DrawDesk(32);
             PropDeskResourcePath = propDeskPath;
             PropCabinet    = LoadRuntimeTile(LimeZuOfficeWallPropsTilePath, out var propCabinetPath) ?? DrawCabinet(32);
@@ -323,7 +337,10 @@ namespace GanglandUndercover.Art
             InteriorRoomPropHospitalTvReportageResourcePath = interiorRoomPropHospitalTvReportagePath;
             InteriorRoomPropFishCuttingSink = LoadRuntimeTile(LimeZuInteriorRoomPropFishCuttingSinkPath, out var interiorRoomPropFishCuttingSinkPath) ?? PropCabinet;
             InteriorRoomPropFishCuttingSinkResourcePath = interiorRoomPropFishCuttingSinkPath;
-            VentIcon       = DrawVentGrate(32);
+            VentIcon       = LoadRuntimeTile(HarbourPropVentBackalleyPath, out var ventIconPath) ?? DrawVentGrate(32);
+            VentIconResourcePath = ventIconPath;
+            KowloonVentIcon = LoadRuntimeTile(KowloonPropVentRustPath, out var kowloonVentIconPath) ?? VentIcon;
+            KowloonVentIconResourcePath = kowloonVentIconPath;
             CameraIcon     = DrawCameraHousing(32);
 
             // ─── VFX ───
@@ -357,35 +374,35 @@ namespace GanglandUndercover.Art
 
             var set = new ProfSpriteSet();
 
-            // Helper: load Texture2D, convert to Sprite (pixel-art, point filter, pivot bottom-center)
-            System.Func<string, Sprite> LoadSprite = (path) =>
+            // Helper: load Texture2D, convert to Sprite (pixel-art, point filter)
+            System.Func<string, Vector2, float, Sprite> LoadSprite = (path, pivot, pixelsPerUnit) =>
             {
                 var tex = Resources.Load<Texture2D>(path);
                 if (tex == null) return null;
                 tex.filterMode = FilterMode.Point;
                 return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
-                    new Vector2(0.5f, 0f), 16f);
+                    pivot, pixelsPerUnit);
             };
 
             // Frame mapping: CC0 idle→Frame0(站立), walk_0→Frame1, walk_1→Frame2
-            set.Front_Frame0 = LoadSprite($"{basePath}/Front/idle");
-            set.Front_Frame1 = LoadSprite($"{basePath}/Front/walk_0");
-            set.Front_Frame2 = LoadSprite($"{basePath}/Front/walk_1");
+            set.Front_Frame0 = LoadSprite($"{basePath}/Front/idle", new Vector2(0.5f, 0f), 16f);
+            set.Front_Frame1 = LoadSprite($"{basePath}/Front/walk_0", new Vector2(0.5f, 0f), 16f);
+            set.Front_Frame2 = LoadSprite($"{basePath}/Front/walk_1", new Vector2(0.5f, 0f), 16f);
 
-            set.Back_Frame0  = LoadSprite($"{basePath}/Back/idle");
-            set.Back_Frame1  = LoadSprite($"{basePath}/Back/walk_0");
-            set.Back_Frame2  = LoadSprite($"{basePath}/Back/walk_1");
+            set.Back_Frame0  = LoadSprite($"{basePath}/Back/idle", new Vector2(0.5f, 0f), 16f);
+            set.Back_Frame1  = LoadSprite($"{basePath}/Back/walk_0", new Vector2(0.5f, 0f), 16f);
+            set.Back_Frame2  = LoadSprite($"{basePath}/Back/walk_1", new Vector2(0.5f, 0f), 16f);
 
-            set.Left_Frame0  = LoadSprite($"{basePath}/Left/idle");
-            set.Left_Frame1  = LoadSprite($"{basePath}/Left/walk_0");
-            set.Left_Frame2  = LoadSprite($"{basePath}/Left/walk_1");
+            set.Left_Frame0  = LoadSprite($"{basePath}/Left/idle", new Vector2(0.5f, 0f), 16f);
+            set.Left_Frame1  = LoadSprite($"{basePath}/Left/walk_0", new Vector2(0.5f, 0f), 16f);
+            set.Left_Frame2  = LoadSprite($"{basePath}/Left/walk_1", new Vector2(0.5f, 0f), 16f);
 
-            set.Right_Frame0 = LoadSprite($"{basePath}/Right/idle");
-            set.Right_Frame1 = LoadSprite($"{basePath}/Right/walk_0");
-            set.Right_Frame2 = LoadSprite($"{basePath}/Right/walk_1");
+            set.Right_Frame0 = LoadSprite($"{basePath}/Right/idle", new Vector2(0.5f, 0f), 16f);
+            set.Right_Frame1 = LoadSprite($"{basePath}/Right/walk_0", new Vector2(0.5f, 0f), 16f);
+            set.Right_Frame2 = LoadSprite($"{basePath}/Right/walk_1", new Vector2(0.5f, 0f), 16f);
 
-            // Death/Avatar: use procedural fallback (CC0 doesn't provide these)
-            // Will be generated alongside and populated by the calling code
+            set.Dead = LoadSprite($"{basePath}/death", new Vector2(0.5f, 0.5f), 64f);
+            set.Avatar = LoadSprite($"{basePath}/avatar", new Vector2(0.5f, 0.5f), 32f);
 
             Debug.Log($"[Sprite2DAssetCache] Loaded CC0 pixel sprites for {prof}");
 
@@ -438,29 +455,7 @@ namespace GanglandUndercover.Art
                     continue;
                 }
 
-                Color main  = ProfessionPalette.MainColor(prof);
-                Color accent= ProfessionPalette.AccentColor(prof);
-                set = new ProfSpriteSet();
-
-                // 正面：3帧行走（-1左腿前, 0站立, 1右腿前）
-                set.Front_Frame0 = DrawCharFront(prof, main, accent, 0);
-                set.Front_Frame1 = DrawCharFront(prof, main, accent, -1);
-                set.Front_Frame2 = DrawCharFront(prof, main, accent, 1);
-                // 背面：3帧行走
-                set.Back_Frame0  = DrawCharBack(prof, main, accent, 0);
-                set.Back_Frame1  = DrawCharBack(prof, main, accent, -1);
-                set.Back_Frame2  = DrawCharBack(prof, main, accent, 1);
-                // 侧面：左右各3帧
-                set.Left_Frame0  = DrawCharSide(prof, main, accent, 0, true);
-                set.Left_Frame1  = DrawCharSide(prof, main, accent, -1, true);
-                set.Left_Frame2  = DrawCharSide(prof, main, accent, 1, true);
-                set.Right_Frame0 = DrawCharSide(prof, main, accent, 0, false);
-                set.Right_Frame1 = DrawCharSide(prof, main, accent, -1, false);
-                set.Right_Frame2 = DrawCharSide(prof, main, accent, 1, false);
-                // 死亡+头像
-                set.Dead     = DrawCharDead(prof, main);
-                set.Avatar   = DrawCharAvatar(prof, main, accent);
-
+                set = CreateProceduralCharacterSet(prof);
                 CharacterSets[prof] = set;
             }
 
@@ -469,6 +464,34 @@ namespace GanglandUndercover.Art
             CharBody_Back  = def.Back_Frame0;
             CharBody_Left  = def.Left_Frame0;
             CharBody_Right = def.Right_Frame0;
+        }
+
+        public static ProfSpriteSet CreateProceduralCharacterSet(Online.OnlineProfession prof)
+        {
+            Color main = ProfessionPalette.MainColor(prof);
+            Color accent = ProfessionPalette.AccentColor(prof);
+            var set = new ProfSpriteSet();
+
+            // 正面：3帧行走（-1左腿前, 0站立, 1右腿前）
+            set.Front_Frame0 = DrawCharFront(prof, main, accent, 0);
+            set.Front_Frame1 = DrawCharFront(prof, main, accent, -1);
+            set.Front_Frame2 = DrawCharFront(prof, main, accent, 1);
+            // 背面：3帧行走
+            set.Back_Frame0 = DrawCharBack(prof, main, accent, 0);
+            set.Back_Frame1 = DrawCharBack(prof, main, accent, -1);
+            set.Back_Frame2 = DrawCharBack(prof, main, accent, 1);
+            // 侧面：左右各3帧
+            set.Left_Frame0 = DrawCharSide(prof, main, accent, 0, true);
+            set.Left_Frame1 = DrawCharSide(prof, main, accent, -1, true);
+            set.Left_Frame2 = DrawCharSide(prof, main, accent, 1, true);
+            set.Right_Frame0 = DrawCharSide(prof, main, accent, 0, false);
+            set.Right_Frame1 = DrawCharSide(prof, main, accent, -1, false);
+            set.Right_Frame2 = DrawCharSide(prof, main, accent, 1, false);
+            // 死亡+头像
+            set.Dead = DrawCharDead(prof, main);
+            set.Avatar = DrawCharAvatar(prof, main, accent);
+
+            return set;
         }
 
         // ═══════════════════════════════════════════════════

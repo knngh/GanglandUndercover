@@ -98,10 +98,10 @@ namespace GanglandUndercover.Online
             {
                 case CriticalTaskType.EvidenceDestruction:
                     // 证据分 -40%
-                    if (taskService != null)
+                    if (evidenceService != null)
                     {
-                        int penalty = Mathf.RoundToInt(taskService.EvidenceScore * 0.4f);
-                        taskService.EvidenceScore = Mathf.Max(0, taskService.EvidenceScore - penalty);
+                        int penalty = Mathf.RoundToInt(evidenceService.EvidenceScore * 0.4f);
+                        evidenceService.SubtractEvidence(penalty);
                     }
                     status = "✗ 证据销毁失败 — 证据分 -40%";
                     break;

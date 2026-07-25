@@ -13,11 +13,21 @@ namespace GanglandUndercover.Art
     ///   502 — 通讯干扰 glitch
     ///   503 — 巡逻警报闪烁
     ///   504 — 击杀溅血（最顶层）
+    ///   506 — 命中冲击闪光
     ///
-    /// 纯程序化，零外部资源依赖。
+    /// 优先使用 Resources/Sprites/VFX/ 帧动画，加载失败自动回退程序化。
     /// </summary>
     public sealed class SabotageVFX : MonoBehaviour
     {
+        private const float BlackoutSheetFps = 6f;
+        private const float LockdownSheetFps = 10f;
+        private const float CommJamSheetFps = 14f;
+        private const float EvidenceLeakSheetFps = 9f;
+        private const float PatrolAlertSheetFps = 6f;
+        private const float EmergencyLightSheetFps = 12f;
+        private const float KillSheetFps = 15f;
+        private const float HitSheetFps = 18f;
+
         [Header("Overlay Panels")]
         public SpriteRenderer blackoutOverlay;
         public SpriteRenderer lockdownOverlay;
@@ -57,6 +67,18 @@ namespace GanglandUndercover.Art
         // 缓存的 "X" 标记纹理
         private Texture2D _xMarkTex;
 
+        // ── 帧动画 VFX（Resources 加载成功时启用，否则回退程序化）──
+        private VFXSheetPlayer _killSheetPlayer;
+        private VFXSheetPlayer _blackoutSheet;
+        private VFXSheetPlayer _lockdownSheet;
+        private VFXSheetPlayer _commJamSheet;
+        private VFXSheetPlayer _evidenceLeakSheet;
+        private VFXSheetPlayer _patrolAlertSheet;
+        private VFXSheetPlayer _emergencyLightSheet;
+        private VFXSheetPlayer _hitSheetPlayer;
+        private SpriteRenderer _emergencyLightRenderer;
+        private GameObject _hitImpactFX;
+
         public void Bind(OnlineMatchController ctrl)
         {
             _ctrl = ctrl;
@@ -72,7 +94,14 @@ namespace GanglandUndercover.Art
             {
                 var go = CreateOverlayQuad("BlackoutOverlay", blackoutColor, 500);
                 blackoutOverlay = go.GetComponent<SpriteRenderer>();
-                CreateEmergencyLight(go.transform);
+                _emergencyLightRenderer = CreateEmergencyLight(go.transform);
+            }
+            else if (_emergencyLightRenderer == null)
+            {
+                Transform emergencyLight = blackoutOverlay.transform.Find("EmergencyRedLight");
+                _emergencyLightRenderer = emergencyLight != null
+                    ? emergencyLight.GetComponent<SpriteRenderer>()
+                    : CreateEmergencyLight(blackoutOverlay.transform);
             }
 
             // ── 锁门红叉遮罩 ──
@@ -104,19 +133,49 @@ namespace GanglandUndercover.Art
                 var go = CreateOverlayQuad("PatrolAlertOverlay", patrolAlertColor, 503);
                 patrolAlertOverlay = go.GetComponent<SpriteRenderer>();
             }
+
+            // ── 帧动画 VFX 初始化（Resources 加载失败则保持 null → 程序化回退）──
+            InitOverlaySheet(ref _blackoutSheet, blackoutOverlay, "blackout", 500, BlackoutSheetFps);
+            InitOverlaySheet(ref _lockdownSheet, lockdownOverlay, "door_lock", 501, LockdownSheetFps);
+            InitOverlaySheet(ref _commJamSheet, commJamOverlay, "comms_jam", 502, CommJamSheetFps);
+            InitOverlaySheet(ref _evidenceLeakSheet, evidenceLeakOverlay, "evidence_leak", 499, EvidenceLeakSheetFps);
+            InitOverlaySheet(ref _patrolAlertSheet, patrolAlertOverlay, "patrol_alert", 503, PatrolAlertSheetFps);
+            InitOverlaySheet(ref _emergencyLightSheet, _emergencyLightRenderer, "emergency_light", 505, EmergencyLightSheetFps);
+
+            // 预加载击杀帧（首次触发时不卡顿）
+            VFXSheetPlayer.Preload("kill");
+            VFXSheetPlayer.Preload("hit");
         }
 
-        /// <summary>触发击杀溅血 VFX（3 秒渐隐）</summary>
+        /// <summary>触发击杀溅血 VFX（帧动画优先，3 秒渐隐回退）</summary>
         public void TriggerKillBlood(Vector3 worldPos)
         {
-            if (killBloodFX != null) Destroy(killBloodFX);
+            if (killBloodFX != null) DestroyRuntimeObject(killBloodFX);
 
             killBloodFX = new GameObject("KillBloodFX");
             killBloodFX.transform.position = worldPos + Vector3.back;
-            var sr = killBloodFX.AddComponent<SpriteRenderer>();
-            sr.sprite = Sprite2DAssetCache.BloodSplatter;
-            sr.sortingOrder = 504;
-            sr.transform.localScale = Vector3.one * 2f;
+
+            TriggerHitImpact(worldPos);
+
+            // 尝试帧动画（kill 序列 10 帧 @ 15fps ≈ 0.67s）
+            var player = killBloodFX.AddComponent<VFXSheetPlayer>();
+            if (player.Init("kill", VFXSheetPlayer.PlayMode.OneShot, KillSheetFps))
+            {
+                player.SetSortingOrder(504);
+                player.Play();
+                _killSheetPlayer = player;
+            }
+            else
+            {
+                // 回退：程序化 BloodSplatter 静态贴图
+                DestroyRuntimeObject(player);
+                var sr = killBloodFX.GetComponent<SpriteRenderer>();
+                if (sr == null) sr = killBloodFX.AddComponent<SpriteRenderer>();
+                sr.sprite = Sprite2DAssetCache.BloodSplatter;
+                sr.sortingOrder = 504;
+                sr.transform.localScale = Vector3.one * 2f;
+            }
+
             _bloodFadeTimer = 3.0f;
             _wasKillActive = true;
         }
@@ -159,9 +218,14 @@ namespace GanglandUndercover.Art
             {
                 _emergencyTimer += Time.deltaTime;
                 float emergencyPulse = Mathf.Abs(Mathf.Sin(_emergencyTimer * 3.5f));
-                Color em = emergencyRedColor;
-                em.a = 0.15f + emergencyPulse * 0.35f;
-                blackoutOverlay.color = Color.Lerp(blackoutOverlay.color, em, Time.deltaTime * 2f);
+                Color blackoutTint = blackoutColor;
+                blackoutTint.a = 0.58f + emergencyPulse * 0.16f;
+                blackoutOverlay.color = Color.Lerp(blackoutOverlay.color, blackoutTint, Time.deltaTime * 4f);
+                SetEmergencyLightPulse(true, emergencyPulse);
+            }
+            else
+            {
+                SetEmergencyLightPulse(false, 0f);
             }
 
             // ── 锁门：暗红遮罩 + 边缘红脉动 ──
@@ -226,7 +290,7 @@ namespace GanglandUndercover.Art
                 _bloodFadeTimer -= Time.deltaTime;
                 if (_bloodFadeTimer <= 0f)
                 {
-                    if (killBloodFX != null) { Destroy(killBloodFX); killBloodFX = null; }
+                    if (killBloodFX != null) { DestroyRuntimeObject(killBloodFX); killBloodFX = null; }
                     _wasKillActive = false;
                 }
                 else if (killBloodFX != null)
@@ -243,6 +307,35 @@ namespace GanglandUndercover.Art
         }
 
         // ── 内部方法 ──
+
+        private void InitOverlaySheet(ref VFXSheetPlayer player, SpriteRenderer overlay, string effectName, int sortOrder, float fps)
+        {
+            if (overlay == null) return;
+
+            Color fallbackColor = overlay.color;
+            Sprite fallbackSprite = overlay.sprite;
+
+            if (player == null)
+            {
+                player = overlay.GetComponent<VFXSheetPlayer>();
+                if (player == null) player = overlay.gameObject.AddComponent<VFXSheetPlayer>();
+            }
+
+            if (player.Init(effectName, VFXSheetPlayer.PlayMode.Loop, fps))
+            {
+                player.SetSortingOrder(sortOrder);
+                player.SetColor(fallbackColor);
+                player.Play();
+                return;
+            }
+
+            if (Application.isPlaying) Destroy(player);
+            else DestroyImmediate(player);
+            player = null;
+            overlay.sprite = fallbackSprite;
+            overlay.color = fallbackColor;
+            overlay.sortingOrder = sortOrder;
+        }
 
         private void SetOverlay(SpriteRenderer sr, bool active)
         {
@@ -272,7 +365,7 @@ namespace GanglandUndercover.Art
         }
 
         /// <summary>创建应急红灯（停电遮罩子对象）</summary>
-        private void CreateEmergencyLight(Transform parent)
+        private SpriteRenderer CreateEmergencyLight(Transform parent)
         {
             var go = new GameObject("EmergencyRedLight");
             go.transform.SetParent(parent, false);
@@ -295,6 +388,21 @@ namespace GanglandUndercover.Art
             sr.sortingOrder = 505;
             go.transform.localPosition = Vector3.zero;
             go.transform.localScale = Vector3.one * 20f;
+            return sr;
+        }
+
+        private void SetEmergencyLightPulse(bool visible, float pulse)
+        {
+            if (_emergencyLightRenderer == null) return;
+
+            _emergencyLightRenderer.enabled = visible;
+            if (!visible) return;
+
+            Color em = emergencyRedColor;
+            em.a = 0.18f + pulse * 0.42f;
+            _emergencyLightRenderer.color = em;
+            float scale = 18f + pulse * 5f;
+            _emergencyLightRenderer.transform.localScale = new Vector3(scale, scale, 1f);
         }
 
         /// <summary>创建 glitch 条纹纹理</summary>
@@ -319,6 +427,48 @@ namespace GanglandUndercover.Art
             }
             tex.Apply();
             return Sprite.Create(tex, new Rect(0, 0, sz, sz), new Vector2(0.5f, 0.5f), 4);
+        }
+
+        private void TriggerHitImpact(Vector3 worldPos)
+        {
+            if (_hitImpactFX != null) DestroyRuntimeObject(_hitImpactFX);
+
+            _hitImpactFX = new GameObject("HitImpactFX");
+            _hitImpactFX.transform.position = worldPos + Vector3.back * 1.05f;
+
+            var player = _hitImpactFX.AddComponent<VFXSheetPlayer>();
+            if (player.Init("hit", VFXSheetPlayer.PlayMode.OneShot, HitSheetFps))
+            {
+                player.SetSortingOrder(506);
+                player.Play();
+                player.OnComplete += ClearHitImpact;
+                _hitSheetPlayer = player;
+                return;
+            }
+
+            DestroyRuntimeObject(player);
+            DestroyRuntimeObject(_hitImpactFX);
+            _hitImpactFX = null;
+            _hitSheetPlayer = null;
+        }
+
+        private void ClearHitImpact()
+        {
+            if (_hitImpactFX != null)
+            {
+                DestroyRuntimeObject(_hitImpactFX);
+                _hitImpactFX = null;
+            }
+
+            _hitSheetPlayer = null;
+        }
+
+        private static void DestroyRuntimeObject(Object target)
+        {
+            if (target == null) return;
+
+            if (Application.isPlaying) Destroy(target);
+            else DestroyImmediate(target);
         }
     }
 }

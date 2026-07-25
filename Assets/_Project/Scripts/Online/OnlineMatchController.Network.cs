@@ -11,6 +11,7 @@ using Unity.Services.Relay.Models;
 using GanglandUndercover;
 using GanglandUndercover.Core;
 using GanglandUndercover.Online;
+using GanglandUndercover.SocialDeduction;
 
 namespace GanglandUndercover.Online
 {
@@ -94,6 +95,7 @@ namespace GanglandUndercover.Online
             // 导致 globalObjectIdHash=0，远端无法复制。
             RegisterSurveillanceCameraPrefab();
             RegisterMiniGameBridgePrefab();
+            RegisterCharacterCustomizerPrefab();
         }
 
         // --- RegisterSurveillanceCameraPrefab ---
@@ -182,6 +184,49 @@ namespace GanglandUndercover.Online
             return false;
         }
 
+        // --- RegisterCharacterCustomizerPrefab ---
+        private void RegisterCharacterCustomizerPrefab()
+        {
+            if (characterCustomizerTemplate != null) return;
+            if (TryReuseRegisteredCharacterCustomizerPrefab(out characterCustomizerTemplate)) return;
+
+            characterCustomizerTemplate = Resources.Load<GameObject>(CharacterCustomizerPrefabResourcePath);
+            if (characterCustomizerTemplate == null)
+            {
+                Debug.LogError("[CharacterCustomizer] Missing Resources prefab: " + CharacterCustomizerPrefabResourcePath);
+                return;
+            }
+
+            networkManager.NetworkConfig.Prefabs.Add(
+                new Unity.Netcode.NetworkPrefab
+                {
+                    Prefab = characterCustomizerTemplate
+                });
+        }
+
+        // --- TryReuseRegisteredCharacterCustomizerPrefab ---
+        private bool TryReuseRegisteredCharacterCustomizerPrefab(out GameObject template)
+        {
+            template = null;
+
+            if (networkManager?.NetworkConfig?.Prefabs == null)
+            {
+                return false;
+            }
+
+            foreach (NetworkPrefab prefab in networkManager.NetworkConfig.Prefabs.Prefabs)
+            {
+                GameObject candidate = prefab?.Prefab != null ? prefab.Prefab : prefab?.OverridingTargetPrefab;
+                if (candidate != null && candidate.GetComponent<CharacterCustomizer>() != null)
+                {
+                    template = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         // --- EnsureMiniGameBridgeNetworkObject ---
         private void EnsureMiniGameBridgeNetworkObject()
         {
@@ -227,6 +272,79 @@ namespace GanglandUndercover.Online
 
             miniGameBridge = bridgeObject.GetComponent<Online.MiniGames.OnlineMiniGameBridge>();
             miniGameBridge.BindController(this);
+        }
+
+        // --- EnsureCharacterCustomizerNetworkObject ---
+        private void EnsureCharacterCustomizerNetworkObject(ulong ownerClientId)
+        {
+            if (!Application.isPlaying || networkManager == null || !networkManager.IsServer)
+            {
+                return;
+            }
+
+            if (characterCustomizers.TryGetValue(ownerClientId, out CharacterCustomizer existing)
+                && existing != null
+                && existing.IsSpawned)
+            {
+                return;
+            }
+
+            if (characterCustomizerTemplate == null)
+            {
+                RegisterCharacterCustomizerPrefab();
+            }
+
+            if (characterCustomizerTemplate == null)
+            {
+                Debug.LogError("[CharacterCustomizer] NetworkPrefab template not registered!");
+                return;
+            }
+
+            NetworkObject networkObject = NetworkObject.InstantiateAndSpawn(
+                characterCustomizerTemplate,
+                networkManager,
+                ownerClientId: ownerClientId,
+                destroyWithScene: false,
+                isPlayerObject: false,
+                forceOverride: false);
+
+            if (networkObject == null)
+            {
+                Debug.LogError("[CharacterCustomizer] Failed to spawn NetworkPrefab.");
+                return;
+            }
+
+            GameObject customizerObject = networkObject.gameObject;
+            customizerObject.name = "OnlineCharacterCustomizer_" + ownerClientId;
+            DontDestroyOnLoad(customizerObject);
+
+            CharacterCustomizer customizer = customizerObject.GetComponent<CharacterCustomizer>();
+            characterCustomizers[ownerClientId] = customizer;
+        }
+
+        // --- RemoveCharacterCustomizerNetworkObject ---
+        private void RemoveCharacterCustomizerNetworkObject(ulong ownerClientId)
+        {
+            if (!characterCustomizers.TryGetValue(ownerClientId, out CharacterCustomizer customizer))
+            {
+                return;
+            }
+
+            characterCustomizers.Remove(ownerClientId);
+
+            if (customizer == null)
+            {
+                return;
+            }
+
+            NetworkObject networkObject = customizer.NetworkObject;
+            if (networkObject != null && networkObject.IsSpawned && networkManager != null && networkManager.IsServer)
+            {
+                networkObject.Despawn(true);
+                return;
+            }
+
+            Destroy(customizer.gameObject);
         }
 
         // --- EnsureServiceBootstrap ---
@@ -287,6 +405,7 @@ namespace GanglandUndercover.Online
                     UpsertLocalPlayer();
                     SendClientProfile();
                     EnsureMiniGameBridgeNetworkObject();
+                    EnsureCharacterCustomizerNetworkObject(networkManager.LocalClientId);
                     EnsureSurveillanceCameraNetworkObjects();
                     PlayCue("start");
                     BroadcastSnapshot();
@@ -374,6 +493,7 @@ namespace GanglandUndercover.Online
                     UpsertLocalPlayer();
                     SendClientProfile();
                     EnsureMiniGameBridgeNetworkObject();
+                    EnsureCharacterCustomizerNetworkObject(networkManager.LocalClientId);
                     EnsureSurveillanceCameraNetworkObjects();
                     UpsertLocalRelayLobbyRoom();
                     RequestPublishRelayLobbySession();
@@ -505,6 +625,189 @@ namespace GanglandUndercover.Online
             return true;
         }
 
+        // --- TryStartReplacementHostForMigration ---
+        internal bool TryStartReplacementHostForMigration(out string reason)
+        {
+            reason = string.Empty;
+
+            if (networkManager == null)
+            {
+                reason = "NetworkManager 未挂载。";
+                return false;
+            }
+
+            bool alreadyServer = networkManager.IsServer || networkManager.IsHost;
+            if (!CanAttemptReplacementHostStart(alreadyServer, networkManager.IsListening, relayJoinCode, out reason))
+            {
+                return false;
+            }
+
+            if (alreadyServer)
+            {
+                MarkReplacementHostReadyForMigration();
+                return true;
+            }
+
+            try
+            {
+                ConfigureTransport("0.0.0.0");
+                RegisterMessages();
+
+                if (!networkManager.StartHost())
+                {
+                    reason = "新 Host NetworkManager 启动失败。";
+                    return false;
+                }
+
+                RegisterMessages();
+                MarkReplacementHostReadyForMigration();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                reason = "新 Host 启动异常：" + exception.GetType().Name;
+                return false;
+            }
+        }
+
+        internal bool ShouldUseRelayReplacementHostForMigration()
+        {
+            return ShouldUseRelayReplacementHostForMigration(relayJoinCode);
+        }
+
+        internal static bool ShouldUseRelayReplacementHostForMigration(string relayCode)
+        {
+            return !string.IsNullOrWhiteSpace(OnlineMatchUtils.CleanRelayJoinInput(relayCode));
+        }
+
+        internal async Task<string> TryStartReplacementRelayHostForMigrationAsync()
+        {
+            if (relayOperationInProgress)
+            {
+                return "Relay 操作正在进行。";
+            }
+
+            relayOperationInProgress = true;
+            disconnectedNetworkSession = false;
+            relayStatus = "Host migration 正在创建新 Relay 房间码。";
+            status = relayStatus;
+            OnRelayStatusChanged?.Invoke(relayStatus);
+
+            try
+            {
+                EnsureServiceBootstrap();
+                EnsureNetworkStack();
+                await serviceBootstrap.InitializeAsync();
+
+                if (!CanUseRelay(out string reason))
+                {
+                    await CleanupJoinedLobbySessionAsync();
+                    relayStatus = reason;
+                    status = reason;
+                    AddCaseLog(reason);
+                    OnRelayStatusChanged?.Invoke(reason);
+                    return reason;
+                }
+
+                if (networkManager != null && networkManager.IsListening && !networkManager.IsServer)
+                {
+                    UnregisterMessages();
+                    networkManager.Shutdown();
+                    await Task.Yield();
+                }
+
+                int maxConnections = Mathf.Clamp(roomMaxPlayers - 1, 1, ruleSet.MaximumRoomPlayers - 1);
+                Allocation allocation = await RelayService.Instance.CreateAllocationAsync(maxConnections);
+                relayJoinCode = (await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId) ?? string.Empty).Trim().ToUpperInvariant();
+                transport.UseWebSockets = false;
+                transport.SetRelayServerData(allocation.ToRelayServerData("dtls"));
+                RegisterMessages();
+
+                if (!networkManager.StartHost())
+                {
+                    relayStatus = "Host migration 新 Relay Host 启动失败。";
+                    status = relayStatus;
+                    AddCaseLog(status);
+                    OnRelayStatusChanged?.Invoke(relayStatus);
+                    return relayStatus;
+                }
+
+                RegisterMessages();
+                MarkReplacementHostReadyForMigration(true);
+                UpsertLocalRelayLobbyRoom();
+                RequestPublishRelayMigrationLobbySession();
+                OnRelayRoomCodeReady?.Invoke(relayJoinCode);
+                return string.Empty;
+            }
+            catch (Exception exception)
+            {
+                relayJoinCode = string.Empty;
+                relayStatus = "Host migration 新 Relay 创建失败：" + exception.Message;
+                status = relayStatus;
+                AddCaseLog(status);
+                OnRelayStatusChanged?.Invoke(relayStatus);
+                return relayStatus;
+            }
+            finally
+            {
+                relayOperationInProgress = false;
+            }
+        }
+
+        internal static bool CanAttemptReplacementHostStart(
+            bool alreadyServer,
+            bool isListening,
+            string relayCode,
+            out string reason)
+        {
+            if (alreadyServer)
+            {
+                reason = string.Empty;
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(OnlineMatchUtils.CleanRelayJoinInput(relayCode)))
+            {
+                reason = "Relay 旧房间码无法直接接管，需要新 Relay allocation 与重连协议。";
+                return false;
+            }
+
+            if (isListening)
+            {
+                reason = "旧客户端连接仍在监听，等待 NetworkManager 完全关闭后才能启动新 Host。";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
+        }
+
+        private void MarkReplacementHostReadyForMigration(bool relayMigration = false)
+        {
+            localPreviewMode = false;
+            disconnectedNetworkSession = false;
+            relayHostClientId = networkManager != null ? networkManager.LocalClientId : 0UL;
+            if (relayMigration)
+            {
+                relayStatus = "Host migration 新 Relay 房间码: " + OnlineMatchUtils.CleanRelayJoinInput(relayJoinCode);
+                status = "已接管 Host，正在恢复对局并发布新 Relay 房间码。";
+            }
+            else
+            {
+                relayStatus = "Host migration 已切换为直连 Host。";
+                status = "已接管 Host，正在恢复对局。";
+            }
+            AddCaseLog(status);
+            if (networkManager != null && networkManager.IsServer)
+            {
+                EnsureMiniGameBridgeNetworkObject();
+                EnsureCharacterCustomizerNetworkObject(networkManager.LocalClientId);
+                EnsureSurveillanceCameraNetworkObjects();
+            }
+            OnRelayConnectionChanged?.Invoke(true);
+            OnRelayStatusChanged?.Invoke(relayStatus);
+        }
+
         // --- StartLocalPreviewRoom ---
         private void StartLocalPreviewRoom()
         {
@@ -553,11 +856,10 @@ namespace GanglandUndercover.Online
             }
 
             players.Clear();
-            killSystem.bodies.Clear();
+            killSystem.Reset();
             caseLog.Clear();
             if (votingService != null) votingService.ClearVotes(); else votes.Clear();
             privateRoles.Clear();
-            killSystem.killCooldowns.Clear();
             abilityCooldowns.Clear();
             serverChatLastSendTimes.Clear();
             _botController?.Clear();
@@ -567,13 +869,8 @@ namespace GanglandUndercover.Online
             disconnectedNetworkSession = false;
             localReady = false;
             matchStarted = false;
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-            submittingActiveTask = false;
-            taskService.EvidenceScore = 0;
+            minigameService?.ResetFull();
+            evidenceService?.ResetEvidence(ruleSet != null ? ruleSet.DefaultEvidenceTarget : 42);
             lastMeetingReason = "尚未召开会议。";
             lastVoteOutcome = "尚未投票。";
             lastEvidenceEvent = "尚未取得关键证据。";
@@ -667,6 +964,7 @@ namespace GanglandUndercover.Online
             if (networkManager.IsServer)
             {
                 EnsureMiniGameBridgeNetworkObject();
+                EnsureCharacterCustomizerNetworkObject(clientId);
 
                 Vector3 spawn = mapService.SpawnPosition(players.Count);
                 players[clientId] = new OnlinePlayerState(clientId, "玩家" + clientId, spawn, false, true, OnlineRole.Unassigned, OnlineProfession.Inspector, 0, false);
@@ -700,6 +998,7 @@ namespace GanglandUndercover.Online
             RemoveDisconnectedPlayerVotes(clientId);
 
             players.Remove(clientId);
+            RemoveCharacterCustomizerNetworkObject(clientId);
             privateRoles.Remove(clientId);
             killSystem.killCooldowns.Remove(clientId);
             abilityCooldowns.Remove(clientId);
@@ -1207,56 +1506,13 @@ namespace GanglandUndercover.Online
                 float killCooldown = killSystem.killCooldowns.TryGetValue(state.ClientId, out float cooldown) ? cooldown : 0f;
                 float abilityCooldown = abilityCooldowns.TryGetValue(state.ClientId, out float abilityCooldownValue) ? abilityCooldownValue : 0f;
                 float ventCooldown = ventCooldowns.TryGetValue(state.ClientId, out float ventCooldownValue) ? ventCooldownValue : 0f;
-                writer.WriteValueSafe(state.ClientId);
-                writer.WriteValueSafe(state.DisplayName);
-                writer.WriteValueSafe(state.Position);
-                writer.WriteValueSafe(state.Ready);
-                writer.WriteValueSafe(state.Alive);
-                writer.WriteValueSafe(state.IsBot);
-                writer.WriteValueSafe((int)state.PublicRole);
-                writer.WriteValueSafe((int)state.Profession);
-                writer.WriteValueSafe(state.Suspicion);
-                writer.WriteValueSafe(killCooldown);
-                writer.WriteValueSafe(abilityCooldown);
-                writer.WriteValueSafe(ventCooldown);
+                SnapshotIO.WritePlayerBroadcast(writer, state, killCooldown, abilityCooldown, ventCooldown);
             }
 
-            writer.WriteValueSafe(tasks.Count);
-
-            foreach (OnlineTaskState task in tasks)
-            {
-                writer.WriteValueSafe(task.Id);
-                writer.WriteValueSafe(task.Position);
-                writer.WriteValueSafe(task.Progress);
-                writer.WriteValueSafe(task.RequiredProgress);
-                writer.WriteValueSafe(task.Completed);
-                writer.WriteValueSafe(task.Sabotaged);
-            }
-
-            writer.WriteValueSafe(killSystem.bodies.Count);
-
-            foreach (OnlineBodyState body in killSystem.bodies)
-            {
-                writer.WriteValueSafe(body.Id);
-                writer.WriteValueSafe(body.VictimClientId);
-                writer.WriteValueSafe(body.Position);
-                writer.WriteValueSafe(body.Reported);
-            }
-
-            writer.WriteValueSafe(votes.Count);
-
-            foreach (KeyValuePair<ulong, ulong> vote in votes)
-            {
-                writer.WriteValueSafe(vote.Key);
-                writer.WriteValueSafe(vote.Value);
-            }
-
-            writer.WriteValueSafe(caseLog.Count);
-
-            foreach (string entry in caseLog)
-            {
-                writer.WriteValueSafe(entry);
-            }
+            SnapshotIO.WriteTasks(writer, tasks);
+            SnapshotIO.WriteBodies(writer, killSystem.bodies);
+            SnapshotIO.WriteVotes(writer, votes);
+            SnapshotIO.WriteCaseLog(writer, caseLog);
 
             networkManager.CustomMessagingManager.SendNamedMessageToAll(ServerSnapshotMessage, writer, NetworkDelivery.ReliableFragmentedSequenced);
         }
@@ -1318,18 +1574,11 @@ namespace GanglandUndercover.Online
 
             for (int i = 0; i < count; i++)
             {
-                reader.ReadValueSafe(out ulong clientId);
-                reader.ReadValueSafe(out string displayName);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out bool ready);
-                reader.ReadValueSafe(out bool alive);
-                reader.ReadValueSafe(out bool isBot);
-                reader.ReadValueSafe(out int roleValue);
-                reader.ReadValueSafe(out int professionValue);
-                reader.ReadValueSafe(out int suspicion);
-                reader.ReadValueSafe(out float killCooldown);
-                reader.ReadValueSafe(out float abilityCooldown);
-                reader.ReadValueSafe(out float ventCooldown);
+                SnapshotIO.ReadPlayerBroadcast(reader,
+                    out ulong clientId, out string displayName, out Vector3 position,
+                    out bool ready, out bool alive, out bool isBot,
+                    out int roleValue, out int professionValue,
+                    out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown);
                 OnlineRole publicRole = ToDefinedOnlineRole(roleValue);
                 OnlineProfession profession = ToDefinedOnlineProfession(professionValue);
 
@@ -1364,18 +1613,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            List<OnlineTaskState> snapshotTasks = new List<OnlineTaskState>(taskCount);
-
-            for (int i = 0; i < taskCount; i++)
-            {
-                reader.ReadValueSafe(out int id);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out int progress);
-                reader.ReadValueSafe(out int requiredProgress);
-                reader.ReadValueSafe(out bool completed);
-                reader.ReadValueSafe(out bool sabotaged);
-                snapshotTasks.Add(new OnlineTaskState(id, OnlineWorldBuilder.TaskNameFor(id), position, progress, requiredProgress, completed, sabotaged));
-            }
+            List<OnlineTaskState> snapshotTasks = SnapshotIO.ReadTasks(reader, taskCount);
 
             reader.ReadValueSafe(out int bodyCount);
             if (!IsSnapshotCountInRange(bodyCount, MaxSnapshotBodies))
@@ -1383,16 +1621,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            List<OnlineBodyState> snapshotBodies = new List<OnlineBodyState>(bodyCount);
-
-            for (int i = 0; i < bodyCount; i++)
-            {
-                reader.ReadValueSafe(out int id);
-                reader.ReadValueSafe(out ulong victimClientId);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out bool reported);
-                snapshotBodies.Add(new OnlineBodyState(id, victimClientId, position, reported));
-            }
+            List<OnlineBodyState> snapshotBodies = SnapshotIO.ReadBodies(reader, bodyCount);
 
             reader.ReadValueSafe(out int voteCount);
             if (!IsSnapshotCountInRange(voteCount, MaxSnapshotVotes))
@@ -1400,14 +1629,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            Dictionary<ulong, ulong> snapshotVotes = new Dictionary<ulong, ulong>();
-
-            for (int i = 0; i < voteCount; i++)
-            {
-                reader.ReadValueSafe(out ulong voterClientId);
-                reader.ReadValueSafe(out ulong targetClientId);
-                snapshotVotes[voterClientId] = targetClientId;
-            }
+            Dictionary<ulong, ulong> snapshotVotes = SnapshotIO.ReadVotes(reader, voteCount);
 
             reader.ReadValueSafe(out int caseLogCount);
             if (!IsSnapshotCountInRange(caseLogCount, MaxSnapshotCaseLogEntries))
@@ -1415,13 +1637,7 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            List<string> snapshotCaseLog = new List<string>(caseLogCount);
-
-            for (int i = 0; i < caseLogCount; i++)
-            {
-                reader.ReadValueSafe(out string entry);
-                snapshotCaseLog.Add(entry);
-            }
+            List<string> snapshotCaseLog = SnapshotIO.ReadCaseLog(reader, caseLogCount);
 
             matchStarted = snapshotMatchStarted;
             phase = (OnlineMatchPhase)phaseValue;
@@ -1441,6 +1657,8 @@ namespace GanglandUndercover.Online
             lastSabotageEvent = snapshotLastSabotageEvent;
             evidenceMilestoneIndex = snapshotEvidenceMilestoneIndex;
             phaseTimer = snapshotPhaseTimer;
+            // 同步 EvidenceService 从恢复的快照值
+            SyncEvidenceServiceFromController();
             taskService.LoadSabotageTimersFromSnapshot(
                 snapshotBlackoutTimer, snapshotLockdownTimer, snapshotCommunicationJamTimer,
                 snapshotEvidenceLeakTimer, snapshotEvidenceLeakAccumulator, snapshotPatrolAlertTimer);

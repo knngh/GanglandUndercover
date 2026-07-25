@@ -65,6 +65,9 @@ namespace GanglandUndercover.Online.Services
         /// <summary>当前会议原因。</summary>
         public string CurrentMeetingReason => currentMeetingReason;
 
+        /// <summary>当前会议是否为紧急会议。</summary>
+        public bool CurrentMeetingIsEmergency => currentMeetingIsEmergency;
+
         /// <summary>是否处于会议阶段。</summary>
         public bool IsMeetingPhase
         {
@@ -133,101 +136,79 @@ namespace GanglandUndercover.Online.Services
         }
 
         /// <summary>
-        /// 尝试报告尸体或触发紧急会议。
-        /// 由 OnlineMatchController.TryReportOrEmergency() 调用。
+        /// 尝试触发紧急会议（仅紧急会议，不含尸体报告）。
+        /// 由 OnlineMatchController.TryReportOrEmergency() 在尸体报告检查后调用。
+        /// 仅校验条件并更新次数/冷却，不触发会议阶段切换。
         /// </summary>
         /// <param name="senderClientId">触发者 ClientId。</param>
         /// <param name="player">触发者状态。</param>
-        /// <returns>是否成功触发会议。</returns>
+        /// <returns>是否通过校验（可触发紧急会议）。</returns>
         public bool TryReportOrEmergency(ulong senderClientId, OnlinePlayerState player)
         {
             if (controller == null) return false;
 
-            // 尸体报告
-            if (TryFindNearestBody(player.Position, out int bodyIndex, out ulong victimId))
-            {
-                // 标记尸体已报告
-                MarkBodyReported(bodyIndex);
-
-                // 发布尸体报告事件
-                eventBus?.Publish(new BodyReportedEvent
-                {
-                    ReporterId = senderClientId,
-                    VictimId = victimId,
-                });
-
-                // 开始会议
-                string reason = player.DisplayName + " 发现尸体并报案";
-                BeginMeeting(reason, senderClientId, isEmergency: false);
-                return true;
-            }
-
             // 通讯干扰中不能开紧急会议
-            if (controller.CommunicationJamTimer > 0f)
-            {
-                return false;
-            }
+            if (controller.CommunicationJamTimer > 0f) return false;
 
             // 次数检查
-            if (emergencyMeetingsLeft <= 0)
-            {
-                return false;
-            }
+            if (emergencyMeetingsLeft <= 0) return false;
 
             // 冷却检查
-            if (emergencyCooldownTimer > 0f)
-            {
-                return false;
-            }
+            if (emergencyCooldownTimer > 0f) return false;
 
             // 范围检查（需在紧急铃范围内）
-            if (!IsInEmergencyRange(player.Position))
-            {
-                return false;
-            }
+            if (!IsInEmergencyRange(player.Position)) return false;
 
-            // 扣除次数并设冷却
-            emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
-            float cooldown = GetEmergencyCooldown();
-            emergencyCooldownTimer = cooldown;
-            SyncControllerMeetingState();
-
-            string emergencyReason = player.DisplayName + " 按下警署紧急铃";
-            BeginMeeting(emergencyReason, senderClientId, isEmergency: true);
-            return true;
-        }
-
-        /// <summary>
-        /// 公开调用紧急会议（供 EmergencyButton / HUD 使用）。
-        /// </summary>
-        public void CallEmergencyMeeting(string callerDisplayName, ulong callerId = 0)
-        {
-            if (emergencyMeetingsLeft <= 0 || emergencyCooldownTimer > 0f) return;
-
+            // 扣除次数并设冷却（meetingCount 由 controller.BeginMeeting 统一递增）
             emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
             emergencyCooldownTimer = GetEmergencyCooldown();
             SyncControllerMeetingState();
 
-            string reason = callerDisplayName + " 按下警署紧急铃";
-            BeginMeeting(reason, callerId, isEmergency: true);
+            return true;
         }
 
         /// <summary>
-        /// 开始会议。设置阶段、计时器，重置投票；会议事件由 controller 的统一入口发布。
+        /// 扣除紧急会议次数并设置冷却（纯状态变更，不触发会议阶段切换）。
+        /// 由 OnlineMatchController.CallEmergencyMeeting() 调用。
         /// </summary>
-        /// <param name="reason">会议原因文本。</param>
-        /// <param name="callerId">触发者 ClientId。</param>
-        /// <param name="isEmergency">是否为紧急会议。</param>
-        public void BeginMeeting(string reason, ulong callerId = 0, bool isEmergency = false)
+        public bool ConsumeEmergencyMeeting(string callerDisplayName, ulong callerId = 0)
         {
-            if (controller == null) return;
+            if (emergencyMeetingsLeft <= 0 || emergencyCooldownTimer > 0f) return false;
 
+            emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
+            emergencyCooldownTimer = GetEmergencyCooldown();
+
+            currentMeetingReason = callerDisplayName + " 按下警署紧急铃";
+            currentMeetingIsEmergency = true;
+            currentMeetingCallerId = callerId;
+            // meetingCount 由 controller.BeginMeeting 统一递增，通过 SyncMeetingStartedFromController 回写
+
+            SyncControllerMeetingState();
+            return true;
+        }
+
+        /// <summary>
+        /// 服务层公开入口：消费紧急会议并通过 controller 统一进入会议流程。
+        /// </summary>
+        public bool CallEmergencyMeeting(string callerDisplayName, ulong callerId = 0)
+        {
+            if (!ConsumeEmergencyMeeting(callerDisplayName, callerId))
+            {
+                return false;
+            }
+
+            controller?.BeginMeeting(callerDisplayName + " 按下警署紧急铃", callerId, isEmergency: true);
+            return true;
+        }
+
+        /// <summary>
+        /// 记录会议元数据（原因/类型/调用者）。不触发阶段切换或投票重置。
+        /// </summary>
+        public void SetMeetingMetadata(string reason, ulong callerId = 0, bool isEmergency = false)
+        {
             currentMeetingReason = reason;
             currentMeetingIsEmergency = isEmergency;
             currentMeetingCallerId = callerId;
-
-            controller.BeginMeeting(reason, callerId, isEmergency);
-            meetingCount = controller.MeetingCount;
         }
 
         /// <summary>
@@ -277,27 +258,40 @@ namespace GanglandUndercover.Online.Services
             SyncControllerMeetingState();
         }
 
-        /// <summary>由旧 controller 入口反向同步可见会议状态，避免双状态源漂移。</summary>
-        internal void SyncStateFromController(int meetingsLeft, float cooldownTimer, int controllerMeetingCount)
+        /// <summary>同步 meetingsLeft 和 cooldownTimer（controller → service 方向）。</summary>
+        internal void SyncMeetingsAndCooldown(int meetingsLeft, float cooldownTimer)
         {
             emergencyMeetingsLeft = Mathf.Max(0, meetingsLeft);
             emergencyCooldownTimer = Mathf.Max(0f, cooldownTimer);
-            meetingCount = Mathf.Max(0, controllerMeetingCount);
         }
 
-        /// <summary>由旧 controller 会议入口同步新会议元数据和计数。</summary>
+        /// <summary>快照恢复时同步会议次数、冷却和当前会议元数据。</summary>
+        internal void SyncSnapshotStateFromController(
+            int meetingsLeft,
+            float cooldownTimer,
+            int snapshotMeetingCount,
+            string reason)
+        {
+            SyncMeetingsAndCooldown(meetingsLeft, cooldownTimer);
+            meetingCount = Mathf.Max(0, snapshotMeetingCount);
+            currentMeetingReason = reason ?? string.Empty;
+            currentMeetingCallerId = 0;
+            currentMeetingIsEmergency = false;
+        }
+
+        /// <summary>同步会议元数据（controller 的 BeginMeeting 调用后同步）。</summary>
         internal void SyncMeetingStartedFromController(
             int meetingsLeft,
             float cooldownTimer,
-            int controllerMeetingCount,
             string reason,
             ulong callerId,
             bool isEmergency)
         {
-            SyncStateFromController(meetingsLeft, cooldownTimer, controllerMeetingCount);
+            SyncMeetingsAndCooldown(meetingsLeft, cooldownTimer);
             currentMeetingReason = reason ?? string.Empty;
             currentMeetingCallerId = callerId;
             currentMeetingIsEmergency = isEmergency;
+            meetingCount++;
         }
 
         /// <summary>完全重置会议状态（网络断开 / 回到大厅用）。</summary>
@@ -352,52 +346,15 @@ namespace GanglandUndercover.Online.Services
             subscribedEventBus = null;
         }
 
-        /// <summary>查找指定位置附近的最近未报告尸体。</summary>
-        private bool TryFindNearestBody(Vector3 position, out int bodyIndex, out ulong victimId)
-        {
-            bodyIndex = -1;
-            victimId = 0;
-            if (controller == null || controller.Bodies == null) return false;
-
-            float bestDistance = controller.RuleSet != null
-                ? controller.RuleSet.ReportRangeFor(controller.PlayerCount)
-                : 1.25f;
-            for (int i = 0; i < controller.Bodies.Count; i++)
-            {
-                var body = controller.Bodies[i];
-                if (body.Reported) continue;
-
-                float distance = Vector3.Distance(position, body.Position);
-                if (distance <= bestDistance)
-                {
-                    bodyIndex = i;
-                    victimId = body.VictimClientId;
-                    bestDistance = distance;
-                }
-            }
-            return bodyIndex >= 0;
-        }
-
-        /// <summary>标记尸体已报告。</summary>
-        private void MarkBodyReported(int bodyIndex)
-        {
-            if (controller?.Bodies == null) return;
-            if (bodyIndex < 0 || bodyIndex >= controller.Bodies.Count) return;
-
-            var body = controller.Bodies[bodyIndex];
-            body.Reported = true;
-            controller.Bodies[bodyIndex] = body;
-        }
-
         /// <summary>检查是否在紧急铃范围内。</summary>
         private bool IsInEmergencyRange(Vector3 position)
         {
             if (controller?.MapService == null) return false;
-            Vector2 center = controller.MapService.CurrentMeetingCenter;
             float range = controller.RuleSet != null
-                ? controller.RuleSet.InteractionRange * 2f
-                : 2.16f;
-            return Vector2.Distance(position, center) <= range;
+                ? controller.RuleSet.ReportRangeFor(controller.PlayerCount)
+                : 1.25f;
+            Vector3 bellPos = controller.MapService.ScaleMapPosition(Vector3.zero);
+            return Vector3.Distance(position, bellPos) <= range;
         }
 
         /// <summary>获取紧急会议冷却时间。</summary>

@@ -1,16 +1,30 @@
 {
-  "source": "Kenney Roguelike Characters + Desert Shooter (CC0)",
-  "sprite_size": "16\u00d716",
+  "source": "Gangland procedural profession sprites baked into CC0-compatible runtime paths",
+  "sprite_size": "64x64 movement/death, 32x32 avatar",
   "frame_count": {
-    "Inspector": "Cop",
-    "Forensics": "Cop",
-    "Tech": "Cop",
-    "UndercoverAgent": "Triad",
-    "Enforcer": "Thug",
-    "Fixer": "Dealer",
-    "Driver": "Informant",
-    "Mole": "CorpSec"
+    "profession_count": 8,
+    "directions_per_profession": 4,
+    "files_per_direction": 4,
+    "special_files_per_profession": 2,
+    "total_png": 144
   },
+  "directions": [
+    "Back",
+    "Front",
+    "Left",
+    "Right"
+  ],
+  "files_per_direction": [
+    "idle",
+    "walk_0",
+    "walk_1",
+    "walk_2"
+  ],
+  "special_files": [
+    "death",
+    "avatar"
+  ],
+  "runtime_note": "Sprite2DAssetCache uses idle, walk_0, walk_1, death, and avatar. walk_2 is kept for import parity and future animation expansion.",
   "profession_map": {
     "Inspector": "Cop",
     "Forensics": "Cop",

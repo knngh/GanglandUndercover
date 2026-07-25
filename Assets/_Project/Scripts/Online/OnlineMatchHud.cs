@@ -135,6 +135,8 @@ namespace GanglandUndercover.Online
         private Button clientButton;
         private Button relayHostButton;
         private Button relayClientButton;
+        private Button lobbyRefreshButton;
+        private Button migrationRelayJoinButton;
         private Button localPreviewButton;
         private Button readyButton;
         private Button startButton;
@@ -346,6 +348,8 @@ namespace GanglandUndercover.Online
                 && clientButton != null
                 && relayHostButton != null
                 && relayClientButton != null
+                && lobbyRefreshButton != null
+                && migrationRelayJoinButton != null
                 && localPreviewButton != null
                 && readyButton != null
                 && startButton != null
@@ -470,6 +474,8 @@ namespace GanglandUndercover.Online
             clientButton = null;
             relayHostButton = null;
             relayClientButton = null;
+            lobbyRefreshButton = null;
+            migrationRelayJoinButton = null;
             localPreviewButton = null;
             readyButton = null;
             startButton = null;
@@ -601,7 +607,7 @@ namespace GanglandUndercover.Online
 
         private void BuildLeftDock(Transform leftDock)
         {
-            Transform connection = CreateSection("连接与开局", leftDock, 246f);
+            Transform connection = CreateSection("连接与开局", leftDock, 292f);
             connectionGroup = connection.gameObject;
             playerNameInput = CreateInputRow(connection, "玩家", "港区玩家", value => controller.SetLocalPlayerName(value));
             roomNameInput = CreateInputRow(connection, "房间", "九龙港区夜局", value => controller.SetRoomName(value));
@@ -617,8 +623,12 @@ namespace GanglandUndercover.Online
             relayClientButton = CreateButton("Relay 加入", connectionRowB, 42f, () => controller.RequestRelayClient());
 
             Transform connectionRowC = CreateButtonRow(connection, 42f);
-            localPreviewButton = CreateButton("本地完整局", connectionRowC, 42f, () => controller.RequestLocalPreview());
-            shutdownButton = CreateButton("离开房间", connectionRowC, 42f, () => controller.RequestShutdown());
+            lobbyRefreshButton = CreateButton("刷新 Lobby", connectionRowC, 42f, () => controller.RequestRefreshLobbyRooms());
+            migrationRelayJoinButton = CreateButton("加入迁移房", connectionRowC, 42f, () => controller.RequestJoinDetectedHostMigrationRelayRoom());
+
+            Transform connectionRowD = CreateButtonRow(connection, 42f);
+            localPreviewButton = CreateButton("本地完整局", connectionRowD, 42f, () => controller.RequestLocalPreview());
+            shutdownButton = CreateButton("离开房间", connectionRowD, 42f, () => controller.RequestShutdown());
             connectionStatusText = CreateText("Connection Status", connection, 13, TextAnchor.UpperLeft, MutedTextColor);
             AddLayout(connectionStatusText.gameObject, 70f, 0f, 0f);
 
@@ -1176,6 +1186,10 @@ namespace GanglandUndercover.Online
             clientButton.interactable = offline;
             relayHostButton.interactable = offline && relayReady;
             relayClientButton.interactable = offline && relayReady;
+            lobbyRefreshButton.interactable = !controller.LobbyBrowserRefreshInProgress;
+            migrationRelayJoinButton.interactable = (offline || controller.HasDisconnectedNetworkSession)
+                && relayReady
+                && controller.HasDetectedHostMigrationRelayRoom;
             localPreviewButton.interactable = offline;
             shutdownButton.interactable = controller.IsOnline || controller.HasDisconnectedNetworkSession;
 

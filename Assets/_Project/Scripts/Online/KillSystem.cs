@@ -390,6 +390,7 @@ namespace GanglandUndercover.Online
 
         /// <summary>
         /// 清空所有击杀相关状态（对局结束/重置时调用）。
+        /// 注意：仅清空字典，不销毁 bodyVisuals 中的 GameObject。
         /// </summary>
         internal void ClearAll()
         {
@@ -399,6 +400,16 @@ namespace GanglandUndercover.Online
             nextBodyId = 0;
             reportCooldownTimer = 0f;
             killCount = 0;
+        }
+
+        /// <summary>
+        /// 完整重置：先销毁尸体可视对象，再清空全部状态。
+        /// 对局开始/返回大厅/断线时调用此方法。
+        /// </summary>
+        internal void Reset()
+        {
+            ClearBodyVisuals();
+            ClearAll();
         }
 
         // -------- 核心逻辑 --------
@@ -447,12 +458,19 @@ namespace GanglandUndercover.Online
                 }
             }
 
-            // 血迹效果
-            if (bloodEffectPrefab != null)
+            // 血迹效果：运行时优先使用已导入的作者化 VFX 帧动画。
+            bool usedAuthoredKillVfx = false;
+            if (controller != null && controller.sabotageVFX != null)
+            {
+                controller.sabotageVFX.TriggerKillBlood(victimPos);
+                usedAuthoredKillVfx = true;
+            }
+
+            if (!usedAuthoredKillVfx && bloodEffectPrefab != null)
             {
                 Instantiate(bloodEffectPrefab, victimPos + new Vector3(0f, 0f, 0.05f), Quaternion.identity, controller.transform);
             }
-            else
+            else if (!usedAuthoredKillVfx)
             {
                 CreateFallbackBloodEffect(victimPos);
             }

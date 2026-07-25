@@ -79,7 +79,7 @@ namespace GanglandUndercover.Online
             return ratio >= 0.25f ? 1 : 0;
         }
 
-        internal static SabotageType SabotageForTask(int taskId)
+        public static SabotageType SabotageForTask(int taskId)
         {
             switch (taskId)
             {
@@ -115,7 +115,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        internal static int SabotageEvidencePenalty(SabotageType sabotageType)
+        public static int SabotageEvidencePenalty(SabotageType sabotageType)
         {
             switch (sabotageType)
             {
@@ -147,7 +147,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        internal static string SabotageName(SabotageType sabotageType)
+        public static string SabotageName(SabotageType sabotageType)
         {
             switch (sabotageType)
             {
@@ -693,7 +693,7 @@ namespace GanglandUndercover.Online
             return policeProfessions[index % policeProfessions.Length];
         }
 
-        internal static string RoleName(OnlineRole role)
+        public static string RoleName(OnlineRole role)
         {
             switch (role)
             {
@@ -735,7 +735,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        internal static string PhaseName(OnlineMatchPhase matchPhase)
+        public static string PhaseName(OnlineMatchPhase matchPhase)
         {
             switch (matchPhase)
             {
@@ -756,9 +756,9 @@ namespace GanglandUndercover.Online
             }
         }
 
-        internal static int TaskRequiredProgress(int taskId)
+        public static int TaskRequiredProgress(int taskId)
         {
-            return OnlineTaskService.TaskRequiredProgress(taskId);
+            return 3;
         }
 
         internal static bool CircleIntersectsRect(Vector3 center, float radius, Rect rect)
@@ -791,7 +791,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        internal static int TaskEvidenceValue(int taskId)
+        public static int TaskEvidenceValue(int taskId)
         {
             switch (taskId)
             {

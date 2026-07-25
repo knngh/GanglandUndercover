@@ -50,6 +50,9 @@ namespace GanglandUndercover.SocialDeduction
         private readonly List<GameObject> spawnedAttachments = new List<GameObject>();
         private bool customMessageInstanceRegistered;
 
+        private Unity.Netcode.NetworkManager ActiveNetworkManager =>
+            NetworkManager != null ? NetworkManager : Unity.Netcode.NetworkManager.Singleton;
+
         // ── 公开属性 ──
 
         /// <summary>
@@ -75,8 +78,16 @@ namespace GanglandUndercover.SocialDeduction
 
             InitializeDefaults();
 
-            if (socialChar == null)
+            if (socialChar == null && HasVisualTargets())
                 Debug.LogWarning("[CharacterCustomizer] 未找到 SocialCharacter 组件，身高→移动速度联动将不可用。");
+        }
+
+        private bool HasVisualTargets()
+        {
+            return headBone != null
+                || bodyBone != null
+                || scaleRoot != null
+                || (skinRenderers != null && skinRenderers.Length > 0);
         }
 
         public override void OnNetworkSpawn()
@@ -457,14 +468,34 @@ namespace GanglandUndercover.SocialDeduction
         /// </summary>
         private void ApplyFromData(CharacterCustomData data)
         {
-            if (!string.IsNullOrEmpty(data.hat))       currentSelection[WardrobePart.Hat] = data.hat;
-            if (!string.IsNullOrEmpty(data.top))       currentSelection[WardrobePart.Top] = data.top;
-            if (!string.IsNullOrEmpty(data.bottom))    currentSelection[WardrobePart.Bottom] = data.bottom;
-            if (!string.IsNullOrEmpty(data.accessory)) currentSelection[WardrobePart.Accessory] = data.accessory;
-            if (!string.IsNullOrEmpty(data.skinTone))  currentSelection[WardrobePart.SkinTone] = data.skinTone;
-            if (!string.IsNullOrEmpty(data.height))    currentSelection[WardrobePart.Height] = data.height;
+            TryApplySelectionFromData(WardrobePart.Hat, data.hat);
+            TryApplySelectionFromData(WardrobePart.Top, data.top);
+            TryApplySelectionFromData(WardrobePart.Bottom, data.bottom);
+            TryApplySelectionFromData(WardrobePart.Accessory, data.accessory);
+            TryApplySelectionFromData(WardrobePart.SkinTone, data.skinTone);
+            TryApplySelectionFromData(WardrobePart.Height, data.height);
 
             ApplyAllVisuals();
+        }
+
+        private void TryApplySelectionFromData(WardrobePart part, string itemId)
+        {
+            if (string.IsNullOrWhiteSpace(itemId))
+                return;
+
+            if (!IsValidSelectionForPart(part, itemId))
+                return;
+
+            currentSelection[part] = itemId;
+        }
+
+        private bool IsValidSelectionForPart(WardrobePart part, string itemId)
+        {
+            if (wardrobeData == null)
+                return false;
+
+            WardrobeItem item = wardrobeData.FindById(itemId);
+            return item != null && item.part == part;
         }
 
         // ── 重置 ──
@@ -515,19 +546,20 @@ namespace GanglandUndercover.SocialDeduction
         /// </summary>
         private void BroadcastCustomData()
         {
-            if (!IsSpawned || NetworkManager.Singleton == null)
+            Unity.Netcode.NetworkManager activeManager = ActiveNetworkManager;
+            if (!IsSpawned || activeManager == null)
                 return;
 
-            var manager = NetworkManager.Singleton.CustomMessagingManager;
+            var manager = activeManager.CustomMessagingManager;
             if (manager == null)
                 return;
 
-            if (!NetworkManager.Singleton.IsServer && !IsOwner)
+            if (!activeManager.IsServer && !IsOwner)
                 return;
 
             string json = SerializeCurrentSelection();
 
-            if (NetworkManager.Singleton.IsServer)
+            if (activeManager.IsServer)
             {
                 SendCustomDataToClients(json, NetworkManager.ServerClientId);
                 return;
@@ -564,15 +596,15 @@ namespace GanglandUndercover.SocialDeduction
 
         private void HandleCustomMessage(ulong senderId, string json)
         {
-            NetworkManager manager = NetworkManager.Singleton;
+            Unity.Netcode.NetworkManager manager = ActiveNetworkManager;
             if (manager == null)
+                return;
+
+            if (!CanApplyRemoteCustomData(manager.IsServer, IsSpawned, OwnerClientId, senderId))
                 return;
 
             if (manager.IsServer)
             {
-                if (!CanAcceptCustomDataFrom(senderId))
-                    return;
-
                 ApplyCustomDataJson(json);
                 SendCustomDataToClients(json, senderId);
                 return;
@@ -583,12 +615,24 @@ namespace GanglandUndercover.SocialDeduction
 
         private bool CanAcceptCustomDataFrom(ulong senderId)
         {
-            return IsSpawned && senderId == OwnerClientId;
+            return CanApplyRemoteCustomData(true, IsSpawned, OwnerClientId, senderId);
+        }
+
+        private static bool CanApplyRemoteCustomData(
+            bool isServerInstance,
+            bool isSpawned,
+            ulong ownerClientId,
+            ulong senderId)
+        {
+            if (isServerInstance)
+                return isSpawned && senderId == ownerClientId;
+
+            return senderId == NetworkManager.ServerClientId;
         }
 
         private void SendCustomDataToClients(string json, ulong senderId)
         {
-            NetworkManager manager = NetworkManager.Singleton;
+            Unity.Netcode.NetworkManager manager = ActiveNetworkManager;
             if (manager == null || !manager.IsServer || manager.CustomMessagingManager == null)
                 return;
 
@@ -624,7 +668,7 @@ namespace GanglandUndercover.SocialDeduction
 
         private void RegisterCustomMessageInstance()
         {
-            NetworkManager manager = NetworkManager.Singleton;
+            Unity.Netcode.NetworkManager manager = ActiveNetworkManager;
             if (!IsSpawned || manager == null || manager.CustomMessagingManager == null)
                 return;
 

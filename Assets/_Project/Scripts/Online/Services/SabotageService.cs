@@ -53,6 +53,9 @@ namespace GanglandUndercover.Online.Services
             { SabotageType.PatrolAlert, 0f },
         };
 
+        /// <summary>证据泄露累积器（每 5 秒扣 1 证据）。</summary>
+        private float evidenceLeakAccumulator;
+
         // ─── 公开只读属性 ──────────────────────────────────────
 
         /// <summary>停电计时器（供 SabotageSync / HUD 读取）。</summary>
@@ -69,6 +72,9 @@ namespace GanglandUndercover.Online.Services
 
         /// <summary>巡逻警报计时器。</summary>
         public float PatrolAlertTimer => GetTimer(SabotageType.PatrolAlert);
+
+        /// <summary>证据泄露累积器（快照序列化用）。</summary>
+        public float EvidenceLeakAccumulator => evidenceLeakAccumulator;
 
         // ─── 生命周期 ──────────────────────────────────────────
 
@@ -140,6 +146,17 @@ namespace GanglandUndercover.Online.Services
                     cooldownTimers[type] = Mathf.Max(0f, coolTime - deltaTime);
                 }
             }
+
+            // 证据泄露 tick：每 5 秒扣 1 证据
+            if (activeTimers.TryGetValue(SabotageType.EvidenceLeak, out float leakTime) && leakTime > 0f)
+            {
+                evidenceLeakAccumulator += deltaTime;
+                if (evidenceLeakAccumulator >= 5f)
+                {
+                    evidenceLeakAccumulator = 0f;
+                    controller?.evidenceService?.SubtractEvidence(1);
+                }
+            }
         }
 
         /// <summary>
@@ -202,15 +219,17 @@ namespace GanglandUndercover.Online.Services
         /// </summary>
         public void ResetAll()
         {
-            foreach (SabotageType type in activeTimers.Keys)
+            foreach (SabotageType type in new List<SabotageType>(activeTimers.Keys))
             {
                 activeTimers[type] = 0f;
             }
 
-            foreach (SabotageType type in cooldownTimers.Keys)
+            foreach (SabotageType type in new List<SabotageType>(cooldownTimers.Keys))
             {
                 cooldownTimers[type] = 0f;
             }
+
+            evidenceLeakAccumulator = 0f;
         }
 
         /// <summary>
@@ -250,13 +269,14 @@ namespace GanglandUndercover.Online.Services
         /// 从快照数据恢复计时器（主机迁移用）。
         /// </summary>
         public void LoadFromSnapshot(float blackout, float lockdown, float commJam,
-            float evidenceLeak, float patrolAlert)
+            float evidenceLeak, float patrolAlert, float leakAccumulator = 0f)
         {
             activeTimers[SabotageType.Blackout] = blackout;
             activeTimers[SabotageType.Lockdown] = lockdown;
             activeTimers[SabotageType.Communications] = commJam;
             activeTimers[SabotageType.EvidenceLeak] = evidenceLeak;
             activeTimers[SabotageType.PatrolAlert] = patrolAlert;
+            evidenceLeakAccumulator = leakAccumulator;
         }
 
         // ─── 内部方法 ──────────────────────────────────────────
@@ -292,7 +312,7 @@ namespace GanglandUndercover.Online.Services
         /// <summary>任务完成时检查是否修复对应类型的破坏。</summary>
         private void OnTaskCompleted(TaskCompletedEvent evt)
         {
-            SabotageType type = OnlineTaskService.SabotageForTask(evt.TaskIndex);
+            SabotageType type = OnlineMatchUtils.SabotageForTask(evt.TaskIndex);
             if (type != SabotageType.None)
             {
                 RepairSabotage(type);

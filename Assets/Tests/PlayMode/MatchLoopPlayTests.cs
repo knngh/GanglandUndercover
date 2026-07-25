@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Reflection;
 using NUnit.Framework;
+using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
@@ -224,6 +225,74 @@ namespace GanglandUndercover.PlayTests
         }
 
         [UnityTest]
+        public IEnumerator HostMigration_ClientHostDisconnectFallsBackWhenNoRemainingPeers()
+        {
+            yield return null;
+
+            GameObject networkObject = new GameObject("HostMigration_ClientNetworkManager");
+            try
+            {
+                NetworkManager clientNetworkManager = networkObject.AddComponent<NetworkManager>();
+                SetField("localPreviewMode", false);
+                SetField("networkManager", clientNetworkManager);
+                SetField("matchStarted", true);
+                SetPhase("Action");
+                SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+
+                InvokePrivate("EnsureMigrationManager");
+                object migrationManager = GetField("migrationManager");
+                SetObjectField(migrationManager, "networkManager", clientNetworkManager);
+
+                InvokeObject(migrationManager, "OnClientDisconnected", NetworkManager.ServerClientId);
+                yield return null;
+
+                AssertPhase("Result", "非 Host 客户端检测到 Host 断线且无剩余 peer 时应降级结算。");
+                StringAssert.Contains("主机已离线", GetString("Status"));
+                Assert.IsFalse((bool)GetObjectProp(migrationManager, "MigrationInProgress"),
+                    "降级结算后迁移流程不应继续挂起。");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(networkObject);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator HostMigration_DirectReplacementHostStartsNetworkManager()
+        {
+            yield return null;
+
+            NetworkManager manager = (NetworkManager)GetField("networkManager");
+            Assert.IsNotNull(manager, "PlayMode Awake 应创建或绑定 NetworkManager。");
+            if (manager.IsListening)
+            {
+                manager.Shutdown();
+                yield return null;
+            }
+
+            SetField("relayJoinCode", string.Empty);
+            object[] args = { string.Empty };
+            MethodInfo mi = _controllerType.GetMethod(
+                "TryStartReplacementHostForMigration",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(mi, "OnlineMatchController 应提供 Host migration replacement Host 启动入口。");
+
+            bool started = (bool)mi.Invoke(_controller, args);
+            yield return null;
+
+            Assert.IsTrue(started, (string)args[0]);
+            Assert.IsTrue(manager.IsHost || manager.IsServer,
+                "直连旧连接已关闭时，replacement Host 应真实启动 NetworkManager。");
+            StringAssert.Contains("已接管 Host", GetString("Status"));
+
+            if (manager.IsListening)
+            {
+                manager.Shutdown();
+                yield return null;
+            }
+        }
+
+        [UnityTest]
         public IEnumerator MeetingEvents_PublishDuringPlayModeEmergencyAndBodyReportPaths()
         {
             yield return null;
@@ -310,6 +379,45 @@ namespace GanglandUndercover.PlayTests
                 "快照恢复应写入主机迁移完成案卷，便于断线恢复回溯。");
         }
 
+        [UnityTest]
+        public IEnumerator EvidenceChain_TaskEvidenceFeedsMeetingDigestAndVoteClosure()
+        {
+            yield return null;
+
+            SetField("localPreviewMode", false);
+            SetField("matchStarted", true);
+            SetPhase("Action");
+            SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+            SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+            SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+            SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+
+            InvokePublic("MarkTaskActive", 1UL, 0);
+            bool completed = InvokeBoolOutString("ValidateAndCompleteTask", 1UL, 0, out string taskError);
+            yield return null;
+
+            Assert.IsTrue(completed, taskError);
+            Assert.Greater(GetInt("EvidenceScore"), 0, "完成任务应推进证据分。");
+
+            InvokePublic("RegisterTaskEvidence", 1, Vector2.one, 1UL);
+            string digest = (string)InvokePublicWithResult("MeetingEvidenceDigest", 1UL);
+            StringAssert.Contains("你的证据链", digest);
+            StringAssert.Contains("强度3", digest);
+            StringAssert.Contains("共 2 条证据", digest);
+
+            SetPhase("Meeting");
+            InvokePrivate("ApplyVote", 1UL, 3UL);
+            yield return null;
+            InvokePrivate("ApplyVote", 2UL, ulong.MaxValue);
+            yield return null;
+            InvokePrivate("ApplyVote", 3UL, ulong.MaxValue);
+            yield return null;
+
+            AssertPhase("Result", "证据链指证权重应打破跳过票并闭合胜负。");
+            Assert.IsFalse(GetPlayerAlive(3UL), "被证据链指证的黑帮应被投出局。");
+            StringAssert.Contains("警方胜利", GetString("Status"));
+        }
+
         // ──────────────────────────────────────────────────────────
         //  帧驱动辅助
         // ──────────────────────────────────────────────────────────
@@ -366,6 +474,30 @@ namespace GanglandUndercover.PlayTests
             fi.SetValue(_controller, value);
         }
 
+        private static void SetObjectField(object target, string name, object value)
+        {
+            FieldInfo fi = target.GetType().GetField(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(fi, $"找不到字段 {name}");
+            fi.SetValue(target, value);
+        }
+
+        private static object GetObjectProp(object target, string name)
+        {
+            PropertyInfo pi = target.GetType().GetProperty(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(pi, $"找不到属性 {name}");
+            return pi.GetValue(target);
+        }
+
+        private static void InvokeObject(object target, string method, params object[] args)
+        {
+            MethodInfo mi = target.GetType().GetMethod(method,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(mi, $"找不到方法 {method}");
+            mi.Invoke(target, args);
+        }
+
         private void SetPhase(string phaseName)
         {
             Type phaseType = RuntimeType("GanglandUndercover.Online.OnlineMatchPhase");
@@ -409,6 +541,23 @@ namespace GanglandUndercover.PlayTests
 
             IDictionary privateRoles = (IDictionary)GetField("privateRoles");
             privateRoles[clientId] = Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineRole"), roleName);
+        }
+
+        private void SetSingleTask(int taskId, Vector3 position, bool completed, bool sabotaged)
+        {
+            object task = Activator.CreateInstance(
+                RuntimeType("GanglandUndercover.Online.OnlineTaskState"),
+                taskId,
+                "Task" + taskId,
+                position,
+                completed ? 1 : 0,
+                1,
+                completed,
+                sabotaged);
+
+            IList tasks = (IList)GetField("tasks");
+            tasks.Clear();
+            tasks.Add(task);
         }
 
         private void ClearPlayers()
@@ -516,6 +665,17 @@ namespace GanglandUndercover.PlayTests
                 BindingFlags.Public | BindingFlags.Instance);
             Assert.IsNotNull(mi, $"找不到方法 {method}");
             return mi.Invoke(_controller, args);
+        }
+
+        private bool InvokeBoolOutString(string methodName, ulong clientId, int taskId, out string message)
+        {
+            object[] args = { clientId, taskId, string.Empty };
+            MethodInfo mi = _controllerType.GetMethod(methodName,
+                BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(mi, $"找不到方法 {methodName}");
+            bool accepted = (bool)mi.Invoke(_controller, args);
+            message = (string)args[2];
+            return accepted;
         }
 
         private void InvokePrivate(string method, params object[] args)

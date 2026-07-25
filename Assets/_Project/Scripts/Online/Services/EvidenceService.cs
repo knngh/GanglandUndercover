@@ -45,23 +45,25 @@ namespace GanglandUndercover.Online.Services
         /// <summary>证据链管理器。</summary>
         private EvidenceChain evidenceChain;
 
+        /// <summary>最近证据事件描述（供快照和 HUD 使用）。</summary>
+        private string lastEvidenceEvent = "尚未取得关键证据。";
+
         /// <summary>指控目标记录（accuserId → targetId）。</summary>
         private readonly Dictionary<ulong, ulong> accusationTargets = new Dictionary<ulong, ulong>();
 
         // ─── 公开只读属性 ──────────────────────────────────────
 
         /// <summary>当前证据分数。</summary>
-        public int EvidenceScore => ActiveEvidenceScore;
+        public int EvidenceScore => evidenceScore;
 
         /// <summary>证据目标值。</summary>
-        public int EvidenceTarget
-        {
-            get => ActiveEvidenceTarget;
-            set => SetActiveEvidenceTarget(value);
-        }
+        public int EvidenceTarget => evidenceTarget;
 
         /// <summary>证据里程碑索引。</summary>
         public int EvidenceMilestoneIndex => evidenceMilestoneIndex;
+
+        /// <summary>最近证据事件描述（供快照和 HUD 使用）。</summary>
+        public string LastEvidenceEvent => lastEvidenceEvent;
 
         /// <summary>证据链管理器实例。</summary>
         public EvidenceChain EvidenceManager => evidenceChain;
@@ -118,26 +120,20 @@ namespace GanglandUndercover.Online.Services
         /// 增加证据分数。自动触发里程碑检查和目标达成判定。
         /// </summary>
         /// <param name="amount">增加量（正数）。</param>
+        /// <param name="eventDescription">证据事件描述。</param>
         /// <param name="collectorId">收集者 ClientId（0 表示系统来源）。</param>
-        public void AddEvidence(int amount, ulong collectorId = 0)
+        public void AddEvidence(int amount, string eventDescription = "", ulong collectorId = 0)
         {
             if (amount <= 0) return;
 
-            OnlineTaskService activeTaskService = ActiveTaskService;
-            if (activeTaskService != null)
-            {
-                activeTaskService.AddEvidence(amount, "证据收集");
-                SyncEvidenceFromTaskService(activeTaskService);
-            }
-            else
-            {
-                evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + amount);
-            }
+            evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + amount);
+            lastEvidenceEvent = (string.IsNullOrEmpty(eventDescription) ? "证据收集" : eventDescription)
+                + " 当前 " + evidenceScore + "/" + evidenceTarget;
 
             eventBus?.Publish(new EvidenceCollectedEvent
             {
                 CollectorId = collectorId,
-                EvidenceIndex = ActiveEvidenceScore,
+                EvidenceIndex = evidenceScore,
             });
 
             UpdateEvidenceMilestone();
@@ -152,15 +148,8 @@ namespace GanglandUndercover.Online.Services
         {
             if (amount <= 0) return;
 
-            OnlineTaskService activeTaskService = ActiveTaskService;
-            if (activeTaskService != null)
-            {
-                activeTaskService.ReduceEvidence(amount);
-                SyncEvidenceFromTaskService(activeTaskService);
-                return;
-            }
-
             evidenceScore = Mathf.Max(0, evidenceScore - amount);
+            SyncControllerEvidenceState();
         }
 
         /// <summary>
@@ -262,8 +251,9 @@ namespace GanglandUndercover.Online.Services
         {
             evidenceChain?.Clear();
             accusationTargets.Clear();
-            SetActiveEvidenceScore(0);
+            evidenceScore = 0;
             evidenceMilestoneIndex = 0;
+            lastEvidenceEvent = "尚未取得关键证据。";
         }
 
         /// <summary>设置证据里程碑索引（快照恢复用）。</summary>
@@ -275,7 +265,33 @@ namespace GanglandUndercover.Online.Services
         /// <summary>设置证据分数（快照恢复用），不触发里程碑检查。</summary>
         public void SetEvidenceScore(int value)
         {
-            SetActiveEvidenceScore(value);
+            evidenceScore = Mathf.Max(0, value);
+        }
+
+        /// <summary>设置证据目标值（开局 / RuleSet 初始化用）。</summary>
+        public void SetEvidenceTarget(int value)
+        {
+            evidenceTarget = Mathf.Max(1, value);
+        }
+
+        /// <summary>一次性恢复快照中的证据状态，包含 HUD/快照所需的最近事件文本。</summary>
+        public void LoadSnapshotState(int score, int target, int milestoneIndex, string evidenceEvent)
+        {
+            evidenceScore = Mathf.Max(0, score);
+            evidenceTarget = Mathf.Max(1, target);
+            evidenceMilestoneIndex = Mathf.Max(0, milestoneIndex);
+            lastEvidenceEvent = string.IsNullOrEmpty(evidenceEvent) ? "尚未取得关键证据。" : evidenceEvent;
+            SyncControllerEvidenceState();
+        }
+
+        /// <summary>对局开始时重置所有证据状态。</summary>
+        public void ResetEvidence(int defaultTarget = 42)
+        {
+            evidenceScore = 0;
+            evidenceTarget = defaultTarget > 0 ? defaultTarget : 42;
+            evidenceMilestoneIndex = 0;
+            lastEvidenceEvent = "尚未取得关键证据。";
+            SyncControllerEvidenceState();
         }
 
         /// <summary>完全重置证据状态（网络断开 / 回到大厅用）。</summary>
@@ -283,8 +299,47 @@ namespace GanglandUndercover.Online.Services
         {
             evidenceChain?.Clear();
             accusationTargets.Clear();
-            SetActiveEvidenceScore(0);
+            evidenceScore = 0;
             evidenceMilestoneIndex = 0;
+            lastEvidenceEvent = "尚未取得关键证据。";
+            SyncControllerEvidenceState();
+        }
+
+        /// <summary>
+        /// 计算任务完成时的证据增益。
+        /// </summary>
+        public static int EvidenceGainFor(int taskId, OnlineProfession profession, OnlineRole role)
+        {
+            int gain = TaskEvidenceValue(taskId);
+
+            if (profession == OnlineProfession.Forensics) gain++;
+            if (role == OnlineRole.Undercover || profession == OnlineProfession.UndercoverAgent) gain++;
+
+            return Mathf.Clamp(gain, 1, 4);
+        }
+
+        /// <summary>任务基础证据价值（静态数据表）。</summary>
+        public static int TaskEvidenceValue(int taskId)
+        {
+            switch (taskId)
+            {
+                case 0: case 3: case 11: case 15: case 16: case 21: case 22: case 26: return 2;
+                case 4: case 8: case 18: case 24: case 27: return 3;
+                default: return 1;
+            }
+        }
+
+        /// <summary>破坏类型的证据惩罚值。</summary>
+        public static int SabotageEvidencePenalty(SabotageType type)
+        {
+            switch (type)
+            {
+                case SabotageType.EvidenceLeak: return 2;
+                case SabotageType.Blackout:
+                case SabotageType.Lockdown:
+                case SabotageType.Communications: return 1;
+                default: return 0;
+            }
         }
 
         // ─── 内部方法 ──────────────────────────────────────────
@@ -297,71 +352,11 @@ namespace GanglandUndercover.Online.Services
             }
         }
 
-        private OnlineTaskService ActiveTaskService => controller != null ? controller.taskService : null;
-
-        private int ActiveEvidenceScore
+        /// <summary>将证据状态同步到 Controller 的镜像字段（供快照序列化和 HUD 读取）。</summary>
+        internal void SyncControllerEvidenceState()
         {
-            get
-            {
-                OnlineTaskService activeTaskService = ActiveTaskService;
-                return activeTaskService != null ? activeTaskService.EvidenceScore : evidenceScore;
-            }
-        }
-
-        private int ActiveEvidenceTarget
-        {
-            get
-            {
-                OnlineTaskService activeTaskService = ActiveTaskService;
-                if (activeTaskService != null && activeTaskService.EvidenceTarget > 0)
-                {
-                    return activeTaskService.EvidenceTarget;
-                }
-
-                return evidenceTarget;
-            }
-        }
-
-        private void SetActiveEvidenceTarget(int value)
-        {
-            evidenceTarget = Mathf.Max(1, value);
-
-            OnlineTaskService activeTaskService = ActiveTaskService;
-            if (activeTaskService == null)
-            {
-                return;
-            }
-
-            activeTaskService.EvidenceTarget = evidenceTarget;
-            SyncEvidenceFromTaskService(activeTaskService);
-        }
-
-        private void SetActiveEvidenceScore(int value)
-        {
-            evidenceScore = Mathf.Max(0, value);
-
-            OnlineTaskService activeTaskService = ActiveTaskService;
-            if (activeTaskService == null)
-            {
-                return;
-            }
-
-            activeTaskService.EvidenceScore = evidenceScore;
-            SyncEvidenceFromTaskService(activeTaskService);
-        }
-
-        private void SyncEvidenceFromTaskService(OnlineTaskService activeTaskService)
-        {
-            if (activeTaskService == null)
-            {
-                return;
-            }
-
-            evidenceScore = activeTaskService.EvidenceScore;
-            if (activeTaskService.EvidenceTarget > 0)
-            {
-                evidenceTarget = activeTaskService.EvidenceTarget;
-            }
+            if (controller == null) return;
+            controller.SyncEvidenceStateFromService(evidenceScore, evidenceTarget, evidenceMilestoneIndex, lastEvidenceEvent);
         }
 
         private void EvaluateControllerState()
@@ -371,6 +366,7 @@ namespace GanglandUndercover.Online.Services
                 return;
             }
 
+            SyncControllerEvidenceState();
             controller.EvaluateWinConditions();
             controller.BroadcastSnapshot();
         }
@@ -399,23 +395,37 @@ namespace GanglandUndercover.Online.Services
             subscribedEventBus = null;
         }
 
-        /// <summary>检查证据里程碑，触发达成事件。</summary>
+        /// <summary>检查证据里程碑，触发达成事件。更新 lastEvidenceEvent。</summary>
         private void UpdateEvidenceMilestone()
         {
-            int score = ActiveEvidenceScore;
-            int target = ActiveEvidenceTarget;
-            int milestone = CalculateMilestone(score, target);
+            int milestone = CalculateMilestone(evidenceScore, evidenceTarget);
             if (milestone <= evidenceMilestoneIndex) return;
 
             evidenceMilestoneIndex = milestone;
+
+            switch (milestone)
+            {
+                case 1:
+                    lastEvidenceEvent = "证据链达成 25%，已锁定第一批路线。";
+                    break;
+                case 2:
+                    lastEvidenceEvent = "证据链达成 50%，会议可重点追问高嫌疑目标。";
+                    break;
+                case 3:
+                    lastEvidenceEvent = "证据链达成 75%，警方接近结案，黑帮必须制造破坏。";
+                    break;
+                default:
+                    lastEvidenceEvent = "证据链闭合，进入结案判定。";
+                    break;
+            }
 
             // 达成 100% 时发布 EvidenceTargetReachedEvent
             if (milestone >= 4)
             {
                 eventBus?.Publish(new EvidenceTargetReachedEvent
                 {
-                    Score = score,
-                    Target = target,
+                    Score = evidenceScore,
+                    Target = evidenceTarget,
                 });
             }
         }
@@ -446,11 +456,8 @@ namespace GanglandUndercover.Online.Services
                 role = player.PublicRole;
             }
 
-            int gain = controller.taskService != null
-                ? controller.taskService.EvidenceGainFor(evt.TaskIndex, profession, role)
-                : 3;
-
-            AddEvidence(gain, evt.PlayerId);
+            int gain = EvidenceGainFor(evt.TaskIndex, profession, role);
+            AddEvidence(gain, "任务完成", evt.PlayerId);
         }
 
         /// <summary>玩家被击杀事件回调 → 注册血迹证据。</summary>

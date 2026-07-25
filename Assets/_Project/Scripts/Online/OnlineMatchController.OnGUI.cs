@@ -627,17 +627,7 @@ namespace GanglandUndercover.Online
                     + (task.Completed ? " 已完成" : task.Sabotaged ? " 被破坏/" + OnlineMatchUtils.SabotageName(OnlineMatchUtils.SabotageForTask(task.Id)) : " 待处理"));
             }
 
-            int activeBodies = 0;
-
-            foreach (OnlineBodyState body in killSystem.bodies)
-            {
-                if (!body.Reported)
-                {
-                    activeBodies++;
-                }
-            }
-
-            builder.AppendLine("未报案尸体: " + activeBodies);
+            builder.AppendLine("未报案尸体: " + killSystem.CountUnreportedBodies());
 
             if (phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting)
             {
@@ -1701,8 +1691,9 @@ namespace GanglandUndercover.Online
             float progress = Mathf.Clamp01(taskService.EvidenceScore / (float)Mathf.Max(1, taskService.EvidenceTarget));
             GUI.color = new Color(0.08f, 0.62f, 0.82f, 1f);
             GUI.DrawTexture(new Rect(rect.x + 12f, rect.y + 16f, (rect.width - 24f) * progress, 10f), Texture2D.whiteTexture);
+            int unreportedBodies = CountUnreportedBodies();
             GUI.color = new Color(0.72f, 0.18f, 0.16f, 1f);
-            GUI.DrawTexture(new Rect(rect.x + 12f, rect.y + 40f, Mathf.Clamp01(CountUnreportedBodies() / 3f) * (rect.width - 24f), 8f), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(rect.x + 12f, rect.y + 40f, Mathf.Clamp01(unreportedBodies / 3f) * (rect.width - 24f), 8f), Texture2D.whiteTexture);
             GUI.color = new Color(0.86f, 0.68f, 0.12f, 1f);
 
             int sabotaged = CountSabotagedTasks();
@@ -1713,7 +1704,7 @@ namespace GanglandUndercover.Online
             }
 
             GUI.color = Color.white;
-            GUI.Label(new Rect(rect.x + 12f, rect.y + 18f, rect.width - 24f, rect.height - 18f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + "\n未报案 " + CountUnreportedBodies() + " | 被破坏任务 " + sabotaged + "\n" + BuildMeetingEvidenceDigest() + "\n会议原因: " + lastMeetingReason + "\n上轮结论: " + lastVoteOutcome);
+            GUI.Label(new Rect(rect.x + 12f, rect.y + 18f, rect.width - 24f, rect.height - 18f), "证据链 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget + "\n未报案 " + unreportedBodies + " | 被破坏任务 " + sabotaged + "\n" + BuildMeetingEvidenceDigest() + "\n会议原因: " + lastMeetingReason + "\n上轮结论: " + lastVoteOutcome);
             GUI.color = oldColor;
         }
 
@@ -1722,9 +1713,9 @@ namespace GanglandUndercover.Online
         {
             OnlineTaskState keyTask = FindHighestValueOpenTask();
             string keyTaskText = keyTask.Id >= 0 ? "关键未闭合: " + keyTask.Name + " +" + OnlineMatchUtils.TaskEvidenceValue(keyTask.Id) : "关键未闭合: 无";
-            string dossier = evidenceDossier?.MeetingEvidenceDossier() ?? "";
+            string dossier = MeetingEvidenceDossier;
             if (!string.IsNullOrEmpty(dossier))
-                return keyTaskText + "\n\n【证据指证】\n" + dossier;
+                return keyTaskText + "\n\n【会议证据】\n" + dossier;
             return keyTaskText + " | 当前票型 " + BuildVoteTallySummary();
         }
 
@@ -1752,7 +1743,27 @@ namespace GanglandUndercover.Online
 
             string lead = skipVotes > 0 ? "跳过 " + skipVotes : "跳过 0";
 
-            // Mark SecretVote voters
+            string secretVotersText = BuildSecretVotersSummary();
+
+            foreach (KeyValuePair<ulong, int> pair in tally)
+            {
+                if (players.TryGetValue(pair.Key, out OnlinePlayerState state))
+                {
+                    lead += " | " + state.DisplayName + " " + pair.Value;
+                }
+            }
+
+            if (secretVotersText.Length > 0)
+            {
+                lead += " | " + secretVotersText;
+            }
+
+            return lead;
+        }
+
+        /// <summary>枚举拥有 SecretVote 能力的玩家，返回格式化摘要。</summary>
+        private string BuildSecretVotersSummary()
+        {
             StringBuilder secretVoters = new StringBuilder();
             foreach (var kv in votes)
             {
@@ -1766,21 +1777,7 @@ namespace GanglandUndercover.Online
                     secretVoters.Append(voterState.DisplayName).Append(" 秘密投票");
                 }
             }
-
-            foreach (KeyValuePair<ulong, int> pair in tally)
-            {
-                if (players.TryGetValue(pair.Key, out OnlinePlayerState state))
-                {
-                    lead += " | " + state.DisplayName + " " + pair.Value;
-                }
-            }
-
-            if (secretVoters.Length > 0)
-            {
-                lead += " | " + secretVoters.ToString();
-            }
-
-            return lead;
+            return secretVoters.ToString();
         }
 
         // --- BuildVoteTallySummary (moved from main controller) ---
@@ -1793,20 +1790,7 @@ namespace GanglandUndercover.Online
                 builder.Append("跳过 ").Append(skipVotes);
             }
 
-            // Show SecretVote voters separately
-            StringBuilder secretBuilder = new StringBuilder();
-            foreach (var kv in votes)
-            {
-                if (players.TryGetValue(kv.Key, out OnlinePlayerState voterState)
-                    && ruleSet != null && ruleSet.HasAbility(voterState.Profession, AbilityType.SecretVote))
-                {
-                    if (secretBuilder.Length > 0)
-                    {
-                        secretBuilder.Append(" | ");
-                    }
-                    secretBuilder.Append(voterState.DisplayName).Append(" 秘密投票");
-                }
-            }
+            string secretText = BuildSecretVotersSummary();
 
             if (tally != null)
             {
@@ -1826,13 +1810,13 @@ namespace GanglandUndercover.Online
                 }
             }
 
-            if (secretBuilder.Length > 0)
+            if (secretText.Length > 0)
             {
                 if (builder.Length > 0)
                 {
                     builder.Append(" | ");
                 }
-                builder.Append(secretBuilder);
+                builder.Append(secretText);
             }
 
             return builder.Length == 0 ? "无人得票" : builder.ToString();

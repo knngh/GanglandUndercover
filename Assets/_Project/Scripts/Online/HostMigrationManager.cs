@@ -207,15 +207,15 @@ namespace GanglandUndercover.Online
             }
 
             // 阶段二：从剩余客户端选举新主机
-            ulong newHostId = ElectNewHost();
+            bool hasNewHost = TryElectNewHost(out ulong newHostId);
             ulong localClientId = matchController.LocalClientIdValue;
 
-            if (newHostId == localClientId)
+            if (hasNewHost && newHostId == localClientId)
             {
                 // 本机成为新主机
                 BecomeNewHost();
             }
-            else if (newHostId > 0)
+            else if (hasNewHost)
             {
                 // 等待新主机广播快照
                 Debug.Log("[HostMigrationManager] 新主机选举为 " + newHostId + "，等待快照同步。");
@@ -226,35 +226,77 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private ulong ElectNewHost()
+        private bool TryElectNewHost(out ulong newHostId)
         {
+            newHostId = 0UL;
             if (networkManager == null)
             {
-                return 0;
+                return false;
             }
 
-            ulong bestId = 0;
-
-            foreach (var client in networkManager.ConnectedClientsList)
+            List<ulong> connectedClientIds = new List<ulong>();
+            foreach (NetworkClient client in networkManager.ConnectedClientsList)
             {
-                ulong clientId = client.ClientId;
+                connectedClientIds.Add(client.ClientId);
+            }
 
-                // M7.2: 排除旧主机
-                if (clientId == oldHostClientId) continue;
+            return TryElectNewHostId(connectedClientIds, oldHostClientId, out newHostId);
+        }
 
-                // 选择最小 clientId 作为新主机
-                if (bestId == 0 || clientId < bestId)
+        internal static ulong ElectNewHostId(IEnumerable<ulong> connectedClientIds, ulong oldHostClientId)
+        {
+            return TryElectNewHostId(connectedClientIds, oldHostClientId, out ulong newHostId)
+                ? newHostId
+                : 0UL;
+        }
+
+        internal static bool TryElectNewHostId(IEnumerable<ulong> connectedClientIds, ulong oldHostClientId, out ulong newHostId)
+        {
+            newHostId = 0UL;
+            if (connectedClientIds == null)
+            {
+                return false;
+            }
+
+            bool found = false;
+            ulong bestId = 0UL;
+            foreach (ulong clientId in connectedClientIds)
+            {
+                if (clientId == oldHostClientId)
+                {
+                    continue;
+                }
+
+                if (!found || clientId < bestId)
                 {
                     bestId = clientId;
+                    found = true;
                 }
             }
 
-            return bestId;
+            newHostId = bestId;
+            return found;
         }
 
-        private void BecomeNewHost()
+        private async void BecomeNewHost()
         {
             Debug.Log("[HostMigrationManager] 本机成为新主机，从快照重建游戏。");
+
+            string reason = string.Empty;
+            if (matchController.ShouldUseRelayReplacementHostForMigration())
+            {
+                reason = await matchController.TryStartReplacementRelayHostForMigrationAsync();
+            }
+            else if (!matchController.TryStartReplacementHostForMigration(out reason))
+            {
+                // reason 已由 TryStartReplacementHostForMigration 写入。
+            }
+
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                FallbackToGameOver("主机迁移失败：" + reason);
+                return;
+            }
 
             // 重建游戏状态
             matchController.RestoreFromSnapshot(cachedSnapshot ?? GameStateSnapshot.FromDefault());

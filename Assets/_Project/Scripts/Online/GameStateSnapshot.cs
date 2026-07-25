@@ -15,7 +15,7 @@ namespace GanglandUndercover.Online
         /// 快照格式版本号。每次序列化格式变更时递增。
         /// 当前版本覆盖：玩家位置/角色/任务/破坏timer/会议/票数/鬼魂状态。
         /// </summary>
-        public const int SNAPSHOT_VERSION = 1;
+        public const int SNAPSHOT_VERSION = 2;
 
         // ── 版本 ──
         public int Version;
@@ -26,6 +26,7 @@ namespace GanglandUndercover.Online
         public int EvidenceScore;
         public int EvidenceTarget;
         public int EmergencyMeetingsLeft;
+        public int MeetingCount;
         public int EvidenceMilestoneIndex;
         public int NextBodyId;
         public int RoomMinPlayers;
@@ -180,6 +181,7 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(EvidenceScore);
             writer.WriteValueSafe(EvidenceTarget);
             writer.WriteValueSafe(EmergencyMeetingsLeft);
+            writer.WriteValueSafe(MeetingCount);
             writer.WriteValueSafe(EvidenceMilestoneIndex);
             writer.WriteValueSafe(NextBodyId);
             writer.WriteValueSafe(RoomMinPlayers);
@@ -212,18 +214,7 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(Players.Count);
             foreach (var p in Players)
             {
-                writer.WriteValueSafe(p.ClientId);
-                writer.WriteValueSafe(p.DisplayName ?? string.Empty);
-                writer.WriteValueSafe(p.Position);
-                writer.WriteValueSafe(p.Input);
-                writer.WriteValueSafe(p.Ready);
-                writer.WriteValueSafe(p.Alive);
-                writer.WriteValueSafe(p.IsBot);
-                writer.WriteValueSafe((int)p.PublicRole);
-                writer.WriteValueSafe((int)p.Profession);
-                writer.WriteValueSafe(p.KillCooldown);
-                writer.WriteValueSafe(p.AbilityCooldown);
-                writer.WriteValueSafe(p.Suspicion);
+                SnapshotIO.WritePlayerMigration(writer, p);
             }
 
             // ── 私密角色 ──
@@ -235,42 +226,16 @@ namespace GanglandUndercover.Online
             }
 
             // ── 任务 ──
-            writer.WriteValueSafe(Tasks.Count);
-            foreach (var t in Tasks)
-            {
-                writer.WriteValueSafe(t.Id);
-                writer.WriteValueSafe(t.Name ?? string.Empty);
-                writer.WriteValueSafe(t.Position);
-                writer.WriteValueSafe(t.Progress);
-                writer.WriteValueSafe(t.RequiredProgress);
-                writer.WriteValueSafe(t.Completed);
-                writer.WriteValueSafe(t.Sabotaged);
-            }
+            SnapshotIO.WriteTasksMigration(writer, Tasks);
 
             // ── 尸体 ──
-            writer.WriteValueSafe(Bodies.Count);
-            foreach (var b in Bodies)
-            {
-                writer.WriteValueSafe(b.Id);
-                writer.WriteValueSafe(b.VictimClientId);
-                writer.WriteValueSafe(b.Position);
-                writer.WriteValueSafe(b.Reported);
-            }
+            SnapshotIO.WriteBodies(writer, Bodies);
 
             // ── 投票 ──
-            writer.WriteValueSafe(Votes.Count);
-            foreach (var v in Votes)
-            {
-                writer.WriteValueSafe(v.VoterClientId);
-                writer.WriteValueSafe(v.TargetClientId);
-            }
+            SnapshotIO.WriteVotes(writer, Votes);
 
             // ── 案卷 ──
-            writer.WriteValueSafe(CaseLog.Count);
-            foreach (var entry in CaseLog)
-            {
-                writer.WriteValueSafe(entry ?? string.Empty);
-            }
+            SnapshotIO.WriteCaseLog(writer, CaseLog);
 
             // ── 冷却字典 ──
             WriteCooldownList(writer, KillCooldowns);
@@ -313,6 +278,11 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out int evidenceScore);
             reader.ReadValueSafe(out int evidenceTarget);
             reader.ReadValueSafe(out int emergencyMeetingsLeft);
+            int meetingCount = 0;
+            if (snapshotVersion >= 2)
+            {
+                reader.ReadValueSafe(out meetingCount);
+            }
             reader.ReadValueSafe(out int evidenceMilestoneIndex);
             reader.ReadValueSafe(out int nextBodyId);
             reader.ReadValueSafe(out int roomMinPlayers);
@@ -343,6 +313,7 @@ namespace GanglandUndercover.Online
             snap.EvidenceScore = evidenceScore;
             snap.EvidenceTarget = evidenceTarget;
             snap.EmergencyMeetingsLeft = emergencyMeetingsLeft;
+            snap.MeetingCount = meetingCount;
             snap.EvidenceMilestoneIndex = evidenceMilestoneIndex;
             snap.NextBodyId = nextBodyId;
             snap.RoomMinPlayers = roomMinPlayers;
@@ -381,34 +352,7 @@ namespace GanglandUndercover.Online
             snap.Players = new List<SnapshotPlayerEntry>(playerCount);
             for (int i = 0; i < playerCount; i++)
             {
-                reader.ReadValueSafe(out ulong clientId);
-                reader.ReadValueSafe(out string displayName);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out Vector2 input);
-                reader.ReadValueSafe(out bool ready);
-                reader.ReadValueSafe(out bool alive);
-                reader.ReadValueSafe(out bool isBot);
-                reader.ReadValueSafe(out int roleValue);
-                reader.ReadValueSafe(out int professionValue);
-                reader.ReadValueSafe(out float killCooldown);
-                reader.ReadValueSafe(out float abilityCooldown);
-                reader.ReadValueSafe(out int suspicion);
-
-                snap.Players.Add(new SnapshotPlayerEntry
-                {
-                    ClientId = clientId,
-                    DisplayName = displayName,
-                    Position = position,
-                    Input = input,
-                    Ready = ready,
-                    Alive = alive,
-                    IsBot = isBot,
-                    PublicRole = (OnlineRole)roleValue,
-                    Profession = (OnlineProfession)professionValue,
-                    KillCooldown = killCooldown,
-                    AbilityCooldown = abilityCooldown,
-                    Suspicion = suspicion,
-                });
+                snap.Players.Add(SnapshotIO.ReadPlayerMigration(reader));
             }
 
             // ── 私密角色 ──
@@ -423,49 +367,19 @@ namespace GanglandUndercover.Online
 
             // ── 任务 ──
             reader.ReadValueSafe(out int taskCount);
-            snap.Tasks = new List<SnapshotTaskEntry>(taskCount);
-            for (int i = 0; i < taskCount; i++)
-            {
-                reader.ReadValueSafe(out int id);
-                reader.ReadValueSafe(out string name);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out int progress);
-                reader.ReadValueSafe(out int requiredProgress);
-                reader.ReadValueSafe(out bool completed);
-                reader.ReadValueSafe(out bool sabotaged);
-                snap.Tasks.Add(new SnapshotTaskEntry { Id = id, Name = name, Position = position, Progress = progress, RequiredProgress = requiredProgress, Completed = completed, Sabotaged = sabotaged });
-            }
+            snap.Tasks = SnapshotIO.ReadTasksAsEntries(reader, taskCount);
 
             // ── 尸体 ──
             reader.ReadValueSafe(out int bodyCount);
-            snap.Bodies = new List<SnapshotBodyEntry>(bodyCount);
-            for (int i = 0; i < bodyCount; i++)
-            {
-                reader.ReadValueSafe(out int id);
-                reader.ReadValueSafe(out ulong victimClientId);
-                reader.ReadValueSafe(out Vector3 position);
-                reader.ReadValueSafe(out bool reported);
-                snap.Bodies.Add(new SnapshotBodyEntry { Id = id, VictimClientId = victimClientId, Position = position, Reported = reported });
-            }
+            snap.Bodies = SnapshotIO.ReadBodiesAsEntries(reader, bodyCount);
 
             // ── 投票 ──
             reader.ReadValueSafe(out int voteCount);
-            snap.Votes = new List<SnapshotVoteEntry>(voteCount);
-            for (int i = 0; i < voteCount; i++)
-            {
-                reader.ReadValueSafe(out ulong voterClientId);
-                reader.ReadValueSafe(out ulong targetClientId);
-                snap.Votes.Add(new SnapshotVoteEntry { VoterClientId = voterClientId, TargetClientId = targetClientId });
-            }
+            snap.Votes = SnapshotIO.ReadVotesAsEntries(reader, voteCount);
 
             // ── 案卷 ──
             reader.ReadValueSafe(out int caseLogCount);
-            snap.CaseLog = new List<string>(caseLogCount);
-            for (int i = 0; i < caseLogCount; i++)
-            {
-                reader.ReadValueSafe(out string entry);
-                snap.CaseLog.Add(entry);
-            }
+            snap.CaseLog = SnapshotIO.ReadCaseLog(reader, caseLogCount);
 
             // ── 冷却字典 ──
             snap.KillCooldowns = ReadCooldownList(reader);

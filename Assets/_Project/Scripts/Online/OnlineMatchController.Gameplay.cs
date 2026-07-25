@@ -38,8 +38,8 @@ namespace GanglandUndercover.Online
         public int ConnectedClientCount => networkManager != null ? networkManager.ConnectedClientsList.Count : 0;
         public bool IsListeningOrConnected => networkManager != null && networkManager.IsListening;
         public bool IsClientConnected => networkManager != null && networkManager.IsConnectedClient;
-        public bool HasActiveMiniGame => activeMiniGame != null;
-        public int ActiveTaskId => activeTaskId;
+        public bool HasActiveMiniGame => minigameService != null && minigameService.HasActiveMiniGame;
+        public int ActiveTaskId => minigameService != null ? minigameService.ActiveTaskId : -1;
         public bool MatchStarted => matchStarted;
         public OnlineMatchPhase Phase => phase;
         public float PhaseTimer => phaseTimer;
@@ -64,7 +64,7 @@ namespace GanglandUndercover.Online
         public string VoiceStatus => chatSystem != null ? "文本聊天: " + chatSystem.CurrentChannel : "文本聊天未初始化";
         public int VoiceParticipantCount => chatSystem != null ? chatSystem.MessageCount : 0;
         public bool VoiceRoutingEnabled => true; // 文本聊天始终可用
-        public bool LocalTaskInputGateActive => activeTaskId >= 0;
+        public bool LocalTaskInputGateActive => minigameService != null && minigameService.HasActiveTask;
         public void EditorSkipOpeningForSmokeTest()
         {
             if (phase == OnlineMatchPhase.Opening)
@@ -95,7 +95,7 @@ namespace GanglandUndercover.Online
             tacticalMapOpen = false;
             fullMapPreview = false;
             intelBoardOpen = false;
-            activeTaskId = -1;
+            minigameService?.Reset();
             phase = OnlineMatchPhase.Action;
             _cameraRig.ResetConfiguration();
             ConfigureMainCamera();
@@ -127,10 +127,7 @@ namespace GanglandUndercover.Online
             fullMapPreview = false;
             tacticalMapOpen = false;
             intelBoardOpen = false;
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskFeedbackTimer = 0f;
+            minigameService?.Reset();
             taskService.ResetAllSabotageTimers();
             _cameraRig.SetSubject(localClientId);
             _cameraRig.ResetConfiguration();
@@ -162,7 +159,7 @@ namespace GanglandUndercover.Online
             fullMapPreview = true;
             tacticalMapOpen = false;
             intelBoardOpen = false;
-            activeTaskId = -1;
+            minigameService?.Reset();
             taskService.ResetAllSabotageTimers();
             _cameraRig.ResetConfiguration();
             ConfigureMainCamera();
@@ -190,7 +187,7 @@ namespace GanglandUndercover.Online
             fullMapPreview = false;
             tacticalMapOpen = false;
             intelBoardOpen = false;
-            activeTaskId = -1;
+            minigameService?.Reset();
             taskService.ApplySabotageEffect(SabotageType.Blackout, "编辑器预览");
             _cameraRig.SetSubject(localClientId);
             _cameraRig.ResetConfiguration();
@@ -272,7 +269,7 @@ namespace GanglandUndercover.Online
             fullMapPreview = false;
             tacticalMapOpen = false;
             intelBoardOpen = false;
-            activeTaskId = -1;
+            minigameService?.Reset();
         }
         private bool EditorForce2DWalkAnimationForClient(ulong clientId, Vector2 input)
         {
@@ -517,12 +514,13 @@ namespace GanglandUndercover.Online
         }
         public bool EditorForceCompleteActiveMiniGameForSmokeTest()
         {
-            if (activeMiniGame == null)
+            if (minigameService == null || !minigameService.HasActiveMiniGame)
             {
                 return false;
             }
 
-            OnActiveMiniGameComplete();
+            // 模拟小游戏完成回调
+            CompleteActiveTask();
             return true;
         }
         public void EditorStartLocalPlayablePreview()
@@ -680,6 +678,9 @@ namespace GanglandUndercover.Online
             }
             evidenceService.Initialize(this, gameEventBus);
 
+            // 绑定 EvidenceService 到 taskService（taskService 的证据属性委托到 EvidenceService）
+            taskService?.BindEvidenceService(evidenceService);
+
             // SabotageService
             if (sabotageService == null)
             {
@@ -690,6 +691,21 @@ namespace GanglandUndercover.Online
                 }
             }
             sabotageService.Initialize(this, gameEventBus);
+
+            // 绑定 SabotageService 到 taskService（taskService 的计时器属性委托到 SabotageService）
+            taskService?.BindSabotageService(sabotageService);
+
+            // MinigameService
+            if (minigameService == null)
+            {
+                minigameService = GetComponent<Services.MinigameService>();
+                if (minigameService == null)
+                {
+                    minigameService = gameObject.AddComponent<Services.MinigameService>();
+                }
+                minigameService.OnTaskCompleted += OnMinigameTaskCompleted;
+                minigameService.OnStatusChanged += msg => { status = msg; };
+            }
         }
         private void EnsureMiniGameBridge()
         {
@@ -810,208 +826,73 @@ namespace GanglandUndercover.Online
                 return state.DisplayName;
             return "玩家" + clientId;
         }
+        // ====== 活动任务 / 迷你游戏（委托到 MinigameService） ======
+
         private void BeginActiveTask(int taskId)
         {
             OnlineTaskState task = GetTask(taskId);
+            if (task.Id < 0) return;
 
-            if (task.Id < 0)
-            {
-                return;
-            }
-
-            activeTaskId = taskId;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-
-            // Task#7：优先打开 Among Us 风格小游戏（成功后走与经典面板一致的服务器提交路径）。
-            // 打开失败（如缺 UI 环境）时 activeMiniGame 保持 null，自动回退到 OnGUI 经典面板。
-            TryOpenActiveMiniGame(taskId);
-
+            minigameService.Begin(taskId);
             status = "开始处理任务：" + task.Name + "。";
             AddCaseLog(status);
         }
-        private void TryOpenActiveMiniGame(int taskId)
-        {
-            DestroyActiveMiniGame();
 
-            try
-            {
-                GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase mini =
-                    OnlineMiniGameBridge.CreateDefaultMinigame(taskId, transform);
-                if (mini == null)
-                {
-                    return;
-                }
-
-                mini.OnComplete = _ => OnActiveMiniGameComplete();
-                mini.OnCancel = _ => OnActiveMiniGameCancel();
-                mini.Show();
-                activeMiniGame = mini;
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning("[OnlineMatch] 小游戏打开失败，回退经典任务面板：" + e.Message);
-                DestroyActiveMiniGame();
-            }
-        }
-        private void OnActiveMiniGameComplete()
-        {
-            // CompleteActiveTask 会把 activeTaskId 置 -1 并提交现场结果；
-            // Update 下一帧检测到 activeTaskId<0 即回收 activeMiniGame（延迟销毁更安全）。
-            CompleteActiveTask();
-        }
-        private void OnActiveMiniGameCancel()
-        {
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-            status = "已退出任务面板。";
-        }
         private void DestroyActiveMiniGame()
         {
-            if (activeMiniGame == null)
-            {
-                return;
-            }
-
-            GanglandUndercover.SocialDeduction.MiniGames.MiniGameBase mini = activeMiniGame;
-            activeMiniGame = null;
-            try
-            {
-                mini.Hide();
-            }
-            catch (Exception)
-            {
-                // Hide 的清理失败不应阻断对象销毁。
-            }
-
-            if (mini != null)
-            {
-                if (Application.isPlaying)
-                {
-                    UnityEngine.Object.Destroy(mini.gameObject);
-                }
-                else
-                {
-                    UnityEngine.Object.DestroyImmediate(mini.gameObject);
-                }
-            }
+            minigameService?.DestroyMiniGame();
         }
+
         private void ReadActiveTaskInput()
         {
             if (Input.GetKeyDown(KeyCode.Escape))
             {
-                activeTaskId = -1;
-                activeTaskStep = 0;
-                activeTaskCharge = 0f;
-                activeTaskStepOneDone = false;
-                activeTaskStepTwoDone = false;
-                activeTaskStepThreeDone = false;
-                activeTaskMistakes = 0;
-                activeTaskFeedbackTimer = 0f;
-                activeTaskFeedbackPositive = false;
-                status = "已退出任务面板。";
+                minigameService.Cancel();
                 return;
             }
 
             if (Input.GetKey(KeyCode.Space))
             {
-                activeTaskCharge = Mathf.Min(1f, activeTaskCharge + Time.deltaTime * OnlineMatchUtils.TaskChargeRate(activeTaskId));
+                minigameService.AddCharge(Time.deltaTime);
             }
 
             if (Input.GetKeyDown(KeyCode.Alpha1))
             {
-                ResolveActiveTaskStep(1);
+                minigameService.ResolveStep(1);
+            }
+            else if (Input.GetKeyDown(KeyCode.Alpha2))
+            {
+                minigameService.ResolveStep(2);
+            }
+            else if (Input.GetKeyDown(KeyCode.Alpha3))
+            {
+                minigameService.ResolveStep(3);
             }
 
-            if (Input.GetKeyDown(KeyCode.Alpha2))
-            {
-                ResolveActiveTaskStep(2);
-            }
-
-            if (Input.GetKeyDown(KeyCode.Alpha3))
-            {
-                ResolveActiveTaskStep(3);
-            }
-
-            if (activeTaskCharge >= 1f && activeTaskStepOneDone && activeTaskStepTwoDone && activeTaskStepThreeDone)
-            {
-                CompleteActiveTask();
-            }
+            minigameService.CheckAndComplete();
         }
+
         private void ResolveActiveTaskStep(int input)
         {
-            if (input == OnlineMatchUtils.CorrectTaskStepInput(activeTaskId, activeTaskStep))
-            {
-                activeTaskStep++;
-                activeTaskCharge = Mathf.Min(1f, activeTaskCharge + 0.28f);
-
-                if (activeTaskStep == 1)
-                {
-                    activeTaskStepOneDone = true;
-                }
-                else if (activeTaskStep == 2)
-                {
-                    activeTaskStepTwoDone = true;
-                }
-                else
-                {
-                    activeTaskStepThreeDone = true;
-                }
-
-                status = "任务校验 " + Mathf.Min(activeTaskStep, 3) + "/3 通过。";
-                activeTaskFeedbackTimer = 0.42f;
-                activeTaskFeedbackPositive = true;
-                return;
-            }
-
-            activeTaskCharge = Mathf.Max(0f, activeTaskCharge - 0.18f);
-            activeTaskMistakes++;
-            status = "校验不匹配，进度回退。";
-            activeTaskFeedbackTimer = 0.55f;
-            activeTaskFeedbackPositive = false;
-
-            if (activeTaskMistakes >= 3)
-            {
-                activeTaskMistakes = 0;
-                activeTaskCharge = 0f;
-                status = "连续错误触发复核，任务进度清零重校。";
-            }
+            minigameService.ResolveStep(input);
         }
+
         private void CompleteActiveTask()
         {
-            int taskId = activeTaskId;
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
+            minigameService.CheckAndComplete();
+        }
 
+        /// <summary>MinigameService.OnTaskCompleted 事件回调：发送网络 Interact 动作。</summary>
+        private void OnMinigameTaskCompleted(int taskId)
+        {
             if (phase == OnlineMatchPhase.Action)
             {
-                submittingActiveTask = true;
+                minigameService.SetSubmitting(true);
                 SendClientAction(OnlineActionType.Interact);
-                submittingActiveTask = false;
+                minigameService.SetSubmitting(false);
             }
-
-            status = "任务操作完成，已提交现场结果。";
         }
+
         private bool ShouldOpenLocalTaskPanel()
         {
             if (phase != OnlineMatchPhase.Action || !players.TryGetValue(LocalClientId(), out OnlinePlayerState localState) || !localState.Alive)
@@ -1031,31 +912,15 @@ namespace GanglandUndercover.Online
         }
         private void UpdateEvidenceMilestone()
         {
-            int milestone = OnlineMatchUtils.EvidenceMilestoneFor(taskService.EvidenceScore, taskService.EvidenceTarget);
+            // EvidenceService 已在 AddEvidence 时自动更新里程碑。
+            // 这里仅做同步到 controller 镜像字段 + 案情日志。
+            if (evidenceService == null) return;
 
-            if (milestone <= evidenceMilestoneIndex)
-            {
-                return;
-            }
+            int milestone = evidenceService.EvidenceMilestoneIndex;
+            if (milestone <= evidenceMilestoneIndex) return;
 
             evidenceMilestoneIndex = milestone;
-
-            switch (milestone)
-            {
-                case 1:
-                    lastEvidenceEvent = "证据链达成 25%，已锁定第一批路线。";
-                    break;
-                case 2:
-                    lastEvidenceEvent = "证据链达成 50%，会议可重点追问高嫌疑目标。";
-                    break;
-                case 3:
-                    lastEvidenceEvent = "证据链达成 75%，警方接近结案，黑帮必须制造破坏。";
-                    break;
-                default:
-                    lastEvidenceEvent = "证据链闭合，进入结案判定。";
-                    break;
-            }
-
+            lastEvidenceEvent = evidenceService.LastEvidenceEvent;
             AddCaseLog(lastEvidenceEvent);
         }
         public void AddCaseLog(string entry)
@@ -1332,7 +1197,7 @@ namespace GanglandUndercover.Online
             bool actionPhase = phase == OnlineMatchPhase.Action;
             bool moving = state.Alive && state.Input.sqrMagnitude > 0.02f;
             bool nearBody = IsNearUnreportedBody(state.Position);
-            bool interacting = state.Alive && activeTaskId >= 0 && isLocal;
+            bool interacting = state.Alive && minigameService != null && minigameService.HasActiveTask && isLocal;
             bool hasVoted = votes.ContainsKey(state.ClientId);
             Color accent = OnlineWorldBuilder.PlayerAccentColor(state);
 

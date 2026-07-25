@@ -18,10 +18,12 @@ namespace GanglandUndercover.PlayTests
     {
         private const string RuntimeAssemblyName = "Assembly-CSharp";
         private const string ControllerTypeName = "GanglandUndercover.Online.OnlineMatchController";
+        private const string CharacterCustomizerTypeName = "GanglandUndercover.SocialDeduction.CharacterCustomizer";
 
         private const string ClientStateMessage = "GanglandClientState";
         private const string ClientActionMessage = "GanglandClientAction";
         private const string ClientProfileMessage = "GanglandClientProfile";
+        private const string CharacterCustomMessage = "GanglandCharacterCustom";
         private const string ServerSnapshotMessage = "GanglandServerSnapshot";
         private const string RoleAssignMessage = "GanglandRoleAssign";
         private const string ChatSendMessage = "GanglandChatSend";
@@ -30,6 +32,7 @@ namespace GanglandUndercover.PlayTests
 
         private readonly List<GameObject> _ownedObjects = new List<GameObject>();
         private Type _controllerType;
+        private Type _customizerType;
         private MonoBehaviour _serverController;
         private NetworkManager _serverNetworkManager;
         private NetworkManager _clientNetworkManager;
@@ -39,9 +42,12 @@ namespace GanglandUndercover.PlayTests
         public void SetUp()
         {
             _controllerType = Type.GetType($"{ControllerTypeName}, {RuntimeAssemblyName}");
+            _customizerType = Type.GetType($"{CharacterCustomizerTypeName}, {RuntimeAssemblyName}");
             Assert.IsNotNull(_controllerType, $"找不到运行时类型 {ControllerTypeName}。");
+            Assert.IsNotNull(_customizerType, $"找不到运行时类型 {CharacterCustomizerTypeName}。");
 
             DestroyObjectsOfType(typeof(NetworkManager));
+            DestroyObjectsOfType(_customizerType);
             DestroyObjectsOfType(_controllerType);
 
             _port = AllocateUdpPort();
@@ -66,7 +72,10 @@ namespace GanglandUndercover.PlayTests
                 _serverNetworkManager.Shutdown();
             }
 
-            DestroySurveillanceCameraTemplate();
+            DestroyTemplateField("surveillanceCameraTemplate");
+            DestroyTemplateField("miniGameBridgeTemplate");
+            DestroyTemplateField("characterCustomizerTemplate");
+            DestroyObjectsOfType(_customizerType);
 
             for (int i = _ownedObjects.Count - 1; i >= 0; i--)
             {
@@ -186,6 +195,44 @@ namespace GanglandUndercover.PlayTests
             Assert.IsFalse(ServerChatContainsContent("刷屏|不应显示"), "被限流的 ChatSend 不应进入服务器聊天。");
         }
 
+        [UnityTest]
+        public IEnumerator CharacterCustomizer_SpawnsOwnerObjectsAndRejectsNonOwnerPayload()
+        {
+            yield return null;
+
+            Assert.IsTrue(_serverNetworkManager.StartHost(), "Host NetworkManager 应能启动。");
+
+            yield return WaitUntilOrFail(
+                () => FindCustomizer(c => c.IsSpawned && c.IsServer && c.OwnerClientId == NetworkManager.ServerClientId) != null,
+                "Host 启动后应生成 server-owned CharacterCustomizer NetworkObject。");
+
+            _clientNetworkManager = CreateNetworkManager("CharacterCustom_ClientNetworkManager", _port, false);
+            CopyServerNetworkPrefabs(_clientNetworkManager);
+            Assert.IsTrue(_clientNetworkManager.StartClient(), "Client NetworkManager 应能启动。");
+
+            yield return WaitUntilOrFail(
+                () => _clientNetworkManager.IsConnectedClient
+                    && FindCustomizer(c => c.IsSpawned && c.IsServer && c.OwnerClientId == _clientNetworkManager.LocalClientId) != null
+                    && FindCustomizer(c => c.IsSpawned && c.IsClient && !c.IsServer && !c.IsOwner
+                        && c.OwnerClientId == NetworkManager.ServerClientId) != null,
+                "Client 连接后应收到 Host 和远端 owner 对应的 CharacterCustomizer clone。");
+
+            NetworkBehaviour serverOwnedCustomizer = FindCustomizer(c =>
+                c.IsSpawned && c.IsServer && c.OwnerClientId == NetworkManager.ServerClientId);
+            NetworkBehaviour clientServerOwnedClone = FindCustomizer(c =>
+                c.IsSpawned && c.IsClient && !c.IsServer && !c.IsOwner && c.OwnerClientId == NetworkManager.ServerClientId);
+            string baselineJson = GetCustomizerJson(serverOwnedCustomizer);
+
+            SendCharacterCustomFromClient(
+                clientServerOwnedClone.NetworkObjectId,
+                "{\"hat\":\"hat_none\",\"top\":\"top_jacket\",\"bottom\":\"bottom_pants\",\"accessory\":\"acc_none\",\"skinTone\":\"skin_light\",\"height\":\"height_m\"}");
+
+            yield return RunFrames(16);
+
+            Assert.AreEqual(baselineJson, GetCustomizerJson(serverOwnedCustomizer),
+                "Client 伪造 server-owned CharacterCustomizer 的外观消息必须被 Host 拒绝。");
+        }
+
         private NetworkManager CreateNetworkManager(string name, ushort port, bool server)
         {
             GameObject go = new GameObject(name);
@@ -218,7 +265,7 @@ namespace GanglandUndercover.PlayTests
             return manager;
         }
 
-        private void DestroySurveillanceCameraTemplate()
+        private void DestroyTemplateField(string fieldName)
         {
             if (_serverController == null || _controllerType == null)
             {
@@ -226,7 +273,7 @@ namespace GanglandUndercover.PlayTests
             }
 
             FieldInfo templateField = _controllerType.GetField(
-                "surveillanceCameraTemplate",
+                fieldName,
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             GameObject template = templateField?.GetValue(_serverController) as GameObject;
 
@@ -374,6 +421,20 @@ namespace GanglandUndercover.PlayTests
             }
         }
 
+        private void SendCharacterCustomFromClient(ulong objectId, string json)
+        {
+            byte[] jsonBytes = Encoding.UTF8.GetBytes(json ?? string.Empty);
+            using FastBufferWriter writer = new FastBufferWriter(jsonBytes.Length + 16, Allocator.Temp);
+            writer.WriteValueSafe(objectId);
+            writer.WriteValueSafe(jsonBytes.Length);
+            writer.WriteBytesSafe(jsonBytes, jsonBytes.Length);
+            _clientNetworkManager.CustomMessagingManager.SendNamedMessage(
+                CharacterCustomMessage,
+                NetworkManager.ServerClientId,
+                writer,
+                NetworkDelivery.ReliableSequenced);
+        }
+
         private IEnumerator WaitUntilOrFail(Func<bool> condition, string message, float timeoutSeconds = 4f)
         {
             float startedAt = Time.realtimeSinceStartup;
@@ -410,6 +471,28 @@ namespace GanglandUndercover.PlayTests
             FieldInfo fi = _controllerType.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(fi, $"找不到字段 {name}");
             return fi.GetValue(_serverController);
+        }
+
+        private NetworkBehaviour FindCustomizer(Func<NetworkBehaviour, bool> predicate)
+        {
+            UnityEngine.Object[] objects = UnityEngine.Object.FindObjectsByType(_customizerType, FindObjectsSortMode.None);
+            foreach (UnityEngine.Object obj in objects)
+            {
+                if (obj is NetworkBehaviour networkBehaviour && predicate(networkBehaviour))
+                {
+                    return networkBehaviour;
+                }
+            }
+
+            return null;
+        }
+
+        private string GetCustomizerJson(NetworkBehaviour customizer)
+        {
+            Assert.IsNotNull(customizer, "CharacterCustomizer 不应为空。");
+            MethodInfo mi = _customizerType.GetMethod("GetCustomDataJson", BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(mi, "找不到 CharacterCustomizer.GetCustomDataJson。");
+            return (string)mi.Invoke(customizer, null);
         }
 
         private void SetField(string name, object value)

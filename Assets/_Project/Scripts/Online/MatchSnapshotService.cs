@@ -32,6 +32,7 @@ namespace GanglandUndercover.Online
             snap.EvidenceScore = _ctrl.taskService.EvidenceScore;
             snap.EvidenceTarget = _ctrl.taskService.EvidenceTarget;
             snap.EmergencyMeetingsLeft = _ctrl.emergencyMeetingsLeft;
+            snap.MeetingCount = _ctrl.MeetingCount;
             snap.EvidenceMilestoneIndex = _ctrl.evidenceMilestoneIndex;
             snap.NextBodyId = _ctrl.killSystem.nextBodyId;
             snap.RoomMinPlayers = _ctrl.roomMinPlayers;
@@ -162,6 +163,7 @@ namespace GanglandUndercover.Online
             _ctrl.taskService.EvidenceScore = snap.EvidenceScore;
             _ctrl.taskService.EvidenceTarget = snap.EvidenceTarget;
             _ctrl.emergencyMeetingsLeft = snap.EmergencyMeetingsLeft;
+            _ctrl.RestoreMeetingCountFromSnapshot(snap.MeetingCount);
             _ctrl.evidenceMilestoneIndex = snap.EvidenceMilestoneIndex;
             _ctrl.killSystem.nextBodyId = snap.NextBodyId;
             _ctrl.roomMinPlayers = snap.RoomMinPlayers;
@@ -181,7 +183,8 @@ namespace GanglandUndercover.Online
                 snap.EvidenceLeakTimer, snap.EvidenceLeakAccumulator, snap.PatrolAlertTimer);
             _ctrl.emergencyCooldownTimer = snap.EmergencyCooldownTimer;
             _ctrl.killSystem.reportCooldownTimer = snap.ReportCooldownTimer;
-            _ctrl.SyncMeetingServiceFromController();
+            _ctrl.SyncMeetingSnapshotToService();
+            _ctrl.SyncEvidenceServiceFromController();
             _ctrl.aiActionGraceTimer = snap.AiActionGraceTimer;
             _ctrl.matchElapsedSeconds = snap.MatchElapsedSeconds;
 

@@ -17,31 +17,16 @@ namespace GanglandUndercover.Online
         // ====== 任务状态 ======
         private readonly List<OnlineTaskState> tasks = new List<OnlineTaskState>();
 
-        // ====== 证据链状态 ======
-        private int evidenceScore;
-        private int evidenceTarget;
-        private int evidenceMilestoneIndex;
-        private string lastEvidenceEvent = "尚未取得关键证据。";
+        // ====== 证据链状态（委托到 EvidenceService） ======
+        // evidenceScore / evidenceTarget / evidenceMilestoneIndex / lastEvidenceEvent
+        // 现在由 Services.EvidenceService 统一管理。本类通过 evidenceServiceRef 代理访问。
+        private Services.EvidenceService evidenceServiceRef;
         private string lastSabotageEvent = "尚未发生破坏。";
 
-        // ====== 破坏效果计时器 ======
-        private float blackoutTimer;
-        private float lockdownTimer;
-        private float communicationJamTimer;
-        private float evidenceLeakTimer;
-        private float evidenceLeakAccumulator;
-        private float patrolAlertTimer;
-
-        // ====== 本地活动任务（迷你游戏状态） ======
-        private int activeTaskId = -1;
-        private int activeTaskStep;
-        private int activeTaskMistakes;
-        private float activeTaskCharge;
-        private float activeTaskFeedbackTimer;
-        private bool activeTaskStepOneDone;
-        private bool activeTaskStepTwoDone;
-        private bool activeTaskStepThreeDone;
-        private bool activeTaskFeedbackPositive;
+        // ====== 破坏效果计时器（委托到 SabotageService） ======
+        // blackoutTimer / lockdownTimer / communicationJamTimer / evidenceLeakTimer /
+        // evidenceLeakAccumulator / patrolAlertTimer 现在由 Services.SabotageService 统一管理。
+        private Services.SabotageService sabotageServiceRef;
 
         // ====== 引用 ======
         private OnlineMatchController controller;
@@ -54,45 +39,30 @@ namespace GanglandUndercover.Online
         public event Action<int> OnTaskRepaired;
         public event Action<int, int> OnEvidenceChanged;              // (score, target)
         public event Action<int> OnEvidenceMilestone;                 // (milestone index)
-        public event Action<int> OnActiveTaskStarted;                 // (taskId)
-        public event Action<int, bool> OnActiveTaskStepResolved;      // (step, success)
-        public event Action OnActiveTaskCompleted;
-        public event Action OnActiveTaskCancelled;
         public event Action<string> OnSabotageEffectApplied;          // (effect description)
 
         // ====== 属性 ======
         public IReadOnlyList<OnlineTaskState> Tasks => tasks;
         public int EvidenceScore
         {
-            get => evidenceScore;
-            set => evidenceScore = Mathf.Max(0, value);
+            get => evidenceServiceRef != null ? evidenceServiceRef.EvidenceScore : 0;
+            set => evidenceServiceRef?.SetEvidenceScore(value);
         }
 
         public int EvidenceTarget
         {
-            get => evidenceTarget;
-            set => SetEvidenceTarget(value);
+            get => evidenceServiceRef != null ? evidenceServiceRef.EvidenceTarget : 0;
+            set => evidenceServiceRef?.SetEvidenceTarget(value);
         }
-        public int EvidenceMilestoneIndex => evidenceMilestoneIndex;
-        public string LastEvidenceEvent => lastEvidenceEvent;
+        public int EvidenceMilestoneIndex => evidenceServiceRef != null ? evidenceServiceRef.EvidenceMilestoneIndex : 0;
+        public string LastEvidenceEvent => evidenceServiceRef != null ? evidenceServiceRef.LastEvidenceEvent : "尚未取得关键证据。";
         public string LastSabotageEvent => lastSabotageEvent;
-        public int ActiveTaskId => activeTaskId;
-        public bool HasActiveTask => activeTaskId >= 0;
-        public int ActiveTaskStep => activeTaskStep;
-        public float ActiveTaskCharge => activeTaskCharge;
-        public int ActiveTaskMistakes => activeTaskMistakes;
-        public float ActiveTaskFeedbackTimer => activeTaskFeedbackTimer;
-        public bool ActiveTaskStepOneDone => activeTaskStepOneDone;
-        public bool ActiveTaskStepTwoDone => activeTaskStepTwoDone;
-        public bool ActiveTaskStepThreeDone => activeTaskStepThreeDone;
-        public bool ActiveTaskFeedbackPositive => activeTaskFeedbackPositive;
-        public float BlackoutTimer => blackoutTimer;
-        public float LockdownTimer => lockdownTimer;
-        public float CommunicationJamTimer => communicationJamTimer;
-        public float EvidenceLeakTimer => evidenceLeakTimer;
-        public float PatrolAlertTimer => patrolAlertTimer;
-        public float EvidenceLeakAccumulator => evidenceLeakAccumulator;
-        public string ActiveTaskName => activeTaskId >= 0 ? GetTask(activeTaskId).Name : string.Empty;
+        public float BlackoutTimer => sabotageServiceRef != null ? sabotageServiceRef.BlackoutTimer : 0f;
+        public float LockdownTimer => sabotageServiceRef != null ? sabotageServiceRef.LockdownTimer : 0f;
+        public float CommunicationJamTimer => sabotageServiceRef != null ? sabotageServiceRef.CommunicationJamTimer : 0f;
+        public float EvidenceLeakTimer => sabotageServiceRef != null ? sabotageServiceRef.EvidenceLeakTimer : 0f;
+        public float PatrolAlertTimer => sabotageServiceRef != null ? sabotageServiceRef.PatrolAlertTimer : 0f;
+        public float EvidenceLeakAccumulator => sabotageServiceRef != null ? sabotageServiceRef.EvidenceLeakAccumulator : 0f;
 
         // ====== 生命周期 ======
 
@@ -104,16 +74,21 @@ namespace GanglandUndercover.Online
         /// <summary>
         /// 延迟初始化引用（在 OnlineMatchController.Awake 之后调用）。
         /// </summary>
-        public void Initialize(OnlineRuleSet ruleSetRef, OnlineMapService mapServiceRef)
+        public void Initialize(OnlineRuleSet ruleSetRef, OnlineMapService mapServiceRef,
+            Services.EvidenceService evidenceService = null)
         {
             ruleSet = ruleSetRef;
             mapService = mapServiceRef;
+            if (evidenceService != null)
+            {
+                evidenceServiceRef = evidenceService;
+            }
 
             // 尚未设定证据目标时，初始化为规则集默认值（保证 lobby 阶段即有合理的 10-20 分钟局时目标，
             // 不覆盖快照恢复或开局缩放后的值）。
-            if (evidenceTarget <= 0)
+            if (evidenceServiceRef != null && evidenceServiceRef.EvidenceTarget <= 0)
             {
-                evidenceTarget = ruleSet != null ? ruleSet.DefaultEvidenceTarget : 44;
+                evidenceServiceRef.SetEvidenceTarget(ruleSet != null ? ruleSet.DefaultEvidenceTarget : 44);
             }
         }
 
@@ -207,31 +182,36 @@ namespace GanglandUndercover.Online
             }
         }
 
-        // ====== 公开 API：证据链 ======
+        // ====== 公开 API：证据链（委托到 EvidenceService） ======
+
+        /// <summary>延迟绑定 EvidenceService 引用（EnsureT1Services 创建后调用）。</summary>
+        public void BindEvidenceService(Services.EvidenceService evidenceService)
+        {
+            evidenceServiceRef = evidenceService;
+        }
+
+        /// <summary>延迟绑定 SabotageService 引用（EnsureT1Services 创建后调用）。</summary>
+        public void BindSabotageService(Services.SabotageService sabotageService)
+        {
+            sabotageServiceRef = sabotageService;
+        }
 
         public void SetEvidenceTarget(int value)
         {
-            int min = ruleSet != null ? ruleSet.MinEvidenceTarget : 28;
-            int max = ruleSet != null ? ruleSet.MaxEvidenceTarget : 56;
-            evidenceTarget = Mathf.Clamp(value, min, max);
+            evidenceServiceRef?.SetEvidenceTarget(value);
         }
 
         public void ResetEvidence()
         {
-            evidenceScore = 0;
-            evidenceTarget = ruleSet != null ? ruleSet.DefaultEvidenceTarget : 42;
-            evidenceMilestoneIndex = 0;
-            lastEvidenceEvent = "尚未取得关键证据。";
+            int defaultTarget = ruleSet != null ? ruleSet.DefaultEvidenceTarget : 42;
+            evidenceServiceRef?.ResetEvidence(defaultTarget);
             lastSabotageEvent = "尚未发生破坏。";
         }
 
         public void SetEvidenceFromSnapshot(int score, int target, int milestoneIndex,
             string evidenceEvent, string sabotageEvent)
         {
-            evidenceScore = score;
-            evidenceTarget = target;
-            evidenceMilestoneIndex = milestoneIndex;
-            lastEvidenceEvent = evidenceEvent;
+            evidenceServiceRef?.LoadSnapshotState(score, target, milestoneIndex, evidenceEvent);
             lastSabotageEvent = sabotageEvent;
         }
 
@@ -240,10 +220,13 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void AddEvidence(int gain, string eventDescription)
         {
-            evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + gain);
-            lastEvidenceEvent = eventDescription + " 当前 " + evidenceScore + "/" + evidenceTarget;
-            OnEvidenceChanged?.Invoke(evidenceScore, evidenceTarget);
-            UpdateEvidenceMilestone();
+            int previousMilestone = EvidenceMilestoneIndex;
+            evidenceServiceRef?.AddEvidence(gain, eventDescription);
+            OnEvidenceChanged?.Invoke(EvidenceScore, EvidenceTarget);
+            if (EvidenceMilestoneIndex > previousMilestone)
+            {
+                OnEvidenceMilestone?.Invoke(EvidenceMilestoneIndex);
+            }
         }
 
         /// <summary>
@@ -251,60 +234,26 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void ReduceEvidence(int penalty)
         {
-            evidenceScore = Mathf.Max(0, evidenceScore - penalty);
-            OnEvidenceChanged?.Invoke(evidenceScore, evidenceTarget);
+            evidenceServiceRef?.SubtractEvidence(penalty);
+            OnEvidenceChanged?.Invoke(EvidenceScore, EvidenceTarget);
         }
 
         /// <summary>
         /// 证据泄露 tick 扣减。
+        /// 注意：实际 tick 逻辑已迁移到 SabotageService.Tick()，此方法保留为兼容空壳。
         /// </summary>
         public void TickEvidenceLeak(float deltaTime)
         {
-            if (evidenceLeakTimer <= 0f) return;
-
-            evidenceLeakTimer = Mathf.Max(0f, evidenceLeakTimer - deltaTime);
-            evidenceLeakAccumulator += deltaTime;
-
-            if (evidenceLeakAccumulator >= 5f)
-            {
-                evidenceScore = Mathf.Max(0, evidenceScore - 1);
-                evidenceLeakAccumulator = 0f;
-                OnEvidenceChanged?.Invoke(evidenceScore, evidenceTarget);
-            }
+            // SabotageService.Tick() 已处理证据泄露累积和扣减
         }
 
         /// <summary>
         /// 证据泄露计时器归零（回合结束时清理）。
+        /// 注意：实际逻辑已迁移到 SabotageService.ResetAll()。
         /// </summary>
         public void ResetEvidenceLeakAccumulator()
         {
-            evidenceLeakAccumulator = 0f;
-        }
-
-        private void UpdateEvidenceMilestone()
-        {
-            int milestone = EvidenceMilestoneFor(evidenceScore, evidenceTarget);
-            if (milestone <= evidenceMilestoneIndex) return;
-
-            evidenceMilestoneIndex = milestone;
-
-            switch (milestone)
-            {
-                case 1:
-                    lastEvidenceEvent = "证据链达成 25%，已锁定第一批路线。";
-                    break;
-                case 2:
-                    lastEvidenceEvent = "证据链达成 50%，会议可重点追问高嫌疑目标。";
-                    break;
-                case 3:
-                    lastEvidenceEvent = "证据链达成 75%，警方接近结案，黑帮必须制造破坏。";
-                    break;
-                default:
-                    lastEvidenceEvent = "证据链闭合，进入结案判定。";
-                    break;
-            }
-
-            OnEvidenceMilestone?.Invoke(milestone);
+            // SabotageService.ResetAll() 已处理
         }
 
         // ====== 公开 API：任务互动（核心流程） ======
@@ -326,17 +275,18 @@ namespace GanglandUndercover.Online
             if (role == OnlineRole.Gang || role == OnlineRole.Mole)
             {
                 // ---- 破坏 ----
-                SabotageType sabotageType = SabotageForTask(nearestTask.Id);
+                SabotageType sabotageType = OnlineMatchUtils.SabotageForTask(nearestTask.Id);
                 nearestTask.Sabotaged = true;
                 nearestTask.Completed = false;
                 nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
-                evidenceScore = Mathf.Max(0, evidenceScore - SabotageEvidencePenalty(sabotageType));
+                int penalty = OnlineMatchUtils.SabotageEvidencePenalty(sabotageType);
+                evidenceServiceRef?.SubtractEvidence(penalty);
 
                 string actorLabel = role == OnlineRole.Mole ? "线人" : "黑帮";
                 string status = actorLabel + "秘密破坏了 " + nearestTask.Name + "。";
-                lastSabotageEvent = status + " 影响: " + SabotageName(sabotageType);
+                lastSabotageEvent = status + " 影响: " + OnlineMatchUtils.SabotageName(sabotageType);
 
-                OnEvidenceChanged?.Invoke(evidenceScore, evidenceTarget);
+                OnEvidenceChanged?.Invoke(EvidenceScore, EvidenceTarget);
                 OnTaskSabotaged?.Invoke(nearestTask.Id, sabotageType);
                 OnSabotageEffectApplied?.Invoke(sabotageType == SabotageType.Blackout ? "黑灯" :
                     sabotageType == SabotageType.Lockdown ? "封锁" :
@@ -355,7 +305,7 @@ namespace GanglandUndercover.Online
                 {
                     // 修复
                     nearestTask.Sabotaged = false;
-                    SabotageType sabotageType = SabotageForTask(nearestTask.Id);
+                    SabotageType sabotageType = OnlineMatchUtils.SabotageForTask(nearestTask.Id);
                     RepairSabotageEffect(sabotageType);
                     string status = nearestTask.Name + " 的破坏已修复，危机效果下降。";
                     lastSabotageEvent = status;
@@ -374,11 +324,14 @@ namespace GanglandUndercover.Online
                     {
                         nearestTask.Completed = true;
                         int gain = EvidenceGainFor(nearestTask.Id, profession, role);
-                        evidenceScore = Mathf.Min(evidenceTarget, evidenceScore + gain);
                         string status = nearestTask.Name + " 完成，证据链推进。";
-                        lastEvidenceEvent = status + " 当前 " + evidenceScore + "/" + evidenceTarget;
-                        OnEvidenceChanged?.Invoke(evidenceScore, evidenceTarget);
-                        UpdateEvidenceMilestone();
+                        int previousMilestone = EvidenceMilestoneIndex;
+                        evidenceServiceRef?.AddEvidence(gain, status);
+                        OnEvidenceChanged?.Invoke(EvidenceScore, EvidenceTarget);
+                        if (EvidenceMilestoneIndex > previousMilestone)
+                        {
+                            OnEvidenceMilestone?.Invoke(EvidenceMilestoneIndex);
+                        }
                         OnTaskCompleted?.Invoke(nearestTask.Id, playerId);
                         SetTask(nearestTask);
                         return status;
@@ -396,157 +349,16 @@ namespace GanglandUndercover.Online
             return string.Empty;
         }
 
-        // ====== 公开 API：活动任务迷你游戏（本地玩家） ======
-
-        /// <summary>
-        /// 判断本地玩家是否应弹出任务面板。
-        /// </summary>
-        public bool ShouldOpenLocalTaskPanel(Vector3 localPosition, OnlineRole role,
-            OnlineMatchPhase phase, bool alive)
-        {
-            if (phase != OnlineMatchPhase.Action || !alive) return false;
-            if (role == OnlineRole.Gang || role == OnlineRole.Mole) return false;
-
-            OnlineTaskState nearestTask = FindNearestTask(localPosition);
-            return nearestTask.Id >= 0 && (!nearestTask.Completed || nearestTask.Sabotaged);
-        }
-
-        public void BeginActiveTask(int taskId)
-        {
-            OnlineTaskState task = GetTask(taskId);
-            if (task.Id < 0) return;
-
-            activeTaskId = taskId;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-
-            OnActiveTaskStarted?.Invoke(taskId);
-        }
-
-        public void CancelActiveTask()
-        {
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-
-            OnActiveTaskCancelled?.Invoke();
-        }
-
-        public void ReadActiveTaskInput()
-        {
-            if (Input.GetKeyDown(KeyCode.Escape))
-            {
-                CancelActiveTask();
-                return;
-            }
-
-            if (Input.GetKey(KeyCode.Space))
-            {
-                activeTaskCharge = Mathf.Min(1f, activeTaskCharge
-                    + Time.deltaTime * TaskChargeRate(activeTaskId));
-            }
-
-            if (Input.GetKeyDown(KeyCode.Alpha1)) ResolveActiveTaskStep(1);
-            if (Input.GetKeyDown(KeyCode.Alpha2)) ResolveActiveTaskStep(2);
-            if (Input.GetKeyDown(KeyCode.Alpha3)) ResolveActiveTaskStep(3);
-
-            if (activeTaskCharge >= 1f
-                && activeTaskStepOneDone
-                && activeTaskStepTwoDone
-                && activeTaskStepThreeDone)
-            {
-                CompleteActiveTask();
-            }
-        }
-
-        private void ResolveActiveTaskStep(int input)
-        {
-            if (input == CorrectTaskStepInput(activeTaskId, activeTaskStep))
-            {
-                activeTaskStep++;
-                activeTaskCharge = Mathf.Min(1f, activeTaskCharge + 0.28f);
-
-                if (activeTaskStep == 1) activeTaskStepOneDone = true;
-                else if (activeTaskStep == 2) activeTaskStepTwoDone = true;
-                else activeTaskStepThreeDone = true;
-
-                activeTaskFeedbackTimer = 0.42f;
-                activeTaskFeedbackPositive = true;
-                OnActiveTaskStepResolved?.Invoke(activeTaskStep, true);
-                return;
-            }
-
-            activeTaskCharge = Mathf.Max(0f, activeTaskCharge - 0.18f);
-            activeTaskMistakes++;
-            activeTaskFeedbackTimer = 0.55f;
-            activeTaskFeedbackPositive = false;
-            OnActiveTaskStepResolved?.Invoke(activeTaskStep + 1, false);
-
-            if (activeTaskMistakes >= 3)
-            {
-                activeTaskMistakes = 0;
-                activeTaskCharge = 0f;
-            }
-        }
-
-        /// <summary>
-        /// 完成任务迷你游戏，返回 true 表示玩家已提交（调用方需发送 Interact Action）。
-        /// </summary>
-        public bool CompleteActiveTask()
-        {
-            activeTaskId = -1;
-            activeTaskStep = 0;
-            activeTaskCharge = 0f;
-            activeTaskStepOneDone = false;
-            activeTaskStepTwoDone = false;
-            activeTaskStepThreeDone = false;
-            activeTaskMistakes = 0;
-            activeTaskFeedbackTimer = 0f;
-            activeTaskFeedbackPositive = false;
-
-            OnActiveTaskCompleted?.Invoke();
-            return true;
-        }
-
-        // ====== 公开 API：破坏效果 ======
+        // ====== 公开 API：破坏效果（委托到 SabotageService） ======
 
         public void TickSabotageTimers(float deltaTime)
         {
-            if (blackoutTimer > 0f)
-                blackoutTimer = Mathf.Max(0f, blackoutTimer - deltaTime);
-
-            if (lockdownTimer > 0f)
-                lockdownTimer = Mathf.Max(0f, lockdownTimer - deltaTime);
-
-            if (communicationJamTimer > 0f)
-                communicationJamTimer = Mathf.Max(0f, communicationJamTimer - deltaTime);
-
-            TickEvidenceLeak(deltaTime);
-
-            if (patrolAlertTimer > 0f)
-                patrolAlertTimer = Mathf.Max(0f, patrolAlertTimer - deltaTime);
+            // SabotageService.Tick() 已处理所有计时器递减和证据泄露
         }
 
         public void ResetAllSabotageTimers()
         {
-            blackoutTimer = 0f;
-            lockdownTimer = 0f;
-            communicationJamTimer = 0f;
-            evidenceLeakTimer = 0f;
-            evidenceLeakAccumulator = 0f;
-            patrolAlertTimer = 0f;
+            sabotageServiceRef?.ResetAll();
         }
 
         /// <summary>
@@ -555,46 +367,18 @@ namespace GanglandUndercover.Online
         public void LoadSabotageTimersFromSnapshot(float blackout, float lockdown, float commJam,
             float evidenceLeak, float evidenceLeakAccum, float patrolAlert)
         {
-            blackoutTimer = blackout;
-            lockdownTimer = lockdown;
-            communicationJamTimer = commJam;
-            evidenceLeakTimer = evidenceLeak;
-            evidenceLeakAccumulator = evidenceLeakAccum;
-            patrolAlertTimer = patrolAlert;
+            sabotageServiceRef?.LoadFromSnapshot(blackout, lockdown, commJam,
+                evidenceLeak, patrolAlert, evidenceLeakAccum);
         }
 
         public void ApplySabotageEffect(SabotageType sabotageType, string taskName)
         {
-            switch (sabotageType)
-            {
-                case SabotageType.Blackout:
-                    blackoutTimer = ruleSet.BlackoutSeconds;
-                    break;
-                case SabotageType.Lockdown:
-                    lockdownTimer = ruleSet.LockdownSeconds;
-                    break;
-                case SabotageType.Communications:
-                    communicationJamTimer = ruleSet.CommunicationJamSeconds;
-                    break;
-                case SabotageType.EvidenceLeak:
-                    evidenceLeakTimer = ruleSet.EvidenceLeakSeconds;
-                    break;
-                case SabotageType.PatrolAlert:
-                    patrolAlertTimer = ruleSet.PatrolAlertSeconds;
-                    break;
-            }
+            sabotageServiceRef?.TriggerSabotage(sabotageType, 0, taskName);
         }
 
         public void RepairSabotageEffect(SabotageType sabotageType)
         {
-            switch (sabotageType)
-            {
-                case SabotageType.Blackout:   blackoutTimer = 0f; break;
-                case SabotageType.Lockdown:   lockdownTimer = 0f; break;
-                case SabotageType.Communications: communicationJamTimer = 0f; break;
-                case SabotageType.EvidenceLeak:   evidenceLeakTimer = 0f; break;
-                case SabotageType.PatrolAlert:    patrolAlertTimer = 0f; break;
-            }
+            sabotageServiceRef?.RepairSabotage(sabotageType);
         }
 
         /// <summary>
@@ -609,7 +393,7 @@ namespace GanglandUndercover.Online
                 if (!task.Sabotaged) continue;
 
                 task.Sabotaged = false;
-                RepairSabotageEffect(SabotageForTask(task.Id));
+                RepairSabotageEffect(OnlineMatchUtils.SabotageForTask(task.Id));
                 tasks[i] = task;
                 OnTaskRepaired?.Invoke(task.Id);
                 repaired++;
@@ -635,26 +419,15 @@ namespace GanglandUndercover.Online
             return options[UnityEngine.Random.Range(0, options.Count)].Position;
         }
 
-        // ====== 证据/任务静态数据 ======
+        // ====== 任务静态数据（仅保留任务身份 / 进度相关） ======
+        // UI 面板数据（TaskPanelTemplateTitle / Subtitle / Accent / Footer / Instruction / TaskMapCode）
+        // 小游戏机制数据（TaskTemplateMode / CorrectTaskStepInput / TaskChargeRate）
+        // 破坏映射（SabotageForTask / SabotageEvidencePenalty / SabotageName）
+        // 均已统一到 OnlineMatchUtils，本类不再重复。
 
         public int EvidenceGainFor(int taskId, OnlineProfession profession, OnlineRole role)
         {
-            int gain = TaskEvidenceValue(taskId);
-
-            if (profession == OnlineProfession.Forensics) gain++;
-            if (role == OnlineRole.Undercover || profession == OnlineProfession.UndercoverAgent) gain++;
-
-            return Mathf.Clamp(gain, 1, 4);
-        }
-
-        public static int TaskEvidenceValue(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: case 3: case 11: case 15: case 16: case 21: case 22: case 26: return 2;
-                case 4: case 8: case 18: case 24: case 27: return 3;
-                default: return 1;
-            }
+            return Services.EvidenceService.EvidenceGainFor(taskId, profession, role);
         }
 
         public static string TaskNameFor(int id)
@@ -713,225 +486,6 @@ namespace GanglandUndercover.Online
             }
         }
 
-        public static int TaskTemplateMode(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: case 6: case 13: case 21: return 0;
-                case 1: case 10: case 20: case 23: return 1;
-                case 2: case 7: case 12: case 14: case 24: return 2;
-                case 3: case 9: case 15: case 19: return 3;
-                case 4: case 11: case 16: case 22: return 4;
-                default: return taskId % 5;
-            }
-        }
-
-        public static string TaskPanelTemplateTitle(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: return "监控追踪";
-                case 1: case 10: case 23: return "货柜查验";
-                case 2: case 14: case 24: return "电力修复";
-                case 3: case 15: return "证物鉴证";
-                case 4: case 11: case 16: case 22: return "档案账本";
-                case 5: case 27: return "接头安全";
-                case 6: case 13: case 21: return "通讯监听";
-                case 7: case 12: return "门禁封控";
-                case 8: case 18: case 26: return "巡线取证";
-                case 9: case 19: return "诊所搜查";
-                case 17: return "街口执勤";
-                case 20: return "鱼档暗号";
-                case 25: return "后巷排查";
-                default: return "现场任务";
-            }
-        }
-
-        public static string TaskPanelTemplateSubtitle(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: return "多屏比对 / 导出线索";
-                case 1: case 10: case 23: return "封条核验 / 货单比对";
-                case 2: case 14: case 24: return "断路恢复 / 电网重启";
-                case 3: case 15: return "样本扫描 / 证据归档";
-                case 4: case 11: case 16: case 22: return "账目追踪 / 异常冻结";
-                case 5: case 27: return "短接传递 / 风险控制";
-                case 6: case 13: case 21: return "锁频过滤 / 信号回收";
-                case 7: case 12: return "刷卡开闸 / 通道清理";
-                case 8: case 18: case 26: return "路线校验 / 目击补强";
-                case 9: case 19: return "现场搜查 / 痕迹比对";
-                case 17: return "巡逻打卡 / 风险压制";
-                case 20: return "暗号识别 / 交易追踪";
-                case 25: return "摩托排查 / 后路封锁";
-                default: return "证据推进 / 风险判断";
-            }
-        }
-
-        public static Color TaskPanelAccent(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: return new Color(0.12f, 0.7f, 0.94f, 1f);
-                case 1: case 10: case 23: return new Color(0.92f, 0.72f, 0.16f, 1f);
-                case 2: case 14: case 24: return new Color(0.14f, 0.82f, 0.32f, 1f);
-                case 3: case 15: return new Color(0.82f, 0.84f, 0.92f, 1f);
-                case 4: case 11: case 16: case 22: return new Color(0.86f, 0.6f, 0.12f, 1f);
-                case 5: case 27: return new Color(0.72f, 0.2f, 0.82f, 1f);
-                case 6: case 13: case 21: return new Color(0.72f, 0.86f, 0.18f, 1f);
-                case 7: case 12: return new Color(0.92f, 0.42f, 0.12f, 1f);
-                case 8: case 18: case 26: return new Color(0.42f, 0.76f, 0.94f, 1f);
-                case 9: case 19: return new Color(0.92f, 0.48f, 0.74f, 1f);
-                case 17: return new Color(0.58f, 0.9f, 0.36f, 1f);
-                case 20: return new Color(0.94f, 0.84f, 0.2f, 1f);
-                case 25: return new Color(0.8f, 0.34f, 0.26f, 1f);
-                default: return new Color(0.08f, 0.62f, 0.82f, 1f);
-            }
-        }
-
-        public static string TaskPanelFooter(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: return "监控面板优先看路线";
-                case 1: case 23: return "货柜越多，假线索越容易藏";
-                case 2: case 14: return "电力恢复会重开部分视野";
-                case 4: case 16: case 22: return "账本任务更容易拉高证据链";
-                case 6: case 13: case 21: return "通讯越乱，黑帮越容易行动";
-                case 7: case 12: return "门禁任务适合配合追捕";
-                case 8: case 18: case 26: return "巡线任务会给路线压力";
-                default: return "完成后会推进整局节奏";
-            }
-        }
-
-        public static string TaskPanelInstruction(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: return "监控追踪：依次按 1-3-2 确认画面编号";
-                case 1: case 10: case 23: return "货柜查验：依次按 2-1-3 输入货单号码";
-                case 2: case 14: case 24: return "电力修复：依次按 3-2-1 接通回路";
-                case 3: case 15: return "证物鉴证：依次按 1-2-3 扫描条码";
-                case 4: case 11: case 16: case 22: return "档案账本：依次按 2-3-1 定位冻结";
-                case 5: case 27: return "接头安全：依次按 3-1-2 核对暗号";
-                default: return "按 1/2/3 键选择校验步骤，空格蓄能，Esc 退出。";
-            }
-        }
-
-        public static string TaskMapCode(int taskId)
-        {
-            switch (taskId)
-            {
-                case 0: return "A1";
-                case 1: return "B2";
-                case 2: return "C1";
-                case 3: return "D3";
-                case 4: return "E2";
-                case 5: return "F1";
-                case 6: return "G3";
-                case 7: return "H2";
-                case 8: return "I1";
-                case 9: return "J3";
-                case 10: return "K2";
-                case 11: return "L1";
-                case 12: return "M3";
-                case 13: return "N2";
-                case 14: return "O1";
-                case 15: return "P2";
-                case 16: return "Q3";
-                case 17: return "R1";
-                case 18: return "S2";
-                case 19: return "T3";
-                case 20: return "U1";
-                case 21: return "V2";
-                case 22: return "W3";
-                case 23: return "X1";
-                case 24: return "Y2";
-                case 25: return "Z1";
-                case 26: return "AA";
-                case 27: return "BB";
-                default: return "??";
-            }
-        }
-
-        public static int CorrectTaskStepInput(int taskId, int step)
-        {
-            switch (TaskTemplateMode(taskId))
-            {
-                case 0: return new[] { 1, 3, 2 }[Mathf.Clamp(step, 0, 2)];
-                case 1: return new[] { 2, 1, 3 }[Mathf.Clamp(step, 0, 2)];
-                case 2: return new[] { 3, 2, 1 }[Mathf.Clamp(step, 0, 2)];
-                case 3: return new[] { 1, 2, 3 }[Mathf.Clamp(step, 0, 2)];
-                case 4: return new[] { 2, 3, 1 }[Mathf.Clamp(step, 0, 2)];
-                default: return new[] { 3, 1, 2 }[Mathf.Clamp(step, 0, 2)];
-            }
-        }
-
-        public static float TaskChargeRate(int taskId)
-        {
-            switch (TaskTemplateMode(taskId))
-            {
-                case 0: return 0.58f;
-                case 1: return 0.72f;
-                case 2: return 0.68f;
-                case 3: return 0.56f;
-                case 4: return 0.76f;
-                default: return 0.62f;
-            }
-        }
-
         public static int TaskRequiredProgress(int taskId) => 3;
-
-        // ====== Sabotage 类型映射 ======
-
-        public static SabotageType SabotageForTask(int taskId)
-        {
-            switch (taskId)
-            {
-                case 2: case 14: return SabotageType.Blackout;
-                case 7: case 12: return SabotageType.Lockdown;
-                case 6: case 13: case 20: case 21: case 27: return SabotageType.Communications;
-                case 3: case 11: case 16: case 22: case 23: case 25: return SabotageType.EvidenceLeak;
-                case 4: case 10: case 17: case 24: case 26: return SabotageType.PatrolAlert;
-                default: return SabotageType.None;
-            }
-        }
-
-        public static int SabotageEvidencePenalty(SabotageType sabotageType)
-        {
-            switch (sabotageType)
-            {
-                case SabotageType.EvidenceLeak: return 2;
-                case SabotageType.Blackout:
-                case SabotageType.Lockdown:
-                case SabotageType.Communications: return 1;
-                default: return 0;
-            }
-        }
-
-        public static string SabotageName(SabotageType sabotageType)
-        {
-            switch (sabotageType)
-            {
-                case SabotageType.Blackout: return "黑灯";
-                case SabotageType.Lockdown: return "封锁";
-                case SabotageType.Communications: return "断讯";
-                case SabotageType.EvidenceLeak: return "泄证";
-                case SabotageType.PatrolAlert: return "巡逻";
-                default: return "未知";
-            }
-        }
-
-        private static int EvidenceMilestoneFor(int score, int target)
-        {
-            if (target <= 0) return 0;
-
-            float ratio = score / (float)target;
-            if (ratio >= 1f) return 4;
-            if (ratio >= 0.75f) return 3;
-            if (ratio >= 0.5f) return 2;
-            if (ratio >= 0.25f) return 1;
-            return 0;
-        }
     }
 }

@@ -292,6 +292,30 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void TimeLimit_ControllerDoesNotResolveBeforeHardLimit()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetMatchStarted(true);
+                fixture.SetPhase("Action");
+                fixture.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                fixture.SetTaskServiceEvidence(score: 38, targetValue: 44);
+                fixture.SetGlobalTimers(phaseTimer: 0f, emergencyCooldown: 0f, aiGrace: 0f, elapsed: 1199f);
+
+                fixture.ResolveTimeLimitOutcome();
+
+                Assert.AreEqual("Action", fixture.PhaseName(),
+                    "控制器内部超时结算入口不能在 20 分钟硬上限前提前结束长局。");
+
+                fixture.SetGlobalTimers(phaseTimer: 0f, emergencyCooldown: 0f, aiGrace: 0f, elapsed: 1200f);
+                fixture.ResolveTimeLimitOutcome();
+
+                Assert.AreEqual("Result", fixture.PhaseName());
+                StringAssert.Contains("警方胜利", fixture.PropertyString("Status"));
+            }
+        }
+
+        [Test]
         public void DetermineChannel_DeadPlayer_Ghost()
         {
             AssertChannel("Action", false, "Ghost");
@@ -798,6 +822,143 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void RelayMigrationLobbySessionOptions_CarryHostMigrationDiscoveryMarker()
+        {
+            object options = BuildRelayMigrationLobbySessionOptions(
+                roomName: " 九龙港区夜局 ",
+                maxPlayers: 8,
+                relayCode: " new999 ",
+                mapName: "港区",
+                ruleSummary: "AI补位");
+            IDictionary properties = (IDictionary)options.GetType().GetProperty("SessionProperties").GetValue(options);
+
+            Assert.AreEqual("NEW999", PropertyString(properties["relayCode"], "Value"));
+            Assert.AreEqual("relay-replacement", PropertyString(properties["hostMigration"], "Value"),
+                "Host migration replacement Relay 房必须带可被旧客户端发现的标记。");
+            Assert.AreEqual("Public", PropertyValueText(properties["hostMigration"], "Visibility"));
+        }
+
+        [Test]
+        public void HostMigrationRelayCandidate_MatchesOnlyMarkedJoinableSameRoom()
+        {
+            Assert.IsTrue(IsHostMigrationRelayCandidate(
+                expectedRoomName: "九龙港区夜局",
+                candidateRoomName: "九龙港区夜局",
+                relayCode: "new999",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                migrationValue: "relay-replacement"));
+
+            Assert.IsFalse(IsHostMigrationRelayCandidate(
+                expectedRoomName: "九龙港区夜局",
+                candidateRoomName: "其他房间",
+                relayCode: "new999",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                migrationValue: "relay-replacement"));
+
+            Assert.IsFalse(IsHostMigrationRelayCandidate(
+                expectedRoomName: "九龙港区夜局",
+                candidateRoomName: "九龙港区夜局",
+                relayCode: string.Empty,
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                migrationValue: "relay-replacement"));
+
+            Assert.IsFalse(IsHostMigrationRelayCandidate(
+                expectedRoomName: "九龙港区夜局",
+                candidateRoomName: "九龙港区夜局",
+                relayCode: "new999",
+                playerCount: 8,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                migrationValue: "relay-replacement"));
+
+            Assert.IsFalse(IsHostMigrationRelayCandidate(
+                expectedRoomName: "九龙港区夜局",
+                candidateRoomName: "九龙港区夜局",
+                relayCode: "new999",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                migrationValue: string.Empty));
+        }
+
+        [Test]
+        public void HostMigrationRelayRoomJoinIntent_AllowsOnlyDisconnectedMarkedSameRoom()
+        {
+            object allowed = BuildHostMigrationRelayRoomSessionJoin(
+                hasDisconnectedNetworkSession: true,
+                expectedRoomName: "九龙港区夜局",
+                sessionId: "session-new",
+                candidateRoomName: "九龙港区夜局",
+                relayCode: " new999 ",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                isHostMigration: true,
+                allowLocalPreview: false);
+
+            object notDisconnected = BuildHostMigrationRelayRoomSessionJoin(
+                hasDisconnectedNetworkSession: false,
+                expectedRoomName: "九龙港区夜局",
+                sessionId: "session-new",
+                candidateRoomName: "九龙港区夜局",
+                relayCode: "new999",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                isHostMigration: true,
+                allowLocalPreview: false);
+
+            object wrongRoom = BuildHostMigrationRelayRoomSessionJoin(
+                hasDisconnectedNetworkSession: true,
+                expectedRoomName: "九龙港区夜局",
+                sessionId: "session-new",
+                candidateRoomName: "其他房间",
+                relayCode: "new999",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                isHostMigration: true,
+                allowLocalPreview: false);
+
+            object unmarked = BuildHostMigrationRelayRoomSessionJoin(
+                hasDisconnectedNetworkSession: true,
+                expectedRoomName: "九龙港区夜局",
+                sessionId: "session-new",
+                candidateRoomName: "九龙港区夜局",
+                relayCode: "new999",
+                playerCount: 2,
+                maxPlayers: 8,
+                isLocked: false,
+                hasPassword: false,
+                isHostMigration: false,
+                allowLocalPreview: false);
+
+            Assert.IsTrue(FieldBool(allowed, "CanJoinRelay"));
+            Assert.IsTrue(FieldBool(allowed, "CanJoinSession"));
+            Assert.AreEqual("NEW999", FieldString(allowed, "RelayCode"));
+            Assert.IsFalse(FieldBool(notDisconnected, "CanJoinRelay"));
+            StringAssert.Contains("断线恢复", FieldString(notDisconnected, "StatusText"));
+            Assert.IsFalse(FieldBool(wrongRoom, "CanJoinRelay"));
+            Assert.IsFalse(FieldBool(unmarked, "CanJoinRelay"));
+            StringAssert.Contains("Host migration", FieldString(wrongRoom, "StatusText"));
+            StringAssert.Contains("Host migration", FieldString(unmarked, "StatusText"));
+        }
+
+        [Test]
         public void LobbyPublishStatus_ShowsProgressAndSessionCode()
         {
             string publishing = BuildLobbyPublishStatus(publishInProgress: true, published: false, sessionCode: string.Empty);
@@ -1130,6 +1291,162 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void CharacterCustom_RemoteAuthorizationPolicyAcceptsOnlyOwnerOnServerAndServerOnClient()
+        {
+            Type customizerType = RuntimeType("GanglandUndercover.SocialDeduction.CharacterCustomizer");
+            MethodInfo canApply = StaticNonPublic(customizerType, "CanApplyRemoteCustomData");
+
+            Assert.IsFalse((bool)canApply.Invoke(null, new object[] { true, false, 7UL, 7UL }),
+                "服务器不能接受未 Spawn 的外观对象消息。");
+            Assert.IsTrue((bool)canApply.Invoke(null, new object[] { true, true, 7UL, 7UL }),
+                "服务器只接受对象 owner 提交自己的外观数据。");
+            Assert.IsFalse((bool)canApply.Invoke(null, new object[] { true, true, 7UL, 8UL }),
+                "服务器必须拒绝非 owner 伪造其他 NetworkObject 的外观数据。");
+
+            Assert.IsTrue((bool)canApply.Invoke(null, new object[] { false, true, 7UL, 0UL }),
+                "客户端只接受 Server 广播的外观数据。");
+            Assert.IsFalse((bool)canApply.Invoke(null, new object[] { false, true, 7UL, 7UL }),
+                "客户端必须拒绝 peer 伪装成对象 owner 的外观广播。");
+        }
+
+        [Test]
+        public void CharacterCustom_ApplyCustomDataRejectsWrongPartIds()
+        {
+            Type customizerType = RuntimeType("GanglandUndercover.SocialDeduction.CharacterCustomizer");
+            Type wardrobeDataType = RuntimeType("GanglandUndercover.SocialDeduction.WardrobeData");
+            Type wardrobeItemType = RuntimeType("GanglandUndercover.SocialDeduction.WardrobeItem");
+            Type wardrobePartType = RuntimeType("GanglandUndercover.SocialDeduction.WardrobePart");
+            Type wardrobeRarityType = RuntimeType("GanglandUndercover.SocialDeduction.WardrobeRarity");
+
+            GameObject host = new GameObject("CharacterCustom_WrongPartIdsTest");
+            ScriptableObject wardrobeData = ScriptableObject.CreateInstance(wardrobeDataType);
+
+            try
+            {
+                object customizer = host.AddComponent(customizerType);
+                IList items = (IList)wardrobeDataType.GetField("items").GetValue(wardrobeData);
+                items.Clear();
+                items.Add(CreateWardrobeItem(wardrobeItemType, wardrobePartType, wardrobeRarityType,
+                    "hat_none", "Hat", "Common"));
+                items.Add(CreateWardrobeItem(wardrobeItemType, wardrobePartType, wardrobeRarityType,
+                    "top_jacket", "Top", "Common"));
+                items.Add(CreateWardrobeItem(wardrobeItemType, wardrobePartType, wardrobeRarityType,
+                    "height_l", "Height", "Common"));
+
+                customizerType.GetField("wardrobeData", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(customizer, wardrobeData);
+                customizerType.GetMethod("InitializeDefaults", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(customizer, null);
+
+                customizerType.GetMethod("ApplyCustomDataJson")
+                    .Invoke(customizer, new object[]
+                    {
+                        "{\"hat\":\"height_l\",\"top\":\"top_jacket\",\"height\":\"hat_none\"}"
+                    });
+
+                IDictionary selection = (IDictionary)customizerType
+                    .GetField("currentSelection", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(customizer);
+
+                Assert.AreEqual("hat_none", selection[Enum.Parse(wardrobePartType, "Hat")],
+                    "Hat 部位不能接受 Height 物品 ID。");
+                Assert.AreEqual("top_jacket", selection[Enum.Parse(wardrobePartType, "Top")],
+                    "合法且部位匹配的 Top 物品应继续生效。");
+                Assert.AreEqual("height_l", selection[Enum.Parse(wardrobePartType, "Height")],
+                    "Height 部位不能接受 Hat 物品 ID。");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(wardrobeData);
+                UnityEngine.Object.DestroyImmediate(host);
+            }
+        }
+
+        [Test]
+        public void HostMigration_ElectsLowestRemainingClientAndExcludesOldHost()
+        {
+            Type migrationType = RuntimeType("GanglandUndercover.Online.HostMigrationManager");
+            MethodInfo elect = migrationType.GetMethod(
+                "ElectNewHostId",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.IsNotNull(elect, "HostMigrationManager 应暴露可测的选举策略。");
+
+            Assert.AreEqual(1UL, elect.Invoke(null, new object[] { new ulong[] { 0UL, 3UL, 1UL, 2UL }, 0UL }),
+                "旧 Host 0 断开时，应从剩余客户端中选择最小 clientId。");
+            Assert.AreEqual(2UL, elect.Invoke(null, new object[] { new ulong[] { 4UL, 2UL, 8UL }, 4UL }),
+                "选举必须排除旧 Host，即使旧 Host 在候选列表中。");
+            Assert.AreEqual(0UL, elect.Invoke(null, new object[] { new ulong[] { 0UL }, 0UL }),
+                "没有剩余客户端时不应选出新 Host。");
+            Assert.AreEqual(0UL, elect.Invoke(null, new object[] { Array.Empty<ulong>(), 0UL }),
+                "空候选列表必须安全返回无新 Host。");
+        }
+
+        [Test]
+        public void HostMigration_TryElectionKeepsCandidateZeroDistinctFromNoCandidate()
+        {
+            Type migrationType = RuntimeType("GanglandUndercover.Online.HostMigrationManager");
+            MethodInfo tryElect = migrationType.GetMethod(
+                "TryElectNewHostId",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.IsNotNull(tryElect, "HostMigrationManager 应暴露可区分候选存在性的选举策略。");
+
+            object[] candidateZeroArgs = { new ulong[] { 4UL, 0UL, 2UL }, 4UL, 999UL };
+            Assert.IsTrue((bool)tryElect.Invoke(null, candidateZeroArgs),
+                "当旧 Host 不是 0 时，clientId 0 仍可能是合法候选，不能被当作无候选。");
+            Assert.AreEqual(0UL, candidateZeroArgs[2]);
+
+            object[] noCandidateArgs = { new ulong[] { 4UL }, 4UL, 999UL };
+            Assert.IsFalse((bool)tryElect.Invoke(null, noCandidateArgs),
+                "只有旧 Host 存在时必须明确返回无候选。");
+            Assert.AreEqual(0UL, noCandidateArgs[2]);
+        }
+
+        [Test]
+        public void HostMigration_ReplacementHostStartPolicyBlocksUnsafePromotion()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            MethodInfo canAttempt = controllerType.GetMethod(
+                "CanAttemptReplacementHostStart",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.IsNotNull(canAttempt, "OnlineMatchController 应集中判定 Host migration 接管启动策略。");
+
+            object[] directStoppedArgs = { false, false, string.Empty, string.Empty };
+            Assert.IsTrue((bool)canAttempt.Invoke(null, directStoppedArgs),
+                "直连客户端旧连接已关闭时，允许尝试启动新 Host。");
+            Assert.AreEqual(string.Empty, directStoppedArgs[3]);
+
+            object[] relayArgs = { false, false, "6kb6dh", string.Empty };
+            Assert.IsFalse((bool)canAttempt.Invoke(null, relayArgs),
+                "Relay 客户端不能复用旧房间码直接接管 Host。");
+            StringAssert.Contains("Relay", (string)relayArgs[3]);
+
+            object[] stillListeningArgs = { false, true, string.Empty, string.Empty };
+            Assert.IsFalse((bool)canAttempt.Invoke(null, stillListeningArgs),
+                "旧客户端连接仍在监听时，不能同步启动 replacement Host。");
+            StringAssert.Contains("旧客户端连接", (string)stillListeningArgs[3]);
+
+            object[] alreadyServerArgs = { true, true, "6kb6dh", string.Empty };
+            Assert.IsTrue((bool)canAttempt.Invoke(null, alreadyServerArgs),
+                "如果本机已经是 server/host，应允许完成迁移收尾。");
+            Assert.AreEqual(string.Empty, alreadyServerArgs[3]);
+        }
+
+        [Test]
+        public void HostMigration_RelayReplacementRouteDetectsOldRelayCode()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            MethodInfo shouldUseRelay = controllerType.GetMethod(
+                "ShouldUseRelayReplacementHostForMigration",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.IsNotNull(shouldUseRelay, "OnlineMatchController 应暴露 Relay replacement Host 路由判定。");
+
+            Assert.IsFalse((bool)shouldUseRelay.Invoke(null, new object[] { string.Empty }),
+                "没有旧 Relay 房间码时应走直连 replacement Host。");
+            Assert.IsTrue((bool)shouldUseRelay.Invoke(null, new object[] { " 6kb6dh " }),
+                "存在旧 Relay 房间码时必须创建新 Relay allocation，而不是复用旧码直接接管。");
+        }
+
+        [Test]
         public void CameraAuthorization_RequiresActionAliveRangeOrRemoteSurveillance()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -1160,6 +1477,42 @@ namespace GanglandUndercover.Tests
 
                 Assert.IsFalse(fixture.CanClientWatchCamera(999UL, cameraCenter),
                     "未知 clientId 不能观看监控。");
+            }
+        }
+
+        [Test]
+        public void SecurityCamera_StartWatchingRequestMaintainsAuthorizedWatcherSet()
+        {
+            Type cameraType = RuntimeType("GanglandUndercover.Online.Surveillance.OnlineSecurityCamera");
+            GameObject host = new GameObject("SecurityCamera_RpcAuthorizationTest");
+
+            try
+            {
+                using (ControllerFixture fixture = new ControllerFixture())
+                {
+                    object camera = host.AddComponent(cameraType);
+                    cameraType.GetMethod("BindController").Invoke(camera, new[] { fixture.Controller });
+
+                    fixture.SetPhase("Action");
+                    fixture.SetPlayer(3UL, new Vector3(100f, 0f, 0f), alive: true, roleName: "Police", professionName: "Inspector");
+                    InvokeStartWatching(cameraType, camera, 3UL);
+                    Assert.IsFalse(CameraWatcherContains(camera, 3UL),
+                        "远距离普通玩家伪造观看请求不应进入 watcher 集合。");
+
+                    fixture.SetPlayer(4UL, Vector3.zero, alive: true, roleName: "Police", professionName: "Inspector");
+                    InvokeStartWatching(cameraType, camera, 4UL);
+                    Assert.IsTrue(CameraWatcherContains(camera, 4UL),
+                        "行动阶段、存活且在范围内的玩家应能观看摄像头。");
+
+                    fixture.SetPhase("Meeting");
+                    InvokeStartWatching(cameraType, camera, 4UL);
+                    Assert.IsFalse(CameraWatcherContains(camera, 4UL),
+                        "已在 watcher 集合中的玩家一旦不再满足授权条件，应被请求路径移除。");
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
             }
         }
 
@@ -1412,6 +1765,20 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void EvidenceService_SnapshotRestoreSynchronizesLastEvidenceEvent()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetTaskServiceEvidence(score: 12, targetValue: 44);
+                fixture.SetLastEvidenceEventRaw("快照证据事件");
+                fixture.SyncEvidenceServiceFromController();
+
+                Assert.AreEqual("快照证据事件", fixture.EvidenceServiceString("LastEvidenceEvent"),
+                    "快照恢复必须把最近证据事件恢复到 EvidenceService，否则下一次 HUD/快照同步会回滚成旧文案。");
+            }
+        }
+
+        [Test]
         public void MeetingService_OnMatchStartedSynchronizesControllerEmergencyState()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -1475,6 +1842,26 @@ namespace GanglandUndercover.Tests
                     0.001f);
                 Assert.AreEqual(1, fixture.PropertyInt("MeetingCount"));
                 Assert.AreEqual(1, fixture.MeetingServiceInt("MeetingCount"));
+            }
+        }
+
+        [Test]
+        public void Controller_CallEmergencyMeetingDoesNotBypassServiceCooldown()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.MeetingServiceOnMatchStarted(2);
+                fixture.SetMeetingServiceCooldown(9f);
+
+                fixture.ControllerCallEmergencyMeeting("玩家1");
+
+                Assert.AreEqual("Action", fixture.PhaseName(),
+                    "Controller 公开入口必须尊重 MeetingService 冷却，不能在 Consume 失败后仍然 BeginMeeting。");
+                Assert.AreEqual(0, fixture.PropertyInt("MeetingCount"));
+                Assert.AreEqual(0, fixture.MeetingServiceInt("MeetingCount"));
             }
         }
 
@@ -1615,6 +2002,83 @@ namespace GanglandUndercover.Tests
                 Assert.AreEqual(2f, target.PropertyFloat("PatrolAlertTimer"), 0.001f);
                 Assert.AreEqual(19f, target.PropertyFloat("PhaseTimer"), 0.001f);
                 Assert.AreEqual("主机迁移完成，对局已恢复。", target.PropertyString("Status"));
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_PreservesMeetingServiceAndAllowsVotingContinuation()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetMatchStarted(true);
+                source.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                source.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                source.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+                source.SetSingleTask(8, Vector3.up, completed: false, sabotaged: false);
+                source.BeginMeeting("迁移中的会议");
+                source.ApplyVote(1UL, 3UL);
+
+                object snapshot = source.CaptureSnapshot();
+
+                target.RestoreFromSnapshot(snapshot);
+
+                Assert.AreEqual("Voting", target.PhaseName());
+                Assert.AreEqual(1, target.PropertyInt("MeetingCount"));
+                Assert.AreEqual(1, target.MeetingServiceInt("MeetingCount"),
+                    "Host migration 快照恢复必须同步 MeetingService 会议次数，避免迁移后服务层读到第 0 场会议。");
+                Assert.AreEqual("迁移中的会议", target.MeetingServiceString("CurrentMeetingReason"),
+                    "Host migration 快照恢复必须同步 MeetingService 当前会议原因。");
+                Assert.IsTrue(target.HasVoted(1UL),
+                    "Host migration 快照恢复必须保留已投票状态，后续玩家投票才能完成本轮会议。");
+
+                target.ApplyVote(2UL, 3UL);
+                target.ApplyVote(3UL, 3UL);
+
+                Assert.AreEqual("Result", target.PhaseName(), "迁移恢复后剩余玩家继续投票应能正常结算。");
+                Assert.IsFalse(target.PlayerAlive(3UL));
+                StringAssert.Contains("警方胜利", target.PropertyString("Status"));
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_ThreeClientPostMigrationTaskMeetingAndVotingFlow()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetMatchStarted(true);
+                source.SetPhase("Action");
+                source.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                source.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                source.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+                source.SetTaskState(9, Vector3.zero, progress: 2, requiredProgress: 3, completed: false, sabotaged: false);
+                source.SetTaskServiceEvidence(score: 10, targetValue: 99);
+
+                object snapshot = source.CaptureSnapshot();
+
+                target.RestoreFromSnapshot(snapshot);
+
+                Assert.AreEqual("Action", target.PhaseName());
+                Assert.AreEqual(3, target.PlayerCount());
+                Assert.AreEqual(2, target.TaskProgress(9));
+                Assert.IsFalse(target.TaskCompleted(9));
+
+                target.MarkTaskActive(1UL, 9);
+                Assert.IsTrue(target.InvokeBoolOutString("ValidateAndCompleteTask", 1UL, 9, out string taskError), taskError);
+                Assert.IsTrue(target.TaskCompleted(9), "迁移后应允许继续完成迁移前已推进的任务。");
+                Assert.Greater(target.PropertyInt("EvidenceScore"), 10,
+                    "迁移后任务完成仍应推进证据链。");
+
+                target.BeginMeeting("迁移后任务会议");
+                target.ApplyVote(1UL, 3UL);
+                target.ApplyVote(2UL, 3UL);
+                target.ApplyVote(3UL, 3UL);
+
+                Assert.AreEqual("Result", target.PhaseName(),
+                    "3 客户端迁移恢复后，任务完成、会议和投票应能连续推进到结算。");
+                Assert.IsFalse(target.PlayerAlive(3UL));
+                StringAssert.Contains("警方胜利", target.PropertyString("Status"));
             }
         }
 
@@ -2065,6 +2529,36 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void WorldBuilder_UsesRuntimeMapPropSpritesForServiceDressing()
+        {
+            Type builderType = RuntimeType("GanglandUndercover.Online.OnlineWorldBuilder");
+            Type mapServiceType = RuntimeType("GanglandUndercover.Online.OnlineMapService");
+            GameObject worldRoot = new GameObject("WorldBuilderRuntimeMapPropRegressionRoot");
+            GameObject mapHost = new GameObject("WorldBuilderRuntimeMapPropRegressionMapService");
+
+            try
+            {
+                object builder = Activator.CreateInstance(builderType);
+                object mapService = mapHost.AddComponent(mapServiceType);
+                var solidObstacles = new List<Rect>();
+                var walkableAreas = new List<Rect>();
+                var labels = new List<TextMesh>();
+
+                Invoke(builder, "Initialize", worldRoot, mapService, solidObstacles, walkableAreas, labels, 8);
+                Invoke(builder, "EnsureRuntimeSprites");
+                Invoke(builder, "BuildDistrictMap");
+
+                Assert.GreaterOrEqual(PropertyInt(builder, "RuntimeMapPropSpriteElementCount"), 20);
+                Assert.GreaterOrEqual(CountChildrenStartingWith(worldRoot.transform, "地图小件 "), 20);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(worldRoot);
+                UnityEngine.Object.DestroyImmediate(mapHost);
+            }
+        }
+
+        [Test]
         public void Sprite2DAssetCache_LoadsCuratedLimeZuSpritesByExplicitPath()
         {
             Type cacheType = RuntimeType("GanglandUndercover.Art.Sprite2DAssetCache");
@@ -2129,6 +2623,229 @@ namespace GanglandUndercover.Tests
             Assert.AreEqual("Sprites/Tilesets/LimeZu/Interiors/room-props/Modern_Interiors_48x48_TicketMachine", StaticPropertyString(cacheType, "InteriorRoomPropTicketMachineResourcePath"));
             Assert.AreEqual("Sprites/Tilesets/LimeZu/Interiors/room-props/Modern_Interiors_48x48_HospitalTvReportage", StaticPropertyString(cacheType, "InteriorRoomPropHospitalTvReportageResourcePath"));
             Assert.AreEqual("Sprites/Tilesets/LimeZu/Interiors/room-props/Modern_Interiors_48x48_FishCuttingSink", StaticPropertyString(cacheType, "InteriorRoomPropFishCuttingSinkResourcePath"));
+        }
+
+        [Test]
+        public void Sprite2DAssetCache_LoadsRuntimeMapPropSpritesByExplicitPath()
+        {
+            Type cacheType = RuntimeType("GanglandUndercover.Art.Sprite2DAssetCache");
+
+            InvokeStatic(cacheType, "Ensure");
+
+            Assert.AreEqual("Sprites/Tilesets/Harbour/props/tile_crate_wood", StaticPropertyString(cacheType, "PropCrateResourcePath"));
+            Assert.AreEqual("Sprites/Tilesets/Harbour/props/tile_barrel_oil", StaticPropertyString(cacheType, "PropBarrelResourcePath"));
+            Assert.AreEqual("Sprites/Tilesets/Harbour/props/tile_vent_backalley", StaticPropertyString(cacheType, "VentIconResourcePath"));
+            Assert.AreEqual("Sprites/Tilesets/KowloonWalledCity/props/tile_crate_old", StaticPropertyString(cacheType, "KowloonPropCrateResourcePath"));
+            Assert.AreEqual("Sprites/Tilesets/KowloonWalledCity/props/tile_vent_rust", StaticPropertyString(cacheType, "KowloonVentIconResourcePath"));
+        }
+
+        [Test]
+        public void VFXSheetPlayer_LoadsEveryRuntimeSheetWithExpectedFirstFrameSize()
+        {
+            Type playerType = RuntimeType("GanglandUndercover.Art.VFXSheetPlayer");
+            Type playModeType = RuntimeType("GanglandUndercover.Art.VFXSheetPlayer+PlayMode");
+            object oneShotMode = Enum.Parse(playModeType, "OneShot");
+            string[] effects =
+            {
+                "blackout",
+                "comms_jam",
+                "door_lock",
+                "emergency_light",
+                "evidence_leak",
+                "hit",
+                "kill",
+                "patrol_alert"
+            };
+            int[] expectedSizes = { 96, 64, 48, 48, 48, 32, 128, 64 };
+
+            for (int i = 0; i < effects.Length; i++)
+            {
+                GameObject host = new GameObject("VFXSheetPlayerRegression_" + effects[i]);
+                try
+                {
+                    object player = host.AddComponent(playerType);
+                    bool initialized = (bool)playerType.GetMethod("Init")
+                        .Invoke(player, new object[] { effects[i], oneShotMode, 12f });
+                    playerType.GetMethod("Play").Invoke(player, null);
+
+                    SpriteRenderer renderer = host.GetComponent<SpriteRenderer>();
+                    Assert.IsTrue(initialized, "Missing runtime VFX sheet: " + effects[i]);
+                    Assert.IsNotNull(renderer.sprite, effects[i] + " should assign the first frame on Play.");
+                    Assert.AreEqual(expectedSizes[i], renderer.sprite.texture.width, effects[i] + " width.");
+                    Assert.AreEqual(expectedSizes[i], renderer.sprite.texture.height, effects[i] + " height.");
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(host);
+                }
+            }
+        }
+
+        [Test]
+        public void SabotageVFX_UsesAuthoredEmergencyLightSheet()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            Type vfxType = RuntimeType("GanglandUndercover.Art.SabotageVFX");
+            Type playerType = RuntimeType("GanglandUndercover.Art.VFXSheetPlayer");
+            GameObject controllerHost = new GameObject("SabotageVFXControllerRegressionHost");
+            GameObject vfxHost = new GameObject("SabotageVFXRegressionHost");
+
+            try
+            {
+                object controller = controllerHost.AddComponent(controllerType);
+                object vfx = vfxHost.AddComponent(vfxType);
+
+                vfxType.GetMethod("Bind").Invoke(vfx, new[] { controller });
+
+                SpriteRenderer blackout = (SpriteRenderer)vfxType.GetField("blackoutOverlay").GetValue(vfx);
+                Assert.IsNotNull(blackout, "Blackout overlay should be created when the VFX system is bound.");
+
+                Transform emergencyLight = blackout.transform.Find("EmergencyRedLight");
+                Assert.IsNotNull(emergencyLight, "Blackout overlay should include an emergency light child.");
+
+                Component sheetPlayer = emergencyLight.GetComponent(playerType);
+                SpriteRenderer emergencyRenderer = emergencyLight.GetComponent<SpriteRenderer>();
+
+                Assert.IsNotNull(sheetPlayer, "Emergency light should use the authored runtime frame sheet.");
+                Assert.IsTrue(PropertyBool(sheetPlayer, "HasFrames"), "Emergency light should load emergency_light frames.");
+                Assert.IsNotNull(emergencyRenderer.sprite, "Emergency light should assign its first authored frame.");
+                Assert.AreEqual(48, emergencyRenderer.sprite.texture.width);
+                Assert.AreEqual(48, emergencyRenderer.sprite.texture.height);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(vfxHost);
+                UnityEngine.Object.DestroyImmediate(controllerHost);
+            }
+        }
+
+        [Test]
+        public void SabotageVFX_LoadsTunedOverlayMotionProfiles()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            Type vfxType = RuntimeType("GanglandUndercover.Art.SabotageVFX");
+            Type playerType = RuntimeType("GanglandUndercover.Art.VFXSheetPlayer");
+            GameObject controllerHost = new GameObject("SabotageVFXProfilesControllerRegressionHost");
+            GameObject vfxHost = new GameObject("SabotageVFXProfilesRegressionHost");
+
+            try
+            {
+                object controller = controllerHost.AddComponent(controllerType);
+                object vfx = vfxHost.AddComponent(vfxType);
+
+                vfxType.GetMethod("Bind").Invoke(vfx, new[] { controller });
+
+                SpriteRenderer blackout = (SpriteRenderer)vfxType.GetField("blackoutOverlay").GetValue(vfx);
+                SpriteRenderer lockdown = (SpriteRenderer)vfxType.GetField("lockdownOverlay").GetValue(vfx);
+                SpriteRenderer commJam = (SpriteRenderer)vfxType.GetField("commJamOverlay").GetValue(vfx);
+                SpriteRenderer evidenceLeak = (SpriteRenderer)vfxType.GetField("evidenceLeakOverlay").GetValue(vfx);
+                SpriteRenderer patrolAlert = (SpriteRenderer)vfxType.GetField("patrolAlertOverlay").GetValue(vfx);
+                SpriteRenderer emergencyLight = blackout.transform.Find("EmergencyRedLight").GetComponent<SpriteRenderer>();
+
+                AssertVfxProfile(blackout, playerType, expectedFrames: 12, expectedFps: 6f, expectedSorting: 500);
+                AssertVfxProfile(lockdown, playerType, expectedFrames: 6, expectedFps: 10f, expectedSorting: 501);
+                AssertVfxProfile(commJam, playerType, expectedFrames: 8, expectedFps: 14f, expectedSorting: 502);
+                AssertVfxProfile(evidenceLeak, playerType, expectedFrames: 12, expectedFps: 9f, expectedSorting: 499);
+                AssertVfxProfile(patrolAlert, playerType, expectedFrames: 4, expectedFps: 6f, expectedSorting: 503);
+                AssertVfxProfile(emergencyLight, playerType, expectedFrames: 8, expectedFps: 12f, expectedSorting: 505);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(vfxHost);
+                UnityEngine.Object.DestroyImmediate(controllerHost);
+            }
+        }
+
+        [Test]
+        public void SabotageVFX_TriggerKillBloodAddsAuthoredHitImpactSheet()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            Type vfxType = RuntimeType("GanglandUndercover.Art.SabotageVFX");
+            Type playerType = RuntimeType("GanglandUndercover.Art.VFXSheetPlayer");
+            GameObject controllerHost = new GameObject("SabotageVFXHitControllerRegressionHost");
+            GameObject vfxHost = new GameObject("SabotageVFXHitRegressionHost");
+
+            try
+            {
+                object controller = controllerHost.AddComponent(controllerType);
+                object vfx = vfxHost.AddComponent(vfxType);
+
+                vfxType.GetMethod("Bind").Invoke(vfx, new[] { controller });
+                vfxType.GetMethod("TriggerKillBlood").Invoke(vfx, new object[] { new Vector3(2f, 3f, 0f) });
+
+                GameObject kill = (GameObject)vfxType.GetField("killBloodFX").GetValue(vfx);
+                GameObject hit = FindObjectNamedIncludingInactive("HitImpactFX");
+
+                Assert.IsNotNull(kill, "Kill trigger should create the authored kill sheet object.");
+                Assert.IsNotNull(hit, "Kill trigger should add a separate authored hit impact sheet.");
+                Assert.IsNotNull(kill.GetComponent(playerType), "KillBloodFX should use the kill sheet.");
+                Assert.IsNotNull(hit.GetComponent(playerType), "HitImpactFX should use the hit sheet.");
+                Assert.AreEqual(10, PropertyInt(kill.GetComponent(playerType), "FrameCount"));
+                Assert.AreEqual(4, PropertyInt(hit.GetComponent(playerType), "FrameCount"));
+                Assert.AreEqual(15f, PropertyFloat(kill.GetComponent(playerType), "FramesPerSecond"), 0.001f);
+                Assert.AreEqual(18f, PropertyFloat(hit.GetComponent(playerType), "FramesPerSecond"), 0.001f);
+                Assert.AreEqual(new Vector3(2f, 3f, -1f), kill.transform.position);
+                Assert.AreEqual(new Vector3(2f, 3f, -1.05f), hit.transform.position);
+            }
+            finally
+            {
+                DestroyAllObjectsNamed("HitImpactFX");
+                UnityEngine.Object.DestroyImmediate(vfxHost);
+                UnityEngine.Object.DestroyImmediate(controllerHost);
+            }
+        }
+
+        [Test]
+        public void KillSystem_PlayKillEffectsUsesAuthoredSabotageVFXSheets()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            Type vfxType = RuntimeType("GanglandUndercover.Art.SabotageVFX");
+            Type playerType = RuntimeType("GanglandUndercover.Art.VFXSheetPlayer");
+            GameObject controllerHost = new GameObject("KillSystemVFXIntegrationRegressionHost");
+
+            try
+            {
+                object controller = controllerHost.AddComponent(controllerType);
+                controllerType
+                    .GetMethod("EnsureVFX", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, null);
+
+                object killSystem = controllerType
+                    .GetField("killSystem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .GetValue(controller);
+                object vfx = controllerType
+                    .GetField("sabotageVFX", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .GetValue(controller);
+
+                Assert.IsNotNull(killSystem, "OnlineMatchController should bind KillSystem during Awake.");
+                Assert.IsNotNull(vfx, "OnlineMatchController should bind SabotageVFX during Awake.");
+
+                killSystem.GetType()
+                    .GetMethod("PlayKillEffects", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(killSystem, new object[] { new Vector3(4f, 5f, 0f), 9001UL });
+
+                GameObject kill = (GameObject)vfxType.GetField("killBloodFX").GetValue(vfx);
+                GameObject hit = FindObjectNamedIncludingInactive("HitImpactFX");
+
+                Assert.IsNotNull(kill, "KillSystem should route kill blood through the authored SabotageVFX sheet.");
+                Assert.IsNotNull(hit, "KillSystem should add the authored hit impact sheet through SabotageVFX.");
+                Assert.IsNull(FindObjectNamedIncludingInactive("KillBloodEffect"),
+                    "KillSystem should not create the old procedural blood fallback when authored VFX is available.");
+                Assert.IsNotNull(kill.GetComponent(playerType), "KillBloodFX should use the authored kill sheet.");
+                Assert.IsNotNull(hit.GetComponent(playerType), "HitImpactFX should use the authored hit sheet.");
+                Assert.AreEqual(10, PropertyInt(kill.GetComponent(playerType), "FrameCount"));
+                Assert.AreEqual(4, PropertyInt(hit.GetComponent(playerType), "FrameCount"));
+                Assert.AreEqual(new Vector3(4f, 5f, -1f), kill.transform.position);
+                Assert.AreEqual(new Vector3(4f, 5f, -1.05f), hit.transform.position);
+            }
+            finally
+            {
+                DestroyAllObjectsNamed("HitImpactFX");
+                DestroyAllObjectsNamed("KillBloodFX");
+                DestroyAllObjectsNamed("KillBloodEffect");
+                DestroyAllObjectsNamed("KillFlashCanvas");
+                UnityEngine.Object.DestroyImmediate(controllerHost);
+            }
         }
 
         [Test]
@@ -2350,6 +3067,50 @@ namespace GanglandUndercover.Tests
             return Activator.CreateInstance(RuntimeType("GanglandUndercover.Online.OnlineVictoryBridge"));
         }
 
+        private static object CreateWardrobeItem(
+            Type itemType,
+            Type partType,
+            Type rarityType,
+            string id,
+            string partName,
+            string rarityName)
+        {
+            object item = Activator.CreateInstance(itemType);
+            itemType.GetField("id").SetValue(item, id);
+            itemType.GetField("displayName").SetValue(item, id);
+            itemType.GetField("part").SetValue(item, Enum.Parse(partType, partName));
+            itemType.GetField("iconPath").SetValue(item, string.Empty);
+            itemType.GetField("rarity").SetValue(item, Enum.Parse(rarityType, rarityName));
+            itemType.GetField("unlockedByDefault").SetValue(item, true);
+            itemType.GetField("scaleFactor").SetValue(item, 1f);
+            return item;
+        }
+
+        private static void InvokeStartWatching(Type cameraType, object camera, ulong senderClientId)
+        {
+            RpcParams rpcParams = new RpcParams
+            {
+                Receive = new RpcReceiveParams
+                {
+                    SenderClientId = senderClientId
+                }
+            };
+
+            cameraType.GetMethod("HandleStartWatchingRequest", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Invoke(camera, new object[] { rpcParams.Receive.SenderClientId });
+        }
+
+        private static bool CameraWatcherContains(object camera, ulong clientId)
+        {
+            object watchers = camera.GetType()
+                .GetField("_watchingPlayers", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(camera);
+
+            return (bool)watchers.GetType()
+                .GetMethod("Contains")
+                .Invoke(watchers, new object[] { clientId });
+        }
+
         private static object GetRoleDistribution(int playerCount)
         {
             return Invoke(CreateRuleSet(), "GetRoleDistribution", playerCount);
@@ -2548,6 +3309,48 @@ namespace GanglandUndercover.Tests
             });
         }
 
+        private static object BuildRelayMigrationLobbySessionOptions(
+            string roomName,
+            int maxPlayers,
+            string relayCode,
+            string mapName,
+            string ruleSummary)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return StaticNonPublic(controllerType, "BuildRelayMigrationLobbySessionOptions").Invoke(null, new object[]
+            {
+                roomName,
+                maxPlayers,
+                relayCode,
+                mapName,
+                ruleSummary
+            });
+        }
+
+        private static bool IsHostMigrationRelayCandidate(
+            string expectedRoomName,
+            string candidateRoomName,
+            string relayCode,
+            int playerCount,
+            int maxPlayers,
+            bool isLocked,
+            bool hasPassword,
+            string migrationValue)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return (bool)StaticNonPublic(controllerType, "IsHostMigrationRelayCandidate").Invoke(null, new object[]
+            {
+                expectedRoomName,
+                candidateRoomName,
+                relayCode,
+                playerCount,
+                maxPlayers,
+                isLocked,
+                hasPassword,
+                migrationValue
+            });
+        }
+
         private static object BuildLobbyQueryOptions()
         {
             Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
@@ -2586,6 +3389,36 @@ namespace GanglandUndercover.Tests
                 maxPlayers,
                 isLocked,
                 hasPassword,
+                allowLocalPreview
+            });
+        }
+
+        private static object BuildHostMigrationRelayRoomSessionJoin(
+            bool hasDisconnectedNetworkSession,
+            string expectedRoomName,
+            string sessionId,
+            string candidateRoomName,
+            string relayCode,
+            int playerCount,
+            int maxPlayers,
+            bool isLocked,
+            bool hasPassword,
+            bool isHostMigration,
+            bool allowLocalPreview)
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            return StaticNonPublic(controllerType, "BuildHostMigrationRelayRoomSessionJoin").Invoke(null, new object[]
+            {
+                hasDisconnectedNetworkSession,
+                expectedRoomName,
+                sessionId,
+                candidateRoomName,
+                relayCode,
+                playerCount,
+                maxPlayers,
+                isLocked,
+                hasPassword,
+                isHostMigration,
                 allowLocalPreview
             });
         }
@@ -2732,6 +3565,11 @@ namespace GanglandUndercover.Tests
             return Convert.ToInt32(target.GetType().GetProperty(propertyName).GetValue(target));
         }
 
+        private static float PropertyFloat(object target, string propertyName)
+        {
+            return Convert.ToSingle(target.GetType().GetProperty(propertyName).GetValue(target));
+        }
+
         private static bool PropertyBool(object target, string propertyName)
         {
             return (bool)target.GetType().GetProperty(propertyName).GetValue(target);
@@ -2761,6 +3599,17 @@ namespace GanglandUndercover.Tests
         private static string StaticPropertyString(Type type, string propertyName)
         {
             return (string)type.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Static).GetValue(null);
+        }
+
+        private static void AssertVfxProfile(SpriteRenderer renderer, Type playerType, int expectedFrames, float expectedFps, int expectedSorting)
+        {
+            Assert.IsNotNull(renderer, "Expected a SpriteRenderer for the VFX profile.");
+            Component player = renderer.GetComponent(playerType);
+            Assert.IsNotNull(player, renderer.name + " should use VFXSheetPlayer.");
+            Assert.AreEqual(expectedFrames, PropertyInt(player, "FrameCount"), renderer.name + " frame count.");
+            Assert.AreEqual(expectedFps, PropertyFloat(player, "FramesPerSecond"), 0.001f, renderer.name + " FPS.");
+            Assert.AreEqual(expectedSorting, renderer.sortingOrder, renderer.name + " sorting order.");
+            Assert.IsNotNull(renderer.sprite, renderer.name + " should have an authored first frame assigned.");
         }
 
         private static int InvokeInt(object target, string methodName, params object[] args)
@@ -2980,6 +3829,8 @@ namespace GanglandUndercover.Tests
 
             private readonly GameObject host;
             private readonly object controller;
+
+            public object Controller => controller;
 
             public ControllerFixture()
             {
@@ -3296,16 +4147,26 @@ namespace GanglandUndercover.Tests
 
             public void SetSingleTask(int taskId, Vector3 position, bool completed, bool sabotaged)
             {
+                SetTaskState(taskId, position, completed ? 1 : 0, 1, completed, sabotaged);
+            }
+
+            public void SetTaskState(
+                int taskId,
+                Vector3 position,
+                int progress,
+                int requiredProgress,
+                bool completed,
+                bool sabotaged)
+            {
                 object task = Activator.CreateInstance(
                     taskStateType,
                     taskId,
                     "Task" + taskId,
                     position,
-                    completed ? 1 : 0,
-                    1,
+                    progress,
+                    requiredProgress,
                     completed,
                     sabotaged);
-
                 object tasks = GetField("tasks");
                 tasks.GetType().GetMethod("Clear").Invoke(tasks, null);
                 tasks.GetType().GetMethod("Add").Invoke(tasks, new[] { task });
@@ -3359,6 +4220,24 @@ namespace GanglandUndercover.Tests
             {
                 object tasks = GetField("tasks");
                 return Convert.ToInt32(tasks.GetType().GetProperty("Count").GetValue(tasks));
+            }
+
+            public int PlayerCount()
+            {
+                object players = GetField("players");
+                return Convert.ToInt32(players.GetType().GetProperty("Count").GetValue(players));
+            }
+
+            public int TaskProgress(int taskId)
+            {
+                object task = FindTask(taskId);
+                return Convert.ToInt32(taskStateType.GetField("Progress").GetValue(task));
+            }
+
+            public bool TaskCompleted(int taskId)
+            {
+                object task = FindTask(taskId);
+                return Convert.ToBoolean(taskStateType.GetField("Completed").GetValue(task));
             }
 
             public int BodyCount()
@@ -3424,6 +4303,25 @@ namespace GanglandUndercover.Tests
                 return Convert.ToInt32(service.GetType().GetProperty("EvidenceScore").GetValue(service));
             }
 
+            public string EvidenceServiceString(string propertyName)
+            {
+                EnsureSnapshotDependencies();
+                object service = GetField("evidenceService");
+                return Convert.ToString(service.GetType().GetProperty(propertyName).GetValue(service));
+            }
+
+            public void SetLastEvidenceEventRaw(string value)
+            {
+                SetField("lastEvidenceEvent", value);
+            }
+
+            public void SyncEvidenceServiceFromController()
+            {
+                EnsureSnapshotDependencies();
+                controllerType.GetMethod("SyncEvidenceServiceFromController", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, null);
+            }
+
             public void InitializeEvidenceServiceTwice()
             {
                 EnsureSnapshotDependencies();
@@ -3461,6 +4359,13 @@ namespace GanglandUndercover.Tests
                     .Invoke(service, new object[] { callerDisplayName, callerId });
             }
 
+            public void SetMeetingServiceCooldown(float value)
+            {
+                EnsureSnapshotDependencies();
+                object service = GetField("meetingService");
+                service.GetType().GetMethod("SetEmergencyCooldownTimer").Invoke(service, new object[] { value });
+            }
+
             public EventProbe AttachEventProbe()
             {
                 EnsureSnapshotDependencies();
@@ -3489,6 +4394,13 @@ namespace GanglandUndercover.Tests
                 EnsureSnapshotDependencies();
                 object service = GetField("meetingService");
                 return Convert.ToSingle(service.GetType().GetProperty(propertyName).GetValue(service));
+            }
+
+            public string MeetingServiceString(string propertyName)
+            {
+                EnsureSnapshotDependencies();
+                object service = GetField("meetingService");
+                return Convert.ToString(service.GetType().GetProperty(propertyName).GetValue(service));
             }
 
             public void ControllerCallEmergencyMeeting(string callerDisplayName)
@@ -3520,6 +4432,11 @@ namespace GanglandUndercover.Tests
                 SetField("emergencyCooldownTimer", emergencyCooldown);
                 SetField("aiActionGraceTimer", aiGrace);
                 SetField("matchElapsedSeconds", elapsed);
+            }
+
+            public void ResolveTimeLimitOutcome()
+            {
+                InvokeNonPublic("ResolveTimeLimitOutcome");
             }
 
             public void SetKillCooldownRaw(ulong clientId, float value)
@@ -3671,6 +4588,21 @@ namespace GanglandUndercover.Tests
             {
                 object players = GetField("players");
                 players.GetType().GetProperty("Item").SetValue(players, state, new object[] { clientId });
+            }
+
+            private object FindTask(int taskId)
+            {
+                object tasks = GetField("tasks");
+                foreach (object task in (IEnumerable)tasks)
+                {
+                    if (Convert.ToInt32(taskStateType.GetField("Id").GetValue(task)) == taskId)
+                    {
+                        return task;
+                    }
+                }
+
+                Assert.Fail("找不到任务 " + taskId);
+                return null;
             }
 
             private void SetField(string fieldName, object value)
