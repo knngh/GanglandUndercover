@@ -8,8 +8,8 @@ READY
 
 | Area | Count |
 |---|---:|
-| Runtime sprite PNG | 373 |
-| Runtime sprite PNG meta | 373 |
+| Runtime sprite PNG | 392 |
+| Runtime sprite PNG meta | 392 |
 | Misconfigured runtime sprite importer | 0 |
 | Character professions | 8 |
 | Character PNG | 144 |
@@ -18,7 +18,8 @@ READY
 | VFX effects | 8 |
 | VFX frames | 64 |
 | VFX frame dimension mismatch | 0 |
-| Runtime UI sprites | 4 |
+| Runtime UI sprites | 20 |
+| Quarantined watermarked draft PNG | 59 |
 | Runtime map prop sprites | 5 |
 | Runtime map prop sprite dimension mismatch | 0 |
 | Sprite2DAssetCache public path constants | 63 |
@@ -29,8 +30,9 @@ READY
 
 ## Next Art Slices
 
-1. VFX polish pass 2: capture blackout, comms jam, door lock, evidence leak, patrol alert, kill, and hit effects in motion; tune scale, FPS, opacity, and sorting.
-2. UI polish: expand the 4 runtime button sprites into a complete panel, card, icon, and disabled-state skin.
-3. Character polish pass 3: review gameplay screenshots and replace procedural silhouettes with final hand-authored variants.
-4. Map polish pass 2: extend authored prop replacement to police-station rooms and remaining high-traffic corridors.
-5. Verification: rerun this report and Unity EditMode before each large art import batch.
+1. UI polish pass 3: replace the remaining quarantined ability icon drafts with reviewed no-watermark camera, report, vent, kill, evidence, and emergency icons.
+2. Minigame polish: author clean wire, keypad, and scan interaction art before enabling MinigameArtCache assets again.
+3. VFX polish pass 2: capture blackout, comms jam, door lock, patrol alert in motion against live gameplay.
+4. Character polish pass 3: review gameplay screenshots and replace procedural silhouettes with final hand-authored variants.
+5. Map polish pass 2: extend authored prop replacement to police-station rooms and remaining high-traffic corridors.
+6. Verification: rerun this report and Unity EditMode before each large art import batch.

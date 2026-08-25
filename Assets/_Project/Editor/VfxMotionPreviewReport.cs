@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using GanglandUndercover.Art;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,34 +12,26 @@ namespace GanglandUndercover.Editor
     {
         public const string DefaultMarkdownPath = "output/vfx_motion_preview.md";
         public const string DefaultContactSheetPath = "output/vfx_contact_sheet.png";
+        public const string DefaultGameplayContextSheetPath = "output/vfx_gameplay_context_sheet.png";
         public const int ContactSheetCellSize = 144;
+        public const int GameplayContextCellWidth = 176;
+        public const int GameplayContextCellHeight = 136;
+        public const int GameplayContextSamplesPerEffect = 4;
         public const int ContactSheetGap = 8;
         public const int ContactSheetMargin = 12;
-
-        private static readonly VfxSpec[] ExpectedEffects =
-        {
-            new VfxSpec("blackout", 12, 96, 96, 6f),
-            new VfxSpec("comms_jam", 8, 64, 64, 14f),
-            new VfxSpec("door_lock", 6, 48, 48, 10f),
-            new VfxSpec("emergency_light", 8, 48, 48, 12f),
-            new VfxSpec("evidence_leak", 12, 48, 48, 9f),
-            new VfxSpec("hit", 4, 32, 32, 18f),
-            new VfxSpec("kill", 10, 128, 128, 15f),
-            new VfxSpec("patrol_alert", 4, 64, 64, 6f),
-        };
 
         [MenuItem("Gangland/Art/Write VFX Motion Preview")]
         public static void WriteDefaultPreview()
         {
-            WritePreview(DefaultMarkdownPath, DefaultContactSheetPath);
+            WritePreview(DefaultMarkdownPath, DefaultContactSheetPath, DefaultGameplayContextSheetPath);
         }
 
         public static Summary BuildSummary()
         {
             Summary summary = new Summary();
-            for (int i = 0; i < ExpectedEffects.Length; i++)
+            for (int i = 0; i < VfxEffectProfile.All.Count; i++)
             {
-                summary.Effects.Add(BuildEffectPreview(ExpectedEffects[i], summary));
+                summary.Effects.Add(BuildEffectPreview(VfxEffectProfile.All[i], summary));
             }
 
             return summary;
@@ -46,22 +39,14 @@ namespace GanglandUndercover.Editor
 
         public static void WritePreview(string markdownPath, string contactSheetPath)
         {
-            Summary summary = BuildSummary();
-            string imageDirectory = Path.GetDirectoryName(contactSheetPath);
-            if (!string.IsNullOrEmpty(imageDirectory))
-            {
-                Directory.CreateDirectory(imageDirectory);
-            }
+            WritePreview(markdownPath, contactSheetPath, DefaultGameplayContextSheetPath);
+        }
 
-            Texture2D contactSheet = BuildContactSheetTexture(summary);
-            try
-            {
-                File.WriteAllBytes(contactSheetPath, contactSheet.EncodeToPNG());
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(contactSheet);
-            }
+        public static void WritePreview(string markdownPath, string contactSheetPath, string gameplayContextSheetPath)
+        {
+            Summary summary = BuildSummary();
+            WriteTexturePng(contactSheetPath, BuildContactSheetTexture(summary));
+            WriteTexturePng(gameplayContextSheetPath, BuildGameplayContextSheetTexture(summary));
 
             string markdownDirectory = Path.GetDirectoryName(markdownPath);
             if (!string.IsNullOrEmpty(markdownDirectory))
@@ -69,11 +54,16 @@ namespace GanglandUndercover.Editor
                 Directory.CreateDirectory(markdownDirectory);
             }
 
-            File.WriteAllText(markdownPath, ToMarkdown(summary, contactSheetPath), Encoding.UTF8);
+            File.WriteAllText(markdownPath, ToMarkdown(summary, contactSheetPath, gameplayContextSheetPath), Encoding.UTF8);
             AssetDatabase.Refresh();
         }
 
         public static string ToMarkdown(Summary summary, string contactSheetPath)
+        {
+            return ToMarkdown(summary, contactSheetPath, DefaultGameplayContextSheetPath);
+        }
+
+        public static string ToMarkdown(Summary summary, string contactSheetPath, string gameplayContextSheetPath)
         {
             StringBuilder builder = new StringBuilder();
             builder.AppendLine("# Gangland Undercover VFX Motion Preview");
@@ -86,16 +76,22 @@ namespace GanglandUndercover.Editor
             builder.AppendLine();
             builder.AppendLine(contactSheetPath);
             builder.AppendLine();
+            builder.AppendLine("## Gameplay Context Preview");
+            builder.AppendLine();
+            builder.AppendLine(gameplayContextSheetPath);
+            builder.AppendLine();
             builder.AppendLine("## Motion Profiles");
             builder.AppendLine();
-            builder.AppendLine("| Effect | Frames | Size | FPS |");
-            builder.AppendLine("|---|---:|---:|---:|");
+            builder.AppendLine("| Effect | Runtime Use | Frames | Size | FPS | Duration | Layer | Mode |");
+            builder.AppendLine("|---|---|---:|---:|---:|---:|---:|---|");
 
             for (int i = 0; i < summary.Effects.Count; i++)
             {
                 EffectPreview effect = summary.Effects[i];
                 builder.Append("| ");
                 builder.Append(effect.Name);
+                builder.Append(" | ");
+                builder.Append(effect.RuntimeUse);
                 builder.Append(" | ");
                 builder.Append(effect.FrameCount);
                 builder.Append("/");
@@ -106,6 +102,31 @@ namespace GanglandUndercover.Editor
                 builder.Append(effect.Height);
                 builder.Append(" | ");
                 builder.Append(effect.FramesPerSecond.ToString("0.##"));
+                builder.Append(" | ");
+                builder.Append(effect.DurationSeconds.ToString("0.##"));
+                builder.Append("s | ");
+                builder.Append(effect.SortingOrder);
+                builder.Append(" | ");
+                builder.Append(effect.PlaybackMode);
+                builder.AppendLine(" |");
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("## Polish Priority");
+            builder.AppendLine();
+            builder.AppendLine("| Priority | Effect | Focus | First Adjustment |");
+            builder.AppendLine("|---|---|---|---|");
+            for (int i = 0; i < summary.Effects.Count; i++)
+            {
+                EffectPreview effect = summary.Effects[i];
+                builder.Append("| ");
+                builder.Append(effect.PolishPriority);
+                builder.Append(" | ");
+                builder.Append(effect.Name);
+                builder.Append(" | ");
+                builder.Append(effect.PolishFocus);
+                builder.Append(" | ");
+                builder.Append(effect.FirstAdjustment);
                 builder.AppendLine(" |");
             }
 
@@ -127,9 +148,9 @@ namespace GanglandUndercover.Editor
             builder.AppendLine();
             builder.AppendLine("## Next Checks");
             builder.AppendLine();
-            builder.AppendLine("1. Inspect row order against the table above: blackout, comms_jam, door_lock, emergency_light, evidence_leak, hit, kill, patrol_alert.");
-            builder.AppendLine("2. Tune scale, FPS, opacity, and sorting where contact-sheet motion reads muddy.");
-            builder.AppendLine("3. Capture the same effects in a live gameplay scene before replacing another asset batch.");
+            builder.AppendLine("1. Inspect row order against the motion table: blackout, comms_jam, door_lock, emergency_light, evidence_leak, hit, kill, patrol_alert.");
+            builder.AppendLine("2. Start with P2 rows, then verify blackout, comms_jam, door_lock, and patrol_alert against busy gameplay backgrounds.");
+            builder.AppendLine("3. Compare the gameplay context preview against a live scene capture before replacing another asset batch.");
             return builder.ToString();
         }
 
@@ -193,19 +214,76 @@ namespace GanglandUndercover.Editor
             return sheet;
         }
 
-        private static EffectPreview BuildEffectPreview(VfxSpec spec, Summary summary)
+        public static Texture2D BuildGameplayContextSheetTexture(Summary summary)
+        {
+            int width = ContactSheetMargin * 2
+                + GameplayContextSamplesPerEffect * GameplayContextCellWidth
+                + Mathf.Max(0, GameplayContextSamplesPerEffect - 1) * ContactSheetGap;
+            int height = ContactSheetMargin * 2
+                + summary.Effects.Count * GameplayContextCellHeight
+                + Mathf.Max(0, summary.Effects.Count - 1) * ContactSheetGap;
+
+            Texture2D sheet = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            FillTexture(sheet, new Color32(22, 25, 32, 255));
+
+            for (int row = 0; row < summary.Effects.Count; row++)
+            {
+                EffectPreview effect = summary.Effects[row];
+                int y = height - ContactSheetMargin - GameplayContextCellHeight
+                    - row * (GameplayContextCellHeight + ContactSheetGap);
+
+                for (int sample = 0; sample < GameplayContextSamplesPerEffect; sample++)
+                {
+                    int x = ContactSheetMargin + sample * (GameplayContextCellWidth + ContactSheetGap);
+                    DrawGameplayContextBackground(sheet, x, y, GameplayContextCellWidth, GameplayContextCellHeight, row, sample);
+
+                    if (effect.FramePaths.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    int frameIndex = Mathf.RoundToInt(sample * (effect.FramePaths.Count - 1) / (float)Mathf.Max(1, GameplayContextSamplesPerEffect - 1));
+                    frameIndex = Mathf.Clamp(frameIndex, 0, effect.FramePaths.Count - 1);
+                    Texture2D source = LoadReadableTexture(effect.FramePaths[frameIndex]);
+                    if (source == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        BlitCenteredNearest(source, sheet, x, y, GameplayContextCellWidth, GameplayContextCellHeight);
+                    }
+                    finally
+                    {
+                        UnityEngine.Object.DestroyImmediate(source);
+                    }
+                }
+            }
+
+            sheet.Apply(false, false);
+            return sheet;
+        }
+
+        private static EffectPreview BuildEffectPreview(VfxEffectProfile profile, Summary summary)
         {
             EffectPreview effect = new EffectPreview(
-                spec.Name,
-                spec.ExpectedFrameCount,
-                spec.Width,
-                spec.Height,
-                spec.FramesPerSecond);
+                profile.Name,
+                profile.FrameCount,
+                profile.Width,
+                profile.Height,
+                profile.FramesPerSecond,
+                profile.RuntimeUse,
+                profile.PlaybackModeName,
+                profile.SortingOrder,
+                profile.PolishPriority,
+                profile.PolishFocus,
+                profile.FirstAdjustment);
 
-            for (int i = 0; i < spec.ExpectedFrameCount; i++)
+            for (int i = 0; i < profile.FrameCount; i++)
             {
                 string path = SpriteResourceImportSettings.SpriteResourcesRoot
-                    + "/VFX/" + spec.Name + "/" + spec.Name + "_" + i.ToString("00") + ".png";
+                    + "/VFX/" + profile.Name + "/" + profile.Name + "_" + i.ToString("00") + ".png";
                 if (!File.Exists(path))
                 {
                     summary.Issues.Add("Missing VFX frame: " + path);
@@ -221,10 +299,10 @@ namespace GanglandUndercover.Editor
 
                 int width = sprite.texture != null ? sprite.texture.width : 0;
                 int height = sprite.texture != null ? sprite.texture.height : 0;
-                if (width != spec.Width || height != spec.Height)
+                if (width != profile.Width || height != profile.Height)
                 {
                     summary.Issues.Add("VFX frame dimension mismatch: " + path + " expected "
-                        + spec.Width + "x" + spec.Height + " found " + width + "x" + height);
+                        + profile.Width + "x" + profile.Height + " found " + width + "x" + height);
                 }
 
                 effect.FramePaths.Add(path);
@@ -232,10 +310,10 @@ namespace GanglandUndercover.Editor
                 effect.Height = height;
             }
 
-            if (effect.FrameCount != spec.ExpectedFrameCount)
+            if (effect.FrameCount != profile.FrameCount)
             {
-                summary.Issues.Add("VFX frame count mismatch: " + spec.Name + " expected "
-                    + spec.ExpectedFrameCount + " found " + effect.FrameCount);
+                summary.Issues.Add("VFX frame count mismatch: " + profile.Name + " expected "
+                    + profile.FrameCount + " found " + effect.FrameCount);
             }
 
             return effect;
@@ -259,10 +337,107 @@ namespace GanglandUndercover.Editor
             return texture;
         }
 
+        private static void WriteTexturePng(string path, Texture2D texture)
+        {
+            string imageDirectory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(imageDirectory))
+            {
+                Directory.CreateDirectory(imageDirectory);
+            }
+
+            try
+            {
+                File.WriteAllBytes(path, texture.EncodeToPNG());
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(texture);
+            }
+        }
+
+        private static void FillTexture(Texture2D texture, Color32 color)
+        {
+            Color32[] pixels = new Color32[texture.width * texture.height];
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                pixels[i] = color;
+            }
+
+            texture.SetPixels32(pixels);
+        }
+
+        private static void DrawGameplayContextBackground(Texture2D target, int targetX, int targetY, int width, int height, int row, int sample)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    bool floorTile = ((x / 16) + (y / 16) + row) % 2 == 0;
+                    bool seam = x % 16 == 0 || y % 16 == 0;
+                    Color32 color = floorTile
+                        ? new Color32(38, 44, 54, 255)
+                        : new Color32(31, 37, 47, 255);
+                    if (seam)
+                    {
+                        color = new Color32(24, 29, 38, 255);
+                    }
+
+                    target.SetPixel(targetX + x, targetY + y, color);
+                }
+            }
+
+            int phaseOffset = sample * 7;
+            DrawFilledRect(target, targetX + 14 + phaseOffset, targetY + 18, 48, 10, new Color32(74, 57, 45, 255));
+            DrawFilledRect(target, targetX + width - 58, targetY + height - 34 - (row % 2) * 12, 38, 22, new Color32(52, 61, 68, 255));
+            DrawFilledRect(target, targetX + width - 54, targetY + height - 30 - (row % 2) * 12, 30, 14, new Color32(77, 88, 92, 255));
+            DrawCharacterSilhouette(target, targetX + width / 2 - 13, targetY + height / 2 - 25);
+            DrawBodyReadableBase(target, targetX + width / 2 + 17, targetY + height / 2 - 10);
+        }
+
+        private static void DrawCharacterSilhouette(Texture2D target, int x, int y)
+        {
+            DrawFilledRect(target, x + 9, y + 0, 10, 10, new Color32(202, 212, 220, 255));
+            DrawFilledRect(target, x + 5, y + 11, 18, 28, new Color32(45, 111, 186, 255));
+            DrawFilledRect(target, x + 2, y + 18, 5, 18, new Color32(33, 76, 124, 255));
+            DrawFilledRect(target, x + 22, y + 18, 5, 18, new Color32(33, 76, 124, 255));
+            DrawFilledRect(target, x + 7, y + 39, 6, 13, new Color32(20, 24, 30, 255));
+            DrawFilledRect(target, x + 16, y + 39, 6, 13, new Color32(20, 24, 30, 255));
+        }
+
+        private static void DrawBodyReadableBase(Texture2D target, int x, int y)
+        {
+            DrawFilledRect(target, x, y + 9, 26, 13, new Color32(96, 24, 22, 255));
+            DrawFilledRect(target, x + 4, y + 4, 12, 12, new Color32(120, 36, 32, 255));
+            DrawFilledRect(target, x + 9, y + 19, 22, 6, new Color32(54, 25, 28, 255));
+        }
+
+        private static void DrawFilledRect(Texture2D target, int x, int y, int width, int height, Color32 color)
+        {
+            for (int yy = 0; yy < height; yy++)
+            {
+                int py = y + yy;
+                if (py < 0 || py >= target.height)
+                {
+                    continue;
+                }
+
+                for (int xx = 0; xx < width; xx++)
+                {
+                    int px = x + xx;
+                    if (px < 0 || px >= target.width)
+                    {
+                        continue;
+                    }
+
+                    target.SetPixel(px, py, color);
+                }
+            }
+        }
+
         private static void BlitCenteredNearest(Texture2D source, Texture2D target, int targetX, int targetY, int cellWidth, int cellHeight)
         {
             int maxSourceSide = Mathf.Max(source.width, source.height);
-            int scale = Mathf.Max(1, Mathf.FloorToInt((cellWidth - 16) / (float)maxSourceSide));
+            int scale = Mathf.Max(1, Mathf.FloorToInt((Mathf.Min(cellWidth, cellHeight) - 16) / (float)maxSourceSide));
             scale = Mathf.Min(scale, 4);
 
             int scaledWidth = source.width * scale;
@@ -309,24 +484,6 @@ namespace GanglandUndercover.Editor
             return new Color32(r, g, b, 255);
         }
 
-        private readonly struct VfxSpec
-        {
-            public readonly string Name;
-            public readonly int ExpectedFrameCount;
-            public readonly int Width;
-            public readonly int Height;
-            public readonly float FramesPerSecond;
-
-            public VfxSpec(string name, int expectedFrameCount, int width, int height, float framesPerSecond)
-            {
-                Name = name;
-                ExpectedFrameCount = expectedFrameCount;
-                Width = width;
-                Height = height;
-                FramesPerSecond = framesPerSecond;
-            }
-        }
-
         public sealed class Summary
         {
             public readonly List<EffectPreview> Effects = new List<EffectPreview>();
@@ -357,19 +514,43 @@ namespace GanglandUndercover.Editor
             public readonly int ExpectedWidth;
             public readonly int ExpectedHeight;
             public readonly float FramesPerSecond;
+            public readonly string RuntimeUse;
+            public readonly string PlaybackMode;
+            public readonly int SortingOrder;
+            public readonly string PolishPriority;
+            public readonly string PolishFocus;
+            public readonly string FirstAdjustment;
             public readonly List<string> FramePaths = new List<string>();
 
             public int Width { get; internal set; }
             public int Height { get; internal set; }
             public int FrameCount => FramePaths.Count;
+            public float DurationSeconds => FramesPerSecond > 0f ? FrameCount / FramesPerSecond : 0f;
 
-            public EffectPreview(string name, int expectedFrameCount, int expectedWidth, int expectedHeight, float framesPerSecond)
+            public EffectPreview(
+                string name,
+                int expectedFrameCount,
+                int expectedWidth,
+                int expectedHeight,
+                float framesPerSecond,
+                string runtimeUse,
+                string playbackMode,
+                int sortingOrder,
+                string polishPriority,
+                string polishFocus,
+                string firstAdjustment)
             {
                 Name = name;
                 ExpectedFrameCount = expectedFrameCount;
                 ExpectedWidth = expectedWidth;
                 ExpectedHeight = expectedHeight;
                 FramesPerSecond = framesPerSecond;
+                RuntimeUse = runtimeUse;
+                PlaybackMode = playbackMode;
+                SortingOrder = sortingOrder;
+                PolishPriority = polishPriority;
+                PolishFocus = polishFocus;
+                FirstAdjustment = firstAdjustment;
             }
         }
     }

@@ -139,14 +139,15 @@ namespace GanglandUndercover.PlayTests
             AssertVectorClose(stablePosition, GetPlayerPosition(clientId), "畸形 ClientState 不应覆盖位置。");
             AssertVectorClose(stableInput, GetPlayerInput(clientId), "畸形 ClientState 不应覆盖输入。");
 
-            SetPhase("Meeting");
+            SetPhase("Voting");
+            SetField("phaseTimer", 30f);
             ClearVotes();
             SendClientAction(4, ulong.MaxValue);
             yield return WaitUntilOrFail(
                 () => GetCollectionCount(GetField("votes")) == 1,
                 "合法 ClientAction 应能通过真实 named-message 路径进入投票表。");
 
-            SetPhase("Meeting");
+            SetPhase("Voting");
             ClearVotes();
             SendClientAction(999, 0UL);
             yield return RunFrames(8);

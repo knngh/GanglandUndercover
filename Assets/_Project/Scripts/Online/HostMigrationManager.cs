@@ -472,8 +472,11 @@ namespace GanglandUndercover.Online
 
         private void HandleHeartbeat(ulong senderClientId, FastBufferReader reader)
         {
-            // 只有非主机客户端处理心跳
-            if (matchController.IsHost)
+            // 心跳只能由当前 NGO Server 发出；主机本机忽略自己的广播。
+            if (!IsTrustedHostMessageSender(
+                    senderClientId,
+                    NetworkManager.ServerClientId,
+                    matchController != null && matchController.IsHost))
             {
                 return;
             }
@@ -483,7 +486,24 @@ namespace GanglandUndercover.Online
 
         private void HandleMigrationSnapshot(ulong senderClientId, FastBufferReader reader)
         {
+            // 迁移快照也必须来自当前 Server，避免普通客户端伪造状态恢复。
+            if (!IsTrustedHostMessageSender(
+                    senderClientId,
+                    NetworkManager.ServerClientId,
+                    matchController != null && matchController.IsHost))
+            {
+                return;
+            }
+
             OnMigrationSnapshotReceived(reader);
+        }
+
+        internal static bool IsTrustedHostMessageSender(
+            ulong senderClientId,
+            ulong serverClientId,
+            bool receiverIsHost)
+        {
+            return !receiverIsHost && senderClientId == serverClientId;
         }
 
         /// <summary>

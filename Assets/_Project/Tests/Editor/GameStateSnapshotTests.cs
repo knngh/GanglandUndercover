@@ -53,6 +53,8 @@ namespace GanglandUndercover.Tests
                 CriticalTaskActive = true,
                 CriticalTaskType = 1,
                 CriticalTaskTimeRemaining = 30.0f,
+                CriticalEvidenceRepairStations = new List<int> { 4 },
+                GangPositionRevealTimeRemaining = 23.5f,
                 Players = new List<GameStateSnapshot.SnapshotPlayerEntry>
                 {
                     new GameStateSnapshot.SnapshotPlayerEntry
@@ -77,6 +79,21 @@ namespace GanglandUndercover.Tests
                     new GameStateSnapshot.SnapshotRoleEntry { ClientId = 1UL, Role = OnlineRole.Undercover },
                     new GameStateSnapshot.SnapshotRoleEntry { ClientId = 2UL, Role = OnlineRole.Gang },
                 },
+                UndercoverStates = new List<GameStateSnapshot.SnapshotUndercoverStateEntry>
+                {
+                    new GameStateSnapshot.SnapshotUndercoverStateEntry
+                    {
+                        ClientId = 1UL, Intel = 4, MissionsDone = 2, Betrayed = true,
+                    },
+                },
+                MoleStates = new List<GameStateSnapshot.SnapshotMoleStateEntry>
+                {
+                    new GameStateSnapshot.SnapshotMoleStateEntry
+                    {
+                        ClientId = 3UL, Intel = 5, HasHitTarget = true, HitTargetClientId = 1UL,
+                        Exposed = true, Kills = 1, Sabotages = 2, SurvivedTilLate = true,
+                    },
+                },
                 Tasks = new List<GameStateSnapshot.SnapshotTaskEntry>
                 {
                     new GameStateSnapshot.SnapshotTaskEntry
@@ -90,6 +107,15 @@ namespace GanglandUndercover.Tests
                         Progress = 3, RequiredProgress = 3, Completed = true, Sabotaged = false
                     },
                 },
+                TaskAssignments = new List<GameStateSnapshot.SnapshotTaskAssignmentEntry>
+                {
+                    new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                        { ClientId = 1UL, TaskId = 0, Progress = 2, RequiredProgress = 3, Completed = false },
+                    new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                        { ClientId = 1UL, TaskId = 7, Progress = 3, RequiredProgress = 3, Completed = true },
+                    new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                        { ClientId = 2UL, TaskId = 12, Progress = 0, RequiredProgress = 3, Completed = false },
+                },
                 Bodies = new List<GameStateSnapshot.SnapshotBodyEntry>
                 {
                     new GameStateSnapshot.SnapshotBodyEntry { Id = 0, VictimClientId = 2UL, Position = new Vector3(1f, 1f, 0f), Reported = false },
@@ -97,6 +123,10 @@ namespace GanglandUndercover.Tests
                 Votes = new List<GameStateSnapshot.SnapshotVoteEntry>
                 {
                     new GameStateSnapshot.SnapshotVoteEntry { VoterClientId = 1UL, TargetClientId = 2UL },
+                },
+                Accusations = new List<GameStateSnapshot.SnapshotAccusationEntry>
+                {
+                    new GameStateSnapshot.SnapshotAccusationEntry { AccuserClientId = 1UL, TargetClientId = 2UL },
                 },
                 CaseLog = new List<string> { "专案启动", "发现尸体" },
                 KillCooldowns = new List<GameStateSnapshot.SnapshotCooldownEntry>
@@ -158,6 +188,13 @@ namespace GanglandUndercover.Tests
                     Assert.AreEqual(original.CriticalTaskActive, restored.CriticalTaskActive);
                     Assert.AreEqual(original.CriticalTaskType, restored.CriticalTaskType);
                     Assert.AreEqual(original.CriticalTaskTimeRemaining, restored.CriticalTaskTimeRemaining, 0.001f);
+                    CollectionAssert.AreEquivalent(
+                        original.CriticalEvidenceRepairStations,
+                        restored.CriticalEvidenceRepairStations);
+                    Assert.AreEqual(
+                        original.GangPositionRevealTimeRemaining,
+                        restored.GangPositionRevealTimeRemaining,
+                        0.001f);
                 }
             }
         }
@@ -225,6 +262,64 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ToBytes_ThenFromBytes_RoundTrips_TaskAssignments()
+        {
+            var original = CreateTestSnapshot();
+
+            using (var writer = new FastBufferWriter(8192, Allocator.Temp))
+            {
+                original.ToBytes(writer);
+
+                using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    var restored = GameStateSnapshot.FromBytes(reader);
+
+                    Assert.AreEqual(original.TaskAssignments.Count, restored.TaskAssignments.Count);
+                    for (int i = 0; i < original.TaskAssignments.Count; i++)
+                    {
+                        Assert.AreEqual(original.TaskAssignments[i].ClientId, restored.TaskAssignments[i].ClientId);
+                        Assert.AreEqual(original.TaskAssignments[i].TaskId, restored.TaskAssignments[i].TaskId);
+                        Assert.AreEqual(original.TaskAssignments[i].Progress, restored.TaskAssignments[i].Progress);
+                        Assert.AreEqual(original.TaskAssignments[i].RequiredProgress, restored.TaskAssignments[i].RequiredProgress);
+                        Assert.AreEqual(original.TaskAssignments[i].Completed, restored.TaskAssignments[i].Completed);
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void ToBytes_ThenFromBytes_RoundTrips_DoubleAgentStates()
+        {
+            var original = CreateTestSnapshot();
+
+            using (var writer = new FastBufferWriter(8192, Allocator.Temp))
+            {
+                original.ToBytes(writer);
+
+                using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    var restored = GameStateSnapshot.FromBytes(reader);
+
+                    Assert.AreEqual(1, restored.UndercoverStates.Count);
+                    Assert.AreEqual(original.UndercoverStates[0].ClientId, restored.UndercoverStates[0].ClientId);
+                    Assert.AreEqual(original.UndercoverStates[0].Intel, restored.UndercoverStates[0].Intel);
+                    Assert.AreEqual(original.UndercoverStates[0].MissionsDone, restored.UndercoverStates[0].MissionsDone);
+                    Assert.AreEqual(original.UndercoverStates[0].Betrayed, restored.UndercoverStates[0].Betrayed);
+
+                    Assert.AreEqual(1, restored.MoleStates.Count);
+                    Assert.AreEqual(original.MoleStates[0].ClientId, restored.MoleStates[0].ClientId);
+                    Assert.AreEqual(original.MoleStates[0].Intel, restored.MoleStates[0].Intel);
+                    Assert.AreEqual(original.MoleStates[0].HasHitTarget, restored.MoleStates[0].HasHitTarget);
+                    Assert.AreEqual(original.MoleStates[0].HitTargetClientId, restored.MoleStates[0].HitTargetClientId);
+                    Assert.AreEqual(original.MoleStates[0].Exposed, restored.MoleStates[0].Exposed);
+                    Assert.AreEqual(original.MoleStates[0].Kills, restored.MoleStates[0].Kills);
+                    Assert.AreEqual(original.MoleStates[0].Sabotages, restored.MoleStates[0].Sabotages);
+                    Assert.AreEqual(original.MoleStates[0].SurvivedTilLate, restored.MoleStates[0].SurvivedTilLate);
+                }
+            }
+        }
+
+        [Test]
         public void ToBytes_ThenFromBytes_RoundTrips_BodiesVotesCaseLog()
         {
             var original = CreateTestSnapshot();
@@ -252,6 +347,14 @@ namespace GanglandUndercover.Tests
                     {
                         Assert.AreEqual(original.Votes[i].VoterClientId, restored.Votes[i].VoterClientId);
                         Assert.AreEqual(original.Votes[i].TargetClientId, restored.Votes[i].TargetClientId);
+                    }
+
+                    // Accusations
+                    Assert.AreEqual(original.Accusations.Count, restored.Accusations.Count);
+                    for (int i = 0; i < original.Accusations.Count; i++)
+                    {
+                        Assert.AreEqual(original.Accusations[i].AccuserClientId, restored.Accusations[i].AccuserClientId);
+                        Assert.AreEqual(original.Accusations[i].TargetClientId, restored.Accusations[i].TargetClientId);
                     }
 
                     // CaseLog

@@ -10,7 +10,7 @@ namespace GanglandUndercover.Online
     /// <summary>
     /// 击杀系统（单一数据源）：
     /// 持有击杀冷却、尸体、报告冷却等全部击杀相关状态。
-    /// 本地 Gang/Mole 靠近目标时显示击杀按钮，管理冷却与特效。
+    /// 本地 Gang/Mole 靠近合法目标时显示击杀按钮，管理冷却与特效。
     /// </summary>
     public sealed class KillSystem : MonoBehaviour
     {
@@ -181,7 +181,7 @@ namespace GanglandUndercover.Online
         /// 服务器端：查找指定位置附近的最近可击杀目标。
         /// 使用 controller 的 privateRoles 判断阵营。
         /// </summary>
-        internal bool TryFindNearestVictim(Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
+        internal bool TryFindNearestVictim(ulong attackerClientId, Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
         {
             victimClientId = ulong.MaxValue;
             victim = default;
@@ -193,13 +193,7 @@ namespace GanglandUndercover.Online
             {
                 OnlinePlayerState candidate = pair.Value;
 
-                // 统一使用 PublicRole 判定可击杀目标，与客户端 UI 保持一致：
-                // PublicRole == Gang  → 公开黑帮（含真 Gang + 卧底 Undercover 伪装）
-                // PublicRole == Mole  → 公开内鬼（理论上不会出现，因 Mole 伪装为 Police）
-                // 以上两种均不可被击杀
-                if (!candidate.Alive
-                    || candidate.PublicRole == OnlineRole.Gang
-                    || candidate.PublicRole == OnlineRole.Mole)
+                if (!controller.CanKillTarget(attackerClientId, pair.Key))
                 {
                     continue;
                 }
@@ -424,7 +418,7 @@ namespace GanglandUndercover.Online
             ulong victimClientId = currentVictim.ClientId;
 
             // 通过 controller 触发击杀
-            controller.RequestAction(OnlineActionType.Kill);
+            controller.RequestAction(OnlineActionType.Kill, currentVictimId);
 
             // 播放本地击杀效果
             PlayKillEffects(victimPos, victimClientId);
@@ -705,7 +699,7 @@ namespace GanglandUndercover.Online
             // 检查本地玩家是否存活
             if (!controller.LocalAlive) return false;
 
-            // 检查本地角色是否为 Gang 或 Mole
+            // 真黑帮可直接击杀；内鬼只有获得暗杀目标且目标在附近时才会显示按钮。
             OnlineRole localRole = controller.LocalRole;
             return localRole == OnlineRole.Gang || localRole == OnlineRole.Mole;
         }
@@ -734,9 +728,7 @@ namespace GanglandUndercover.Online
             {
                 if (kvp.Key == localId) continue;
                 var state = kvp.Value;
-                if (!state.Alive) continue;
-                // 不能击杀同阵营（Gang/Mole 之间不互相伤害）
-                if (state.PublicRole == OnlineRole.Gang || state.PublicRole == OnlineRole.Mole) continue;
+                if (!controller.CanKillTarget(localId, kvp.Key)) continue;
 
                 float dist = Vector3.Distance(localPos, state.Position);
                 if (dist < bestDistance)
@@ -829,7 +821,7 @@ namespace GanglandUndercover.Online
             if (sr == null) sr = visual.GetComponentInChildren<SpriteRenderer>();
             if (sr != null)
             {
-                sr.sortingOrder = Mathf.RoundToInt(-visual.transform.position.z * 100f);
+                sr.sortingOrder = Mathf.RoundToInt(visual.transform.position.z * 100f);
             }
         }
     }

@@ -31,6 +31,8 @@ namespace GanglandUndercover.Online
         private const string ClientProfileMessage = "GanglandClientProfile";
         private const string ServerSnapshotMessage = "GanglandServerSnapshot";
         private const string RoleAssignMessage = "GanglandRoleAssign";
+        private const string IdentityProgressMessage = "GanglandIdentityProgress";
+        private const string MoleTargetMessage = "GanglandMoleTarget";
         private const string ChatSendMessage = "GanglandChatSend";
         private const string ChatBroadcastMessage = "GanglandChatBroadcast";
         private const string MapSelectMessage = "GanglandMapSelect"; // D5
@@ -156,6 +158,7 @@ namespace GanglandUndercover.Online
         internal string lastEvidenceEvent = "尚未取得关键证据。";
         internal string lastSabotageEvent = "尚未发生破坏。";
         private OnlineRole localRole = OnlineRole.Unassigned;
+        private OnlineProfession localProfession = OnlineProfession.Inspector;
         internal OnlineMatchPhase phase = OnlineMatchPhase.Lobby;
         private ChatSystem chatSystem;
         private readonly Dictionary<ulong, float> serverChatLastSendTimes = new Dictionary<ulong, float>();
@@ -261,7 +264,7 @@ namespace GanglandUndercover.Online
         public int HumanPlayerCount => CountHumanPlayers();
         public int ReadyPlayerCountValue => ReadyPlayerCount();
         public int AlivePlayerCount => CountAlivePlayers();
-        public int CompletedTaskCount => CountCompletedTasks();
+        public int CompletedTaskCount => TeamCompletedTaskCount;
         public int SabotagedTaskCount => CountSabotagedTasks();
         public int UnreportedBodyCount => CountUnreportedBodies();
         public int WorldObjectCount => CountWorldObjects();
@@ -455,6 +458,7 @@ namespace GanglandUndercover.Online
 
         private void Awake()
         {
+            EnsureAudioListener();
             EnsureCoreServices();
             EnsureRuleSet();
             BuildDefaultTasks();
@@ -473,9 +477,45 @@ namespace GanglandUndercover.Online
             _meetingCount = 0;
         }
 
+        private void EnsureAudioListener()
+        {
+            MaintainFallbackAudioListener();
+        }
+
+        private static GameObject fallbackAudioListenerObject;
+
+        private static void MaintainFallbackAudioListener()
+        {
+            if (fallbackAudioListenerObject == null)
+            {
+                fallbackAudioListenerObject = new GameObject("Gangland Audio Listener Fallback");
+                fallbackAudioListenerObject.AddComponent<AudioListener>();
+                DontDestroyOnLoad(fallbackAudioListenerObject);
+            }
+
+            AudioListener fallback = fallbackAudioListenerObject.GetComponent<AudioListener>();
+            bool hasRealListener = false;
+            AudioListener[] listeners = FindObjectsByType<AudioListener>(FindObjectsInactive.Include);
+            for (int i = 0; i < listeners.Length; i++)
+            {
+                if (listeners[i] != null && listeners[i] != fallback && listeners[i].isActiveAndEnabled)
+                {
+                    hasRealListener = true;
+                    break;
+                }
+            }
+
+            // Real cameras own the listener in normal scenes and screenshot
+            // harnesses. The fallback only fills the no-camera test/runtime gap.
+            fallback.enabled = !hasRealListener;
+        }
+
 
         private void Update()
         {
+            MaintainFallbackAudioListener();
+            TickProfessionAbilities(Time.deltaTime);
+
             if (Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.M))
             {
                 tacticalMapOpen = !tacticalMapOpen;
@@ -595,7 +635,11 @@ namespace GanglandUndercover.Online
 
         public void SetRoomMinPlayers(int value)
         {
-            roomMinPlayers = Mathf.Clamp(value, ruleSet.MinimumRoomPlayers, roomMaxPlayers);
+            // Raising the minimum above the current maximum must be allowed to
+            // move the maximum with it; clamping against the old maximum made
+            // the follow-up correction branch unreachable and blocked 10-player
+            // rooms after a smaller lobby configuration.
+            roomMinPlayers = Mathf.Clamp(value, ruleSet.MinimumRoomPlayers, ruleSet.MaximumRoomPlayers);
 
             if (roomMaxPlayers < roomMinPlayers)
             {
@@ -750,7 +794,31 @@ namespace GanglandUndercover.Online
 
         public void RequestAction(OnlineActionType actionType)
         {
+            if (actionType == OnlineActionType.Kill)
+            {
+                if (TryGetLocalKillTarget(out ulong targetClientId))
+                {
+                    SendClientAction(actionType, targetClientId);
+                }
+                else
+                {
+                    status = "附近没有可击倒目标。";
+                }
+
+                return;
+            }
+
             SendClientAction(actionType);
+        }
+
+        public void RequestAction(OnlineActionType actionType, ulong targetClientId)
+        {
+            SendClientAction(actionType, targetClientId);
+        }
+
+        public void RequestSabotage(SabotageType sabotageType)
+        {
+            SendClientAction(OnlineActionType.Sabotage, (ulong)sabotageType);
         }
 
         public void RequestTaskStep(int input)
@@ -787,6 +855,11 @@ namespace GanglandUndercover.Online
         public void RequestSkipVote()
         {
             SendClientAction(OnlineActionType.SkipVote);
+        }
+
+        public void RequestAccusation(ulong targetClientId)
+        {
+            SendClientAction(OnlineActionType.Accuse, targetClientId);
         }
 
 
@@ -852,7 +925,7 @@ namespace GanglandUndercover.Online
             }
             else if (Input.GetKeyDown(KeyCode.Q))
             {
-                SendClientAction(OnlineActionType.Kill);
+                RequestAction(OnlineActionType.Kill);
                 actionCooldown = 0.35f;
             }
             else if (Input.GetKeyDown(KeyCode.R))
@@ -884,11 +957,17 @@ namespace GanglandUndercover.Online
         private void TickHostSimulation()
         {
             float deltaTime = Time.deltaTime;
+
+            if (AdvanceMatchClock(deltaTime))
+            {
+                return;
+            }
+
             sabotageService?.Tick(deltaTime);
 
             // Phase 2.4: 紧急任务触发检查与同步
             TickCriticalTaskTriggers();
-            TickCriticalTaskSync();
+            TickCriticalTaskSync(deltaTime);
 
             // Phase 2.1: MeetingService 为紧急冷却权威源，controller 字段保持镜像
             meetingService?.Tick(deltaTime);
@@ -919,7 +998,6 @@ namespace GanglandUndercover.Online
             else if (phase == OnlineMatchPhase.Meeting)
             {
                 phaseTimer -= deltaTime;
-                TickBotVoting(deltaTime);
 
                 if (phaseTimer <= 0f)
                 {
@@ -943,14 +1021,6 @@ namespace GanglandUndercover.Online
 
             if (phase == OnlineMatchPhase.Action)
             {
-                matchElapsedSeconds += deltaTime;
-
-                if (matchElapsedSeconds >= ruleSet.MatchHardLimitSeconds)
-                {
-                    ResolveTimeLimitOutcome();
-                    return;
-                }
-
                 if (aiActionGraceTimer <= 0f)
                 {
                     TickBotAction(deltaTime);
@@ -973,7 +1043,9 @@ namespace GanglandUndercover.Online
                     }
                     else
                     {
-                        state.Input = Vector2.zero;
+                        Vector3 ghostDirection = new Vector3(state.Input.x, state.Input.y, 0f);
+                        state.Position = mapService.ClampToOnlineMap(
+                            state.Position + ghostDirection * MoveSpeed * 1.2f * deltaTime);
                     }
 
                     players[clientId] = state;
@@ -997,6 +1069,172 @@ namespace GanglandUndercover.Online
                 serverSnapshotTimer = SnapshotIntervalSeconds;
                 BroadcastSnapshot();
             }
+        }
+
+        private bool AdvanceMatchClock(float deltaTime)
+        {
+            if (!matchStarted
+                || phase == OnlineMatchPhase.Lobby
+                || phase == OnlineMatchPhase.Result
+                || deltaTime <= 0f)
+            {
+                return false;
+            }
+
+            matchElapsedSeconds += deltaTime;
+            float hardLimitSeconds = ruleSet != null ? ruleSet.MatchHardLimitSeconds : 1200f;
+            if (matchElapsedSeconds < hardLimitSeconds)
+            {
+                return false;
+            }
+
+            matchElapsedSeconds = hardLimitSeconds;
+            ResolveTimeLimitOutcome();
+            return true;
+        }
+
+        private bool TrySabotageNearestTask(ulong senderClientId, OnlinePlayerState player, OnlineRole role)
+        {
+            if (!OnlineMatchUtils.CanSabotage(role)
+                || role == OnlineRole.Undercover && HasBetrayed(senderClientId))
+            {
+                return false;
+            }
+
+            OnlineTaskState task = FindNearestTask(player.Position);
+            if (task.Id < 0 || task.Sabotaged)
+            {
+                return false;
+            }
+
+            SabotageType sabotageType = OnlineMatchUtils.SabotageForTask(task.Id);
+            if (!ApplySabotageEffect(sabotageType, task.Name, senderClientId))
+            {
+                return false;
+            }
+
+            RecordCriticalTaskSabotage(senderClientId, sabotageType);
+
+            task.Sabotaged = true;
+            if (!(syncManager != null && syncManager.TaskSync != null && syncManager.TaskSync.HasAssignments))
+            {
+                task.Completed = false;
+                task.Progress = Mathf.Max(0, task.Progress - 1);
+            }
+            SetTask(task);
+
+            evidenceService?.SubtractEvidence(OnlineMatchUtils.SabotageEvidencePenalty(sabotageType));
+            status = "有人秘密破坏了 " + task.Name + "。";
+            lastSabotageEvent = status + " 影响: " + OnlineMatchUtils.SabotageName(sabotageType);
+            syncManager?.OnTaskSabotagedLocally(senderClientId, task.Id, sabotageType);
+            AudioManager.Instance?.PlaySFX(SoundEffect.Sabotage);
+            LogEvidence(EvidenceCategory.EvidenceChain,
+                task.Name + " 被破坏（" + OnlineMatchUtils.SabotageName(sabotageType) + "）", -1);
+            return true;
+        }
+
+        private void TryTriggerSelectedSabotage(
+            ulong senderClientId,
+            OnlinePlayerState player,
+            SabotageType sabotageType)
+        {
+            OnlineRole role = GetPrivateRole(senderClientId);
+            if (!OnlineMatchUtils.CanSabotage(role)
+                || role == OnlineRole.Undercover && HasBetrayed(senderClientId)
+                || !IsStandardSabotage(sabotageType)
+                || IsSabotageActive(sabotageType)
+                || abilityCooldowns.TryGetValue(senderClientId, out float cooldown) && cooldown > 0f)
+            {
+                return;
+            }
+
+            int sabotagedTaskIndex = -1;
+            int sabotagedTaskId = -1;
+            string sourceName = OnlineMatchUtils.SabotageName(sabotageType);
+            for (int i = 0; i < tasks.Count; i++)
+            {
+                OnlineTaskState task = tasks[i];
+                if (task.Sabotaged || OnlineMatchUtils.SabotageForTask(task.Id) != sabotageType)
+                {
+                    continue;
+                }
+
+                sabotagedTaskIndex = i;
+                sabotagedTaskId = task.Id;
+                sourceName = task.Name;
+                break;
+            }
+
+            if (!ApplySabotageEffect(sabotageType, sourceName, senderClientId))
+            {
+                return;
+            }
+
+            RecordCriticalTaskSabotage(senderClientId, sabotageType);
+
+            if (sabotagedTaskIndex >= 0)
+            {
+                OnlineTaskState task = tasks[sabotagedTaskIndex];
+                task.Sabotaged = true;
+                if (!(syncManager != null && syncManager.TaskSync != null && syncManager.TaskSync.HasAssignments))
+                {
+                    task.Completed = false;
+                    task.Progress = Mathf.Max(0, task.Progress - 1);
+                }
+                tasks[sabotagedTaskIndex] = task;
+            }
+
+            evidenceService?.SubtractEvidence(OnlineMatchUtils.SabotageEvidencePenalty(sabotageType));
+            lastSabotageEvent = status;
+
+            float sabotageCooldown = ruleSet.AbilityCooldownSeconds * SabotageCooldownMultiplier(senderClientId);
+            abilityCooldowns[senderClientId] = sabotageCooldown;
+            player.AbilityCooldown = sabotageCooldown;
+            player.Suspicion += 1;
+            players[senderClientId] = player;
+
+            if (sabotagedTaskId >= 0)
+            {
+                syncManager?.OnTaskSabotagedLocally(senderClientId, sabotagedTaskId, sabotageType);
+            }
+
+            if (role == OnlineRole.Mole)
+            {
+                if (!_moleObjectives.TryGetValue(senderClientId, out MoleObjective objective))
+                {
+                    objective = new MoleObjective();
+                }
+
+                objective.Sabotages++;
+                _moleObjectives[senderClientId] = objective;
+                SendIdentityProgress(senderClientId);
+            }
+
+            AudioManager.Instance?.PlaySFX(SoundEffect.Sabotage);
+            EvaluateWinConditions();
+            BroadcastSnapshot();
+        }
+
+        private static bool IsStandardSabotage(SabotageType sabotageType)
+        {
+            return sabotageType == SabotageType.Blackout
+                || sabotageType == SabotageType.Lockdown
+                || sabotageType == SabotageType.Communications
+                || sabotageType == SabotageType.EvidenceLeak
+                || sabotageType == SabotageType.PatrolAlert;
+        }
+
+        private bool IsSabotageActive(SabotageType sabotageType)
+        {
+            return sabotageType switch
+            {
+                SabotageType.Blackout => taskService.BlackoutTimer > 0f,
+                SabotageType.Lockdown => taskService.LockdownTimer > 0f,
+                SabotageType.Communications => taskService.CommunicationJamTimer > 0f,
+                SabotageType.EvidenceLeak => taskService.EvidenceLeakTimer > 0f,
+                SabotageType.PatrolAlert => taskService.PatrolAlertTimer > 0f,
+                _ => true,
+            };
         }
 
 
@@ -1032,7 +1270,13 @@ namespace GanglandUndercover.Online
 
         private void StartOnlineMatchCore(bool broadcast)
         {
+            StartOnlineMatchCoreWithNaturalSampleGuard(broadcast, false);
+        }
+
+        private void StartOnlineMatchCoreWithNaturalSampleGuard(bool broadcast, bool guaranteeNaturalSampleBotKiller)
+        {
             EnsureRuntimeDependencies();
+            ClearCriticalTasks();
 
             if (roomAutoFillAi && players.Count < roomMinPlayers)
             {
@@ -1042,8 +1286,11 @@ namespace GanglandUndercover.Online
             BuildDefaultTasks();
             killSystem.Reset();
             votes.Clear();
+            ClearActiveTaskLocks();
             caseLog.Clear();
             privateRoles.Clear();
+            ClearIdentityState();
+            ClearProfessionAbilities();
             abilityCooldowns.Clear();
             serverChatLastSendTimes.Clear();
             _botController?.ClearVoteTimers();
@@ -1097,35 +1344,42 @@ namespace GanglandUndercover.Online
                     _botController.InitBotState(ids[i]);
             }
 
-            AssignRoles(ids);
+            AssignRoles(ids, guaranteeNaturalSampleBotKiller);
             ApplyFirstKillDelay();
             status = "专案开始：身份已私发，准备进入九龙港城。";
             AddCaseLog(status);
             PlayCue("start");
             SetPublishedLobbySessionLocked(true);
+            AudioManager.Instance?.PlayBGM(MusicTrack.InGame);
+
+            List<ulong> gangCoverIds = new List<ulong>();
+            List<ulong> policeCoverIds = new List<ulong>();
+            foreach (var kvp in players)
+            {
+                if (kvp.Value.PublicRole == OnlineRole.Gang)
+                {
+                    gangCoverIds.Add(kvp.Key);
+                }
+                else if (kvp.Value.PublicRole == OnlineRole.Police)
+                {
+                    policeCoverIds.Add(kvp.Key);
+                }
+            }
+            syncManager?.OnMatchStarted(gangCoverIds, policeCoverIds, tasks);
 
             if (broadcast)
             {
                 BroadcastSnapshot();
             }
-
-            List<ulong> gangIds = new List<ulong>();
-            List<ulong> nonGangIds = new List<ulong>();
-            foreach (var kvp in players)
-            {
-                if (privateRoles.TryGetValue(kvp.Key, out OnlineRole role))
-                {
-                    if (role == OnlineRole.Gang || role == OnlineRole.Mole)
-                        gangIds.Add(kvp.Key);
-                    else if (role == OnlineRole.Police || role == OnlineRole.Undercover)
-                        nonGangIds.Add(kvp.Key);
-                }
-            }
-            syncManager?.OnMatchStarted(gangIds, nonGangIds, tasks);
         }
 
         // M4.1: 可配置阵营分配
         private void AssignRoles(IList<ulong> ids)
+        {
+            AssignRoles(ids, false);
+        }
+
+        private void AssignRoles(IList<ulong> ids, bool guaranteeNaturalSampleBotKiller)
         {
             RoleDistribution dist = ruleSet.GetRoleDistribution(ids.Count);
             List<ulong> shuffled = new List<ulong>(ids);
@@ -1157,6 +1411,70 @@ namespace GanglandUndercover.Online
             {
                 AssignSingleRole(shuffled[idx], OnlineRole.Police, policeIdx++);
             }
+
+            if (guaranteeNaturalSampleBotKiller)
+            {
+                EnsureNaturalSampleBotKiller();
+            }
+        }
+
+        private void EnsureNaturalSampleBotKiller()
+        {
+            if (!localPreviewMode || CountHumanPlayers() != 1)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
+            {
+                if (pair.Value.IsBot && GetPrivateRole(pair.Key) == OnlineRole.Gang)
+                {
+                    return;
+                }
+            }
+
+            ulong humanId = ulong.MaxValue;
+            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
+            {
+                if (!pair.Value.IsBot)
+                {
+                    humanId = pair.Key;
+                    break;
+                }
+            }
+
+            if (humanId == ulong.MaxValue || GetPrivateRole(humanId) != OnlineRole.Gang)
+            {
+                return;
+            }
+
+            ulong replacementBotId = ulong.MaxValue;
+            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
+            {
+                if (pair.Value.IsBot && GetPrivateRole(pair.Key) == OnlineRole.Police)
+                {
+                    replacementBotId = pair.Key;
+                    break;
+                }
+            }
+
+            if (replacementBotId == ulong.MaxValue)
+            {
+                return;
+            }
+
+            int policeIndex = 0;
+            foreach (OnlineRole role in privateRoles.Values)
+            {
+                if (role == OnlineRole.Police)
+                {
+                    policeIndex++;
+                }
+            }
+
+            AssignSingleRole(humanId, OnlineRole.Police, policeIndex);
+            AssignSingleRole(replacementBotId, OnlineRole.Gang, 0);
+            AddCaseLog("自然节奏采样：已将一个黑帮身份交给 Bot，避免单真人闲置导致无自动击杀者。");
         }
 
         private void ApplyFirstKillDelay()
@@ -1196,6 +1514,7 @@ namespace GanglandUndercover.Online
                 players[clientId] = state;
             }
             SendRole(clientId, role);
+            SendIdentityProgress(clientId);
         }
 
         private void FillBotsAndStart()
@@ -1301,6 +1620,13 @@ namespace GanglandUndercover.Online
 
         internal void TryInteractWithTask(ulong senderClientId, OnlinePlayerState player)
         {
+            if (!player.Alive && !CanGhostCompleteTasks(senderClientId, player))
+            {
+                status = "该鬼魂不能继续执行任务或破坏。";
+                BroadcastSnapshot();
+                return;
+            }
+
             OnlineTaskState nearestTask = FindNearestTask(player.Position);
 
             if (nearestTask.Id < 0)
@@ -1311,20 +1637,36 @@ namespace GanglandUndercover.Online
             }
 
             OnlineRole role = GetPrivateRole(senderClientId);
+            OnlineTaskState playerTask = TaskForPlayer(senderClientId, nearestTask);
 
-            if (role == OnlineRole.Gang || role == OnlineRole.Mole)
+            if (role != OnlineRole.Gang && !nearestTask.Sabotaged && !IsTaskVisibleToPlayer(senderClientId, nearestTask))
+            {
+                status = "该任务未分配给你。";
+                BroadcastSnapshot();
+                return;
+            }
+
+            if (role == OnlineRole.Gang)
             {
                 SabotageType sabotageType = OnlineMatchUtils.SabotageForTask(nearestTask.Id);
+                if (!ApplySabotageEffect(sabotageType, nearestTask.Name, senderClientId))
+                {
+                    status = "该类破坏仍在生效或冷却中。";
+                    BroadcastSnapshot();
+                    return;
+                }
+
                 nearestTask.Sabotaged = true;
-                nearestTask.Completed = false;
-                nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
+                if (!(syncManager != null && syncManager.TaskSync != null && syncManager.TaskSync.HasAssignments))
+                {
+                    nearestTask.Completed = false;
+                    nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
+                }
                 evidenceService?.SubtractEvidence(OnlineMatchUtils.SabotageEvidencePenalty(sabotageType));
-                string actorLabel = role == OnlineRole.Mole ? "线人" : "黑帮";
-                status = actorLabel + "秘密破坏了 " + nearestTask.Name + "。";
+                status = "有人秘密破坏了 " + nearestTask.Name + "。";
                 lastSabotageEvent = status + " 影响: " + OnlineMatchUtils.SabotageName(sabotageType);
                 AddCaseLog(status);
                 syncManager?.OnTaskSabotagedLocally(senderClientId, nearestTask.Id, sabotageType);
-                ApplySabotageEffect(sabotageType, nearestTask.Name);
                 AudioManager.Instance?.PlaySFX(SoundEffect.Sabotage);
 
                 // M5.5: 证据板记录 + 嫌疑增加
@@ -1332,6 +1674,7 @@ namespace GanglandUndercover.Online
                     $"{nearestTask.Name} 被破坏（{OnlineMatchUtils.SabotageName(sabotageType)}），证据链-{OnlineMatchUtils.SabotageEvidencePenalty(sabotageType)}", -1);
 
                 // 增加附近存活玩家的嫌疑（模糊线索，不点名）
+                List<ulong> nearbyPlayerIds = new List<ulong>();
                 foreach (var kv in players)
                 {
                     if (!kv.Value.Alive || kv.Key == senderClientId) continue;
@@ -1339,7 +1682,12 @@ namespace GanglandUndercover.Online
                         new Vector2(kv.Value.Position.x, kv.Value.Position.y),
                         new Vector2(nearestTask.Position.x, nearestTask.Position.y));
                     if (dist < 6f)
-                        AddSuspicion(kv.Key, 1);
+                        nearbyPlayerIds.Add(kv.Key);
+                }
+
+                for (int i = 0; i < nearbyPlayerIds.Count; i++)
+                {
+                    AddSuspicion(nearbyPlayerIds[i], 1);
                 }
             }
             else
@@ -1350,7 +1698,7 @@ namespace GanglandUndercover.Online
                     {
                         miniGameBridge.OpenRepairMinigameOnClient(senderClientId, nearestTask.Id);
                     }
-                    else if (!nearestTask.Completed)
+                    else if (!playerTask.Completed)
                     {
                         miniGameBridge.OpenMinigameOnClient(senderClientId, nearestTask.Id);
                     }
@@ -1360,7 +1708,14 @@ namespace GanglandUndercover.Online
 
                 if (senderClientId == LocalClientId() && !player.IsBot && !(minigameService != null && minigameService.SubmittingActiveTask))
                 {
-                    BeginActiveTask(nearestTask.Id); // 降级到旧 OnGUI 任务
+                    if (nearestTask.Sabotaged || !playerTask.Completed)
+                    {
+                        BeginActiveTask(nearestTask.Id); // 降级到旧 OnGUI 任务
+                    }
+                    else
+                    {
+                        status = nearestTask.Name + " 已完成。";
+                    }
                     return;
                 }
 
@@ -1372,26 +1727,57 @@ namespace GanglandUndercover.Online
                     lastSabotageEvent = status;
                     AddCaseLog(status);
                 }
-                else if (!nearestTask.Completed)
+                else if (!playerTask.Completed)
                 {
-                    int progressGain = role == OnlineRole.Undercover ? 2 : 1;
-                    nearestTask.Progress = Mathf.Min(nearestTask.RequiredProgress, nearestTask.Progress + progressGain);
-
-                    if (nearestTask.Progress >= nearestTask.RequiredProgress)
+                    TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+                    bool usesPersonalProgress = taskSync != null && taskSync.HasAssignments;
+                    if (usesPersonalProgress)
                     {
-                        nearestTask.Completed = true;
-                        int gain = EvidenceGainFor(nearestTask.Id, player.Profession, role);
-                        evidenceService?.AddEvidence(gain, nearestTask.Name + " 完成，证据链推进。");
-                        player.Suspicion = Mathf.Max(0, player.Suspicion - 1);
-                        players[senderClientId] = player;
-                        status = nearestTask.Name + " 完成，证据链推进。";
-                        AddCaseLog(status);
-                        PlayCue("task");
-                        syncManager?.OnTaskCompletedLocally(senderClientId, nearestTask.Id);
+                        taskSync.TryAdvanceTask(senderClientId, nearestTask, 1, out playerTask);
                     }
                     else
                     {
-                        status = nearestTask.Name + " 进度 " + nearestTask.Progress + "/" + nearestTask.RequiredProgress + "。";
+                        nearestTask.Progress = Mathf.Min(nearestTask.RequiredProgress, nearestTask.Progress + 1);
+                        nearestTask.Completed = nearestTask.Progress >= nearestTask.RequiredProgress;
+                        playerTask = nearestTask;
+                    }
+
+                    if (playerTask.Completed)
+                    {
+                        OnlineRole evidenceRole = EvidenceRoleForTask(player, role);
+                        int gain = EvidenceGainFor(nearestTask.Id, player.Profession, evidenceRole);
+                        if (gain > 0)
+                        {
+                            status = nearestTask.Name + " 完成，证据链推进。";
+                            evidenceService?.AddEvidence(gain, status);
+                        }
+                        else
+                        {
+                            status = nearestTask.Name + " 完成，行动记录已更新。";
+                        }
+
+                        player.Suspicion = Mathf.Max(0, player.Suspicion - 1);
+                        players[senderClientId] = player;
+                        AddCaseLog(status);
+                        PlayCue("task");
+                        if (!usesPersonalProgress)
+                        {
+                            syncManager?.OnTaskCompletedLocally(senderClientId, nearestTask.Id);
+                        }
+                        if (role == OnlineRole.Undercover)
+                        {
+                            AccumulateUndercoverIntel(senderClientId, 1);
+                        }
+                        else if (role == OnlineRole.Mole)
+                        {
+                            AccumulateMoleIntel(senderClientId, 1);
+                        }
+
+                        RecordCriticalTaskRepair(senderClientId, nearestTask.Id);
+                    }
+                    else
+                    {
+                        status = nearestTask.Name + " 进度 " + playerTask.Progress + "/" + playerTask.RequiredProgress + "。";
                     }
                 }
             }
@@ -1416,9 +1802,9 @@ namespace GanglandUndercover.Online
 
 
 
-        private void TryKill(ulong senderClientId, OnlinePlayerState player)
+        internal void TryKill(ulong senderClientId, OnlinePlayerState player, ulong targetClientId)
         {
-            if (GetPrivateRole(senderClientId) != OnlineRole.Gang && GetPrivateRole(senderClientId) != OnlineRole.Mole)
+            if (!OnlineMatchUtils.IsGangSide(GetPrivateRole(senderClientId)))
             {
                 status = "只有黑帮可以击倒目标。";
                 BroadcastSnapshot();
@@ -1432,13 +1818,16 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (!TryFindNearestVictim(player.Position, out ulong victimClientId, out OnlinePlayerState victim))
+            if (!CanKillTarget(senderClientId, targetClientId)
+                || !players.TryGetValue(targetClientId, out OnlinePlayerState victim)
+                || Vector3.Distance(player.Position, victim.Position) > ruleSet.KillRange)
             {
                 status = "附近没有可击倒目标。";
                 BroadcastSnapshot();
                 return;
             }
 
+            ulong victimClientId = targetClientId;
             victim.Alive = false;
             victim.Input = Vector2.zero;
             victim.KillCooldown = 0f;
@@ -1456,7 +1845,14 @@ namespace GanglandUndercover.Online
             {
                 worldBuilder.CreateCorpseMarker(victim.Position);
             }
-            killSystem.killCooldowns[senderClientId] = ruleSet.KillCooldownFor(players.Count);
+            float killCooldown = ruleSet.KillCooldownFor(players.Count);
+            if (ruleSet.HasAbility(player.Profession, AbilityType.KillCooldownReduce))
+            {
+                killCooldown *= ruleSet.GetAbilityMultiplier(player.Profession, AbilityType.KillCooldownReduce);
+            }
+
+            killSystem.killCooldowns[senderClientId] = killCooldown;
+            player.KillCooldown = killCooldown;
             player.Suspicion += 2;
             players[senderClientId] = player;
             killSystem.killCount++;
@@ -1475,12 +1871,40 @@ namespace GanglandUndercover.Online
                 var obj = _moleObjectives[senderClientId];
                 obj.Kills++;
                 _moleObjectives[senderClientId] = obj;
+                SendIdentityProgress(senderClientId);
             }
 
             syncManager?.OnKilled(victimClientId, senderClientId);
             PlayCue("kill");
             EvaluateWinConditions();
             BroadcastSnapshot();
+        }
+
+        internal bool CanKillTarget(ulong attackerClientId, ulong targetClientId)
+        {
+            if (attackerClientId == targetClientId
+                || !players.TryGetValue(attackerClientId, out OnlinePlayerState attacker)
+                || !players.TryGetValue(targetClientId, out OnlinePlayerState target)
+                || !attacker.Alive
+                || !target.Alive)
+            {
+                return false;
+            }
+
+            OnlineRole attackerRole = GetPrivateRole(attackerClientId);
+            if (attackerRole == OnlineRole.Gang)
+            {
+                // 真黑帮不知道谁是卧底或内鬼。允许误伤，避免按钮可用性成为身份探测器。
+                return true;
+            }
+
+            if (attackerRole == OnlineRole.Mole)
+            {
+                ulong? assignedTarget = GetMoleHitTarget(attackerClientId) ?? AssignMoleHit(attackerClientId);
+                return assignedTarget.HasValue && assignedTarget.Value == targetClientId;
+            }
+
+            return false;
         }
 
         internal void TryUseProfessionAbility(ulong senderClientId, OnlinePlayerState player)
@@ -1498,76 +1922,75 @@ namespace GanglandUndercover.Online
             {
                 case OnlineProfession.Inspector:
                     RevealMostSuspiciousPlayer();
-                    status = player.DisplayName + " 发起重点盘问，案情板标记最高嫌疑。";
+                    int trackedFootprints = TrackNearbyFootprints(senderClientId);
+                    status = player.DisplayName + " 发起足迹追踪，标记了 " + trackedFootprints + " 个行动痕迹。";
+                    EmitProfessionAbilityFeedback(senderClientId, "FootprintTrack", new Color(0.16f, 0.86f, 0.96f, 1f), player.Position);
                     break;
                 case OnlineProfession.Forensics:
-                    evidenceService?.AddEvidence(1, player.DisplayName + " 快速鉴证，证据链 +1。");
-                    status = player.DisplayName + " 快速鉴证，证据链 +1。";
+                    int corpseBonus = CorpseExamineBonus(senderClientId);
+                    int evidenceGain = 1;
+                    if (TryFindNearestBody(player.Position, out int corpseIndex))
+                    {
+                        evidenceGain += corpseBonus;
+                        OnlineBodyState corpse = killSystem.bodies[corpseIndex];
+                        RegisterCorpseExamineEvidence(corpse.Position, senderClientId);
+                    }
+
+                    evidenceService?.AddEvidence(evidenceGain, player.DisplayName + " 完成尸体检验，证据链 +" + evidenceGain + "。");
+                    status = player.DisplayName + " 完成尸体检验，证据链 +" + evidenceGain + "。";
+                    EmitProfessionAbilityFeedback(senderClientId, "CorpseExamine", new Color(1f, 0.78f, 0.18f, 1f), player.Position);
                     break;
                 case OnlineProfession.Tech:
                     taskService.RepairSabotageEffect(SabotageType.Blackout);
                     RepairSabotagedTasks(1);
-                    status = player.DisplayName + " 重启监控和电闸，解除一次破坏。";
+                    RegisterSurveillanceEvidence(new Vector2(player.Position.x, player.Position.y), senderClientId);
+                    status = player.DisplayName + " 接入远程监控，重启监控和电闸。";
+                    EmitProfessionAbilityFeedback(senderClientId, "RemoteSurveillance", new Color(0.18f, 0.74f, 1f, 1f), player.Position);
                     break;
                 case OnlineProfession.UndercoverAgent:
-                    // C3: 证据≥75%时可以背叛黑帮（切换公开身份为警察）
-                    if (evidenceService != null && evidenceService.EvidenceScore >= Mathf.CeilToInt(evidenceService.EvidenceTarget * 0.75f)
-                        && player.PublicRole != OnlineRole.Police)
+                    if (CanBetray(senderClientId) && ExecuteBetrayal(senderClientId))
                     {
-                        // 背叛：公开身份切警察，证据+3，黑帮全员被标记
                         player.PublicRole = OnlineRole.Police;
-                        player.Suspicion -= 2;
-                        evidenceService.AddEvidence(3, "卧底背叛！" + player.DisplayName + " 当众背叛黑帮！");
-                        status = player.DisplayName + " 当众背叛黑帮！已转为警方证人，全员黑帮嫌疑+2。";
-                        // 标记所有黑帮侧（Gang + Mole）
-                        foreach (var kv in players)
-                        {
-                            OnlineRole kvRole = GetPrivateRole(kv.Key);
-                            if (kvRole == OnlineRole.Gang || kvRole == OnlineRole.Mole)
-                            {
-                                var s = kv.Value;
-                                s.Suspicion += 2;
-                                players[kv.Key] = s;
-                            }
-                        }
+                        status = player.DisplayName + " 公开卧底身份，转为警方证人。";
                     }
-                    else
+                    else if (!TrySabotageNearestTask(senderClientId, player, role))
                     {
-                        evidenceService?.AddEvidence(2, player.DisplayName + " 秘密上传线报，证据链 +2 但暴露风险上升。");
-                        player.Suspicion += 2;
-                        status = player.DisplayName + " 秘密上传线报，证据链 +2 但暴露风险上升。";
+                        status = "附近没有可破坏的设施；继续完成伪装任务收集情报。";
                     }
                     break;
                 case OnlineProfession.Enforcer:
+                    ActivateDarkVision(senderClientId);
                     if (role == OnlineRole.Gang || role == OnlineRole.Mole)
                     {
                         killSystem.killCooldowns[senderClientId] = Mathf.Max(0f, killSystem.killCooldowns.TryGetValue(senderClientId, out float killCooldown) ? killCooldown - 9f : 0f);
                         player.Suspicion += 1;
-                        status = player.DisplayName + " 清理路线，击倒冷却缩短。";
+                        status = "有人清理了隐蔽行动路线。";
                     }
                     else
                     {
-                        status = player.DisplayName + " 封锁后巷，附近黑帮嫌疑上升。";
+                        status = player.DisplayName + " 启动暗视，封锁后巷，附近黑帮嫌疑上升。";
                         MarkNearbyGangSuspicion(player.Position, 1);
                     }
+
+                    EmitProfessionAbilityFeedback(senderClientId, "DarkVision", new Color(0.72f, 0.3f, 1f, 1f), player.Position);
 
                     break;
                 case OnlineProfession.Fixer:
                     RepairSabotagedTasks(2);
                     evidenceService?.SubtractEvidence(1);
-                    status = player.DisplayName + " 篡改现场，修复表象但证据链被污染。";
+                    status = "现场痕迹遭到篡改，证据链被污染。";
                     break;
                 case OnlineProfession.Driver:
-                    if ((role == OnlineRole.Gang || role == OnlineRole.Mole) && TryUseUnderworldPassage(ref player))
+                    if (role == OnlineRole.Undercover && !HasBetrayed(senderClientId)
+                        && TrySabotageNearestTask(senderClientId, player, role))
                     {
                         player.Suspicion += 1;
-                        status = player.DisplayName + " 通过暗线通道换位。";
                     }
                     else
                     {
                         player.Position = FindNearestOpenPosition(player.Position + new Vector3(UnityEngine.Random.Range(-2.4f, 2.4f), UnityEngine.Random.Range(-1.8f, 1.8f), 0f), player.Position);
-                        player.Suspicion += (role == OnlineRole.Gang || role == OnlineRole.Mole) ? 1 : 0;
-                        status = player.DisplayName + " 走后巷快速换位。";
+                        player.Suspicion += OnlineMatchUtils.IsGangSide(role) ? 1 : 0;
+                        status = "后巷传来短暂动静。";
                     }
 
                     break;
@@ -1617,16 +2040,16 @@ namespace GanglandUndercover.Online
                         // Override cooldown to 20s for Sabotage Intel
                         abilityCooldowns[senderClientId] = 20f;
                         player.AbilityCooldown = 20f;
-                        status = player.DisplayName + " 暗中破坏情报，证据链 -2。";
+                        status = "情报系统遭到暗中干扰，证据链 -2。";
                         lastEvidenceEvent = status + " 当前 " + taskService.EvidenceScore + "/" + taskService.EvidenceTarget;
                     }
 
                     break;
                 default:
-                    if ((role == OnlineRole.Gang || role == OnlineRole.Mole) && TryUseUnderworldPassage(ref player))
+                    if (OnlineMatchUtils.CanUseUnderworldPassage(role) && TryUseUnderworldPassage(ref player))
                     {
                         player.Suspicion += 1;
-                        status = player.DisplayName + " 通过暗线通道换位。";
+                        status = "暗线通道出现短暂动静。";
                     }
                     else
                     {
@@ -1655,7 +2078,7 @@ namespace GanglandUndercover.Online
 
         // ──────────────────────────────────────────────
         //  暗线通道系统（Underworld Passage）
-        //  仅 Gang/Mole 可用，冷却由 ruleSet.VentCooldownSeconds 控制；
+        //  仅 Gang/Undercover 可用，冷却由 ruleSet.VentCooldownSeconds 控制；
         //  节点位置来自 OnlineMapService；逻辑见 TryUseUnderworldPassage()。
         // ──────────────────────────────────────────────
 
@@ -1665,9 +2088,37 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void CallEmergencyMeeting(string callerDisplayName)
         {
+            if (phase != OnlineMatchPhase.Action)
+            {
+                return;
+            }
+
+            ulong callerId = SkipVoteTarget;
+            OnlinePlayerState caller = default;
+            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
+            {
+                if (pair.Value.Alive && string.Equals(pair.Value.DisplayName, callerDisplayName, StringComparison.Ordinal))
+                {
+                    callerId = pair.Key;
+                    caller = pair.Value;
+                    break;
+                }
+            }
+
+            if (callerId == SkipVoteTarget)
+            {
+                return;
+            }
+
+            if (taskService.CommunicationJamTimer > 0f
+                || Vector3.Distance(caller.Position, mapService.ScaleMapPosition(Vector3.zero)) > ruleSet.ReportRangeFor(players.Count))
+            {
+                return;
+            }
+
             if (meetingService != null)
             {
-                if (!meetingService.ConsumeEmergencyMeeting(callerDisplayName, 0UL))
+                if (!meetingService.TryReportOrEmergency(callerId, caller))
                 {
                     return;
                 }
@@ -1679,12 +2130,17 @@ namespace GanglandUndercover.Online
                 emergencyMeetingsLeft = Mathf.Max(0, emergencyMeetingsLeft - 1);
                 emergencyCooldownTimer = ruleSet.EmergencyCooldownSecondsFor(players.Count);
             }
-            BeginMeeting(callerDisplayName + " 按下警署紧急铃", 0UL, isEmergency: true);
+            BeginMeeting(callerDisplayName + " 按下警署紧急铃", callerId, isEmergency: true);
             BroadcastSnapshot();
         }
 
         private void TryReportOrEmergency(ulong senderClientId, OnlinePlayerState player)
         {
+            if (phase != OnlineMatchPhase.Action || !player.Alive)
+            {
+                return;
+            }
+
             if (killSystem.reportCooldownTimer > 0f)
             {
                 status = "报案冷却中：" + Mathf.CeilToInt(killSystem.reportCooldownTimer) + "s，请稍后再试。";
@@ -1768,7 +2224,16 @@ namespace GanglandUndercover.Online
             taskService.RepairSabotageEffect(SabotageType.Blackout);
             killSystem.reportCooldownTimer = ruleSet.ReportCooldownSecondsFor(players.Count);
             minigameService?.Reset();
-            votingService?.ClearVotes();
+            ClearActiveTaskLocks();
+            if (votingService != null)
+            {
+                votingService.ClearVotes();
+            }
+            else
+            {
+                votes.Clear();
+            }
+            ClearAccusations();
             lastMeetingReason = reason;
 
             List<ulong> ids = new List<ulong>(players.Keys);
@@ -1803,6 +2268,7 @@ namespace GanglandUndercover.Online
             }
 
             PlayCue("meeting");
+            AudioManager.Instance?.PlayBGM(MusicTrack.Meeting);
         }
 
         private Vector3 MeetingSeatPositionFor(ulong clientId)
@@ -1823,23 +2289,9 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            // 首次投票 → 进入投票阶段
-            if (phase == OnlineMatchPhase.Meeting)
-            {
-                phase = OnlineMatchPhase.Voting;
-                phaseTimer = Mathf.Max(phaseTimer, 6f);
-            }
-
-            // C2-2: Register as evidence accusation for vote weight bonus
-            if (targetClientId != SkipVoteTarget)
-                AccusePlayer(voterClientId, targetClientId);
-
             // 构建状态消息
             if (!players.TryGetValue(voterClientId, out OnlinePlayerState voter)) return;
-            bool hasSecretVote = ruleSet != null && ruleSet.HasAbility(voter.Profession, AbilityType.SecretVote);
-            status = hasSecretVote
-                ? voter.DisplayName + " 秘密投票"
-                : voter.DisplayName + (targetClientId == SkipVoteTarget ? " 已投票跳过。" : " 已投票给 " + players[targetClientId].DisplayName + "。");
+            status = voter.DisplayName + " 已提交匿名选票。";
             AddCaseLog(status);
             syncManager?.OnVoteCast(voterClientId, targetClientId);
             PlayCue("vote");
@@ -1857,7 +2309,7 @@ namespace GanglandUndercover.Online
 
         private void ResolveVotes()
         {
-            if (phase != OnlineMatchPhase.Voting && phase != OnlineMatchPhase.Meeting)
+            if (phase != OnlineMatchPhase.Voting)
             {
                 return;
             }
@@ -1891,6 +2343,7 @@ namespace GanglandUndercover.Online
                 lastVoteOutcome = status + " 票型: " + BuildVoteTallySummary(tally, skipVotes);
                 AddCaseLog(status);
                 syncManager?.OnMeetingEnded();
+                AudioManager.Instance?.PlayBGM(MusicTrack.InGame);
                 BroadcastSnapshot();
                 return;
             }
@@ -1933,6 +2386,7 @@ namespace GanglandUndercover.Online
             {
                 phase = OnlineMatchPhase.Action;
                 ApplyPostMeetingKillGrace();
+                AudioManager.Instance?.PlayBGM(MusicTrack.InGame);
             }
 
             BroadcastSnapshot();
@@ -1946,6 +2400,15 @@ namespace GanglandUndercover.Online
             }
 
             UpdateEvidenceMilestone();
+
+            foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
+            {
+                if (CheckMoleWinCondition(pair.Key))
+                {
+                    SetResult("黑帮胜利：内鬼锁定并清除了卧底。");
+                    return;
+                }
+            }
 
             // 优先使用 OnlineVictoryBridge 双重判定（原生在线规则 + 离线 VictoryEvaluator）
             if (syncManager != null)
@@ -1962,46 +2425,41 @@ namespace GanglandUndercover.Online
             }
 
             // 兜底：在线原生快速判定（证据链 / 存活阵营）
-            if (taskService.EvidenceScore >= taskService.EvidenceTarget)
-            {
-                SetResult("警方胜利：证据链闭合。");
-                return;
-            }
-
-            // 阵营归属：黑帮侧 = Gang + Mole，警方侧 = Police + Undercover
+            // 阵营归属：黑帮侧 = Gang + Mole，警方侧 = Police + Undercover。
             int aliveGangSide = 0;
             int alivePoliceSide = 0;
-            int aliveGang = 0;
-            int aliveNonGangSide = 0;
             int aliveUndercover = 0;
+            int totalUndercover = 0;
             int totalAlive = 0;
 
             foreach (KeyValuePair<ulong, OnlinePlayerState> pair in players)
             {
+                OnlineRole role = GetPrivateRole(pair.Key);
+                if (role == OnlineRole.Undercover) totalUndercover++;
                 if (!pair.Value.Alive)
                 {
                     continue;
                 }
 
                 totalAlive++;
-                OnlineRole role = GetPrivateRole(pair.Key);
-                if (role == OnlineRole.Gang || role == OnlineRole.Mole)
+                if (OnlineMatchUtils.IsGangSide(role))
                 {
                     aliveGangSide++;
-                    if (role == OnlineRole.Gang) aliveGang++;
                 }
                 else
                 {
                     alivePoliceSide++;
-                    aliveNonGangSide++;
                     if (role == OnlineRole.Undercover) aliveUndercover++;
                 }
             }
 
-            // 卧底特殊胜利：优先于阵营全灭判定
-            if (aliveUndercover == 1 && totalAlive == 1)
+            if (totalUndercover > 0 && aliveUndercover == 0)
             {
-                SetResult("卧底胜利：港区暗线完美收网。");
+                SetResult("黑帮胜利：卧底已被拔除。");
+            }
+            else if (taskService.EvidenceScore >= taskService.EvidenceTarget && aliveUndercover > 0)
+            {
+                SetResult("警方胜利：卧底存活，证据链闭合，收网成功。");
             }
             else if (aliveGangSide == 0 && totalAlive >= 1)
             {
@@ -2010,10 +2468,6 @@ namespace GanglandUndercover.Online
             else if (alivePoliceSide == 0 && totalAlive >= 1)
             {
                 SetResult("黑帮胜利：警方阵营全部出局。");
-            }
-            else if (aliveGang > 0 && (aliveNonGangSide == 0 || (totalAlive >= 4 && aliveGang >= aliveNonGangSide)))
-            {
-                SetResult("黑帮胜利：港区控制权失守。");
             }
         }
 
@@ -2077,20 +2531,14 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (taskService.EvidenceScore >= Mathf.CeilToInt(taskService.EvidenceTarget * 0.82f) || CountCompletedTasks() >= Mathf.CeilToInt(tasks.Count * 0.72f))
-            {
-                SetResult("警方胜利：行动超时前已掌握关键证据。");
-            }
-            else
-            {
-                SetResult("黑帮胜利：20 分钟窗口结束，关键证据未能闭合。");
-            }
+            SetResult("平局：行动窗口结束，双方均未完成决定性目标。");
         }
 
         private void SetResult(string resultStatus)
         {
             phase = OnlineMatchPhase.Result;
             phaseTimer = 0f;
+            ClearCriticalTasks();
             taskService.ResetAllSabotageTimers();
             emergencyCooldownTimer = 0f;
             SyncMeetingServiceFromController();
@@ -2100,6 +2548,7 @@ namespace GanglandUndercover.Online
             lastEvidenceEvent = "尚未取得关键证据。";
             lastSabotageEvent = "尚未发生破坏。";
             minigameService?.ResetFull();
+            ClearActiveTaskLocks();
             status = resultStatus;
 
             // C4: 评估内鬼隐藏目标 — 存活至≤3人
@@ -2112,6 +2561,7 @@ namespace GanglandUndercover.Online
                     {
                         obj.SurvivedTilLate = true;
                         _moleObjectives[kv.Key] = obj;
+                        SendIdentityProgress(kv.Key);
                     }
                 }
             }
@@ -2135,6 +2585,9 @@ namespace GanglandUndercover.Online
                 state.Input = Vector2.zero;
                 players[clientId] = state;
             }
+
+            // 结算是强制同步边界，必须包含公开身份和最终摘要。
+            BroadcastSnapshot();
         }
 
 
@@ -2356,7 +2809,11 @@ namespace GanglandUndercover.Online
             if (!TryValidateTaskActor(clientId, taskId, out _, out OnlineTaskState task, out reason))
                 return false;
 
-            if (task.Completed)
+            if (!CanPlayerCompleteAssignedTask(clientId, taskId, out reason))
+                return false;
+
+            OnlineTaskState playerTask = TaskForPlayer(clientId, task);
+            if (playerTask.Completed)
             {
                 reason = "任务已完成";
                 return false;
@@ -2368,7 +2825,7 @@ namespace GanglandUndercover.Online
                 return false;
             }
 
-            if (IsTaskLockedByAnotherPlayer(clientId, taskId, out reason))
+            if (IsPlayerHandlingAnotherTask(clientId, taskId, out reason))
                 return false;
 
             reason = string.Empty;
@@ -2383,13 +2840,19 @@ namespace GanglandUndercover.Online
             if (!TryValidateTaskActor(clientId, taskId, out _, out OnlineTaskState task, out reason))
                 return false;
 
+            if (GetPrivateRole(clientId) == OnlineRole.Gang)
+            {
+                reason = "黑帮不能修复已破坏设施";
+                return false;
+            }
+
             if (!task.Sabotaged)
             {
                 reason = "任务未被破坏";
                 return false;
             }
 
-            if (IsTaskLockedByAnotherPlayer(clientId, taskId, out reason))
+            if (IsRepairLockedByAnotherPlayer(clientId, taskId, out reason))
                 return false;
 
             reason = string.Empty;
@@ -2401,8 +2864,15 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void MarkTaskActive(ulong clientId, int taskId)
         {
-            if (activeTaskUsers == null) activeTaskUsers = new Dictionary<int, ulong>();
-            activeTaskUsers[taskId] = clientId;
+            if (activeTaskByPlayer == null) activeTaskByPlayer = new Dictionary<ulong, int>();
+            activeTaskByPlayer[clientId] = taskId;
+
+            OnlineTaskState task = GetTask(taskId);
+            if (task.Id >= 0 && task.Sabotaged)
+            {
+                if (activeRepairUsers == null) activeRepairUsers = new Dictionary<int, ulong>();
+                activeRepairUsers[taskId] = clientId;
+            }
         }
 
         /// <summary>
@@ -2410,9 +2880,18 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void ReleaseTask(ulong clientId, int taskId)
         {
-            if (activeTaskUsers != null && activeTaskUsers.TryGetValue(taskId, out ulong owner) && owner == clientId)
+            if (activeTaskByPlayer != null
+                && activeTaskByPlayer.TryGetValue(clientId, out int activeTaskId)
+                && activeTaskId == taskId)
             {
-                activeTaskUsers.Remove(taskId);
+                activeTaskByPlayer.Remove(clientId);
+            }
+
+            if (activeRepairUsers != null
+                && activeRepairUsers.TryGetValue(taskId, out ulong repairOwner)
+                && repairOwner == clientId)
+            {
+                activeRepairUsers.Remove(taskId);
             }
         }
 
@@ -2424,7 +2903,11 @@ namespace GanglandUndercover.Online
             if (!TryValidateTaskActor(clientId, taskId, out OnlinePlayerState player, out OnlineTaskState task, out error))
                 return false;
 
-            if (task.Completed)
+            if (!CanPlayerCompleteAssignedTask(clientId, taskId, out error))
+                return false;
+
+            OnlineTaskState playerTask = TaskForPlayer(clientId, task);
+            if (playerTask.Completed)
             {
                 error = "任务已完成";
                 return false;
@@ -2439,9 +2922,16 @@ namespace GanglandUndercover.Online
             if (!IsTaskActiveFor(clientId, taskId, out error))
                 return false;
 
-            // 记录完成
-            SetTask(new OnlineTaskState(task.Id, task.Name, task.Position,
-                task.RequiredProgress, task.RequiredProgress, true, task.Sabotaged));
+            TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+            if (taskSync != null && taskSync.HasAssignments)
+            {
+                taskSync.OnTaskCompleted(clientId, taskId);
+            }
+            else
+            {
+                SetTask(new OnlineTaskState(task.Id, task.Name, task.Position,
+                    task.RequiredProgress, task.RequiredProgress, true, task.Sabotaged));
+            }
 
             // 证据收益
             int gain = 0;
@@ -2450,13 +2940,23 @@ namespace GanglandUndercover.Online
             {
                 OnlineRole role = privateRoles.TryGetValue(clientId, out OnlineRole r) ? r : OnlineRole.Police;
                 OnlineProfession prof = player.Profession;
-                gain = EvidenceGainFor(taskId, prof, role);
-                taskService.AddEvidence(gain, status);
-                lastEvidenceEvent = taskService.LastEvidenceEvent;
+                gain = EvidenceGainFor(taskId, prof, EvidenceRoleForTask(player, role));
+                if (gain > 0)
+                {
+                    taskService.AddEvidence(gain, status);
+                    lastEvidenceEvent = taskService.LastEvidenceEvent;
+                }
+                else
+                {
+                    status = $"{player.DisplayName} 完成了任务：{task.Name}。";
+                }
             }
 
             ReleaseTask(clientId, taskId);
-            syncManager?.OnTaskCompletedLocally(clientId, taskId);
+            if (taskSync == null || !taskSync.HasAssignments)
+            {
+                syncManager?.OnTaskCompletedLocally(clientId, taskId);
+            }
             EvaluateWinConditions();
             BroadcastSnapshot();
 
@@ -2464,7 +2964,10 @@ namespace GanglandUndercover.Online
 
             // M5.5: 证据板记录
             LogEvidence(EvidenceCategory.TaskTrail, $"{player.DisplayName} 完成 {task.Name}", (int)clientId);
-            LogEvidence(EvidenceCategory.EvidenceChain, $"证据链 +{gain}，当前 {EvidenceScore}/{EvidenceTarget}", -1);
+            if (gain > 0)
+            {
+                LogEvidence(EvidenceCategory.EvidenceChain, $"证据链 +{gain}，当前 {EvidenceScore}/{EvidenceTarget}", -1);
+            }
             AddSuspicion(clientId, -2); // 完成任务降低嫌疑
 
             // C3: Wire identity mechanics — undercover/mole intelligence accumulation
@@ -2474,13 +2977,42 @@ namespace GanglandUndercover.Online
             if (privateRole == OnlineRole.Mole)
                 AccumulateMoleIntel(clientId, 1);
 
+            RecordCriticalTaskRepair(clientId, taskId);
+
             // C2-1: Wire EvidenceChain — register task evidence for meeting chain
             RegisterTaskEvidence(taskId, new Vector2(task.Position.x, task.Position.y), clientId);
 
             return true;
         }
 
-        private Dictionary<int, ulong> activeTaskUsers;
+        private bool CanPlayerCompleteAssignedTask(ulong clientId, int taskId, out string reason)
+        {
+            OnlineRole role = GetPrivateRole(clientId);
+            if (role == OnlineRole.Gang)
+            {
+                reason = "黑帮不能完成常规调查任务";
+                return false;
+            }
+
+            TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+            if (taskSync != null && taskSync.HasAssignments && !taskSync.IsTaskAssignedTo(clientId, taskId))
+            {
+                reason = "该任务未分配给你";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
+        }
+
+        private Dictionary<ulong, int> activeTaskByPlayer;
+        private Dictionary<int, ulong> activeRepairUsers;
+
+        internal void ClearActiveTaskLocks()
+        {
+            activeTaskByPlayer?.Clear();
+            activeRepairUsers?.Clear();
+        }
 
         /// <summary>
         /// M5.3: 服务器校验并完成破坏修复。
@@ -2489,6 +3021,12 @@ namespace GanglandUndercover.Online
         {
             if (!TryValidateTaskActor(clientId, taskId, out OnlinePlayerState player, out OnlineTaskState task, out error))
                 return false;
+
+            if (GetPrivateRole(clientId) == OnlineRole.Gang)
+            {
+                error = "黑帮不能修复已破坏设施";
+                return false;
+            }
 
             if (!task.Sabotaged)
             {
@@ -2532,9 +3070,9 @@ namespace GanglandUndercover.Online
                 return false;
             }
 
-            if (!player.Alive)
+            if (!player.Alive && !CanGhostCompleteTasks(clientId, player))
             {
-                reason = "玩家已死亡";
+                reason = "该鬼魂不能继续执行任务";
                 return false;
             }
 
@@ -2558,32 +3096,58 @@ namespace GanglandUndercover.Online
             return true;
         }
 
-        private bool IsTaskLockedByAnotherPlayer(ulong clientId, int taskId, out string reason)
+        private bool CanGhostCompleteTasks(ulong clientId, OnlinePlayerState player)
+        {
+            if (player.Alive)
+            {
+                return false;
+            }
+
+            OnlineRole role = GetPrivateRole(clientId);
+            return role == OnlineRole.Police
+                || role == OnlineRole.Undercover && HasBetrayed(clientId);
+        }
+
+        private bool IsPlayerHandlingAnotherTask(ulong clientId, int taskId, out string reason)
         {
             reason = string.Empty;
-            if (activeTaskUsers != null
-                && activeTaskUsers.TryGetValue(taskId, out ulong owner)
-                && owner != clientId)
+            if (activeTaskByPlayer != null
+                && activeTaskByPlayer.TryGetValue(clientId, out int activeTaskId)
+                && activeTaskId != taskId)
             {
-                reason = "任务由其他玩家处理中";
+                reason = "你正在处理另一项任务";
                 return true;
             }
 
             return false;
         }
 
+        private bool IsRepairLockedByAnotherPlayer(ulong clientId, int taskId, out string reason)
+        {
+            reason = string.Empty;
+            if (activeRepairUsers != null
+                && activeRepairUsers.TryGetValue(taskId, out ulong owner)
+                && owner != clientId)
+            {
+                reason = "该设施正由其他玩家修复";
+                return true;
+            }
+
+            return IsPlayerHandlingAnotherTask(clientId, taskId, out reason);
+        }
+
         private bool IsTaskActiveFor(ulong clientId, int taskId, out string reason)
         {
             reason = string.Empty;
-            if (activeTaskUsers == null || !activeTaskUsers.TryGetValue(taskId, out ulong owner))
+            if (activeTaskByPlayer == null || !activeTaskByPlayer.TryGetValue(clientId, out int activeTaskId))
             {
                 reason = "任务未开始";
                 return false;
             }
 
-            if (owner != clientId)
+            if (activeTaskId != taskId)
             {
-                reason = "任务由其他玩家处理中";
+                reason = "你正在处理另一项任务";
                 return false;
             }
 
@@ -2697,6 +3261,11 @@ namespace GanglandUndercover.Online
 
         private int EvidenceGainFor(int taskId, OnlineProfession profession, OnlineRole role)
         {
+            if (role != OnlineRole.Police)
+            {
+                return 0;
+            }
+
             int gain = Services.EvidenceService.TaskEvidenceValue(taskId);
 
             if (profession == OnlineProfession.Forensics)
@@ -2708,12 +3277,14 @@ namespace GanglandUndercover.Online
             if (ruleSet != null && ruleSet.HasAbility(profession, AbilityType.EvidenceChainBonus))
                 gain = Mathf.RoundToInt(gain * ruleSet.GetAbilityMultiplier(profession, AbilityType.EvidenceChainBonus));
 
-            if (role == OnlineRole.Undercover || profession == OnlineProfession.UndercoverAgent)
-            {
-                gain++;
-            }
-
             return Mathf.Clamp(gain, 1, 5);
+        }
+
+        private static OnlineRole EvidenceRoleForTask(OnlinePlayerState player, OnlineRole privateRole)
+        {
+            return privateRole == OnlineRole.Undercover && player.PublicRole == OnlineRole.Police
+                ? OnlineRole.Police
+                : privateRole;
         }
 
 
@@ -3124,10 +3695,15 @@ namespace GanglandUndercover.Online
 
             phase = OnlineMatchPhase.Lobby;
             matchStarted = false;
+            AudioManager.Instance?.PlayBGM(MusicTrack.MainMenu);
             fullMapPreview = true;
             localRole = OnlineRole.Unassigned;
+            localProfession = OnlineProfession.Inspector;
             privateRoles.Clear();
+            ClearIdentityState();
+            ClearProfessionAbilities();
             votes.Clear();
+            ClearActiveTaskLocks();
             killSystem.Reset();
             abilityCooldowns.Clear();
             serverChatLastSendTimes.Clear();

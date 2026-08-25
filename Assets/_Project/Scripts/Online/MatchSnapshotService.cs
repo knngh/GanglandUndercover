@@ -59,7 +59,7 @@ namespace GanglandUndercover.Online
             snap.MatchElapsedSeconds = _ctrl.matchElapsedSeconds;
 
             // ── 紧急任务 (Phase 2.4) ──
-            _ctrl.WriteCriticalTaskSnapshot(snap);
+            _ctrl.WriteCriticalTaskSnapshot(ref snap);
 
             // ── 玩家状态 ──
             snap.Players = new List<GameStateSnapshot.SnapshotPlayerEntry>(_ctrl.players.Count);
@@ -88,6 +88,8 @@ namespace GanglandUndercover.Online
             {
                 snap.PrivateRoles.Add(new GameStateSnapshot.SnapshotRoleEntry { ClientId = kv.Key, Role = kv.Value });
             }
+            snap.UndercoverStates = _ctrl.UndercoverStatesSnapshot();
+            snap.MoleStates = _ctrl.MoleStatesSnapshot();
 
             // ── 任务 ──
             snap.Tasks = new List<GameStateSnapshot.SnapshotTaskEntry>(_ctrl.tasks.Count);
@@ -100,6 +102,7 @@ namespace GanglandUndercover.Online
                     Completed = t.Completed, Sabotaged = t.Sabotaged,
                 });
             }
+            snap.TaskAssignments = _ctrl.TaskSyncAssignmentsSnapshot();
 
             // ── 尸体 ──
             snap.Bodies = new List<GameStateSnapshot.SnapshotBodyEntry>(_ctrl.killSystem.bodies.Count);
@@ -118,6 +121,8 @@ namespace GanglandUndercover.Online
             {
                 snap.Votes.Add(new GameStateSnapshot.SnapshotVoteEntry { VoterClientId = v.Key, TargetClientId = v.Value });
             }
+
+            snap.Accusations = _ctrl.AccusationsSnapshot();
 
             // ── 案卷 ──
             snap.CaseLog = new List<string>(_ctrl.caseLog);
@@ -144,6 +149,23 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void Restore(GameStateSnapshot snap)
         {
+            ulong localClientId = _ctrl.LocalClientIdValue;
+            OnlineRole localRole = _ctrl.LocalRole;
+            List<GameStateSnapshot.SnapshotUndercoverStateEntry> localUndercoverStates = _ctrl.UndercoverStatesSnapshot();
+            List<GameStateSnapshot.SnapshotMoleStateEntry> localMoleStates = _ctrl.MoleStatesSnapshot();
+            bool snapshotContainsLocalRole = false;
+            if (snap.PrivateRoles != null)
+            {
+                foreach (GameStateSnapshot.SnapshotRoleEntry role in snap.PrivateRoles)
+                {
+                    if (role.ClientId == localClientId)
+                    {
+                        snapshotContainsLocalRole = true;
+                        break;
+                    }
+                }
+            }
+
             // ── 版本兼容性检查 ──
             if (snap.Version != GameStateSnapshot.SNAPSHOT_VERSION)
             {
@@ -156,6 +178,8 @@ namespace GanglandUndercover.Online
             {
                 Debug.LogError("[RestoreFromSnapshot] 快照完整性检查失败，恢复后的状态可能不完整。");
             }
+
+            _ctrl.ClearActiveTaskLocks();
 
             // ── 全局状态 ──
             _ctrl.matchStarted = snap.MatchStarted;
@@ -190,48 +214,75 @@ namespace GanglandUndercover.Online
 
             // ── 玩家状态 ──
             _ctrl.players.Clear();
-            foreach (var p in snap.Players)
+            if (snap.Players != null)
             {
-                var state = new OnlinePlayerState(p.ClientId, p.DisplayName, p.Position, p.Ready, p.Alive, p.PublicRole, p.Profession, p.Suspicion, p.IsBot)
+                foreach (var p in snap.Players)
                 {
-                    Input = p.Input,
-                    KillCooldown = p.KillCooldown,
-                    AbilityCooldown = p.AbilityCooldown,
-                };
-                _ctrl.players[p.ClientId] = state;
+                    var state = new OnlinePlayerState(p.ClientId, p.DisplayName, p.Position, p.Ready, p.Alive, p.PublicRole, p.Profession, p.Suspicion, p.IsBot)
+                    {
+                        Input = p.Input,
+                        KillCooldown = p.KillCooldown,
+                        AbilityCooldown = p.AbilityCooldown,
+                    };
+                    _ctrl.players[p.ClientId] = state;
+                }
             }
 
             // ── 私密角色 ──
             _ctrl.privateRoles.Clear();
-            foreach (var r in snap.PrivateRoles)
+            if (snap.PrivateRoles != null)
             {
-                _ctrl.privateRoles[r.ClientId] = r.Role;
+                foreach (var r in snap.PrivateRoles)
+                {
+                    _ctrl.privateRoles[r.ClientId] = r.Role;
+                }
+            }
+            _ctrl.LoadIdentityStates(snap.UndercoverStates, snap.MoleStates);
+            if (!snapshotContainsLocalRole)
+            {
+                _ctrl.RestoreLocalIdentityIfMissing(localClientId, localRole, localUndercoverStates, localMoleStates);
             }
 
             // ── 任务 ──
             _ctrl.tasks.Clear();
-            foreach (var t in snap.Tasks)
+            if (snap.Tasks != null)
             {
-                _ctrl.tasks.Add(new OnlineTaskState(t.Id, t.Name, t.Position, t.Progress, t.RequiredProgress, t.Completed, t.Sabotaged));
+                foreach (var t in snap.Tasks)
+                {
+                    _ctrl.tasks.Add(new OnlineTaskState(t.Id, t.Name, t.Position, t.Progress, t.RequiredProgress, t.Completed, t.Sabotaged));
+                }
             }
+            _ctrl.LoadTaskSyncAssignments(snap.TaskAssignments ?? new List<GameStateSnapshot.SnapshotTaskAssignmentEntry>());
 
             // ── 尸体 ──
             _ctrl.killSystem.bodies.Clear();
-            foreach (var b in snap.Bodies)
+            if (snap.Bodies != null)
             {
-                _ctrl.killSystem.bodies.Add(new OnlineBodyState(b.Id, b.VictimClientId, b.Position, b.Reported));
+                foreach (var b in snap.Bodies)
+                {
+                    _ctrl.killSystem.bodies.Add(new OnlineBodyState(b.Id, b.VictimClientId, b.Position, b.Reported));
+                }
             }
 
             // ── 投票 ──
             _ctrl.votes.Clear();
-            foreach (var v in snap.Votes)
+            if (snap.Votes != null)
             {
-                _ctrl.votes[v.VoterClientId] = v.TargetClientId;
+                foreach (var v in snap.Votes)
+                {
+                    _ctrl.votes[v.VoterClientId] = v.TargetClientId;
+                }
             }
+
+            // ── 会议指证 ──
+            _ctrl.LoadAccusations(snap.Accusations);
 
             // ── 案卷 ──
             _ctrl.caseLog.Clear();
-            _ctrl.caseLog.AddRange(snap.CaseLog);
+            if (snap.CaseLog != null)
+            {
+                _ctrl.caseLog.AddRange(snap.CaseLog);
+            }
 
             // ── 冷却 ──
             OnlineMatchUtils.ListToCooldowns(_ctrl.killSystem.killCooldowns, snap.KillCooldowns);
@@ -247,9 +298,12 @@ namespace GanglandUndercover.Online
 
             // ── Bot 目标 ──
             _ctrl.botController.ClearTargets();
-            foreach (var bt in snap.BotTargets)
+            if (snap.BotTargets != null)
             {
-                _ctrl.botController.SetTarget(bt.ClientId, bt.Target);
+                foreach (var bt in snap.BotTargets)
+                {
+                    _ctrl.botController.SetTarget(bt.ClientId, bt.Target);
+                }
             }
 
             // ── 紧急任务 (Phase 2.4) ──

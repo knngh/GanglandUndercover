@@ -15,7 +15,7 @@ namespace GanglandUndercover.Online
         /// 快照格式版本号。每次序列化格式变更时递增。
         /// 当前版本覆盖：玩家位置/角色/任务/破坏timer/会议/票数/鬼魂状态。
         /// </summary>
-        public const int SNAPSHOT_VERSION = 2;
+        public const int SNAPSHOT_VERSION = 7;
 
         // ── 版本 ──
         public int Version;
@@ -56,17 +56,23 @@ namespace GanglandUndercover.Online
         public bool CriticalTaskActive;
         public byte CriticalTaskType;
         public float CriticalTaskTimeRemaining;
+        public List<int> CriticalEvidenceRepairStations;
+        public float GangPositionRevealTimeRemaining;
 
         // ── 玩家状态 ──
         public List<SnapshotPlayerEntry> Players;
 
         // ── 私密角色 ──
         public List<SnapshotRoleEntry> PrivateRoles;
+        public List<SnapshotUndercoverStateEntry> UndercoverStates;
+        public List<SnapshotMoleStateEntry> MoleStates;
 
         // ── 任务 / 尸体 / 投票 / 案卷 ──
         public List<SnapshotTaskEntry> Tasks;
+        public List<SnapshotTaskAssignmentEntry> TaskAssignments;
         public List<SnapshotBodyEntry> Bodies;
         public List<SnapshotVoteEntry> Votes;
+        public List<SnapshotAccusationEntry> Accusations;
         public List<string> CaseLog;
 
         // ── 冷却 ──
@@ -108,6 +114,35 @@ namespace GanglandUndercover.Online
             public bool Sabotaged;
         }
 
+        public struct SnapshotTaskAssignmentEntry
+        {
+            public ulong ClientId;
+            public int TaskId;
+            public int Progress;
+            public int RequiredProgress;
+            public bool Completed;
+        }
+
+        public struct SnapshotUndercoverStateEntry
+        {
+            public ulong ClientId;
+            public int Intel;
+            public int MissionsDone;
+            public bool Betrayed;
+        }
+
+        public struct SnapshotMoleStateEntry
+        {
+            public ulong ClientId;
+            public int Intel;
+            public bool HasHitTarget;
+            public ulong HitTargetClientId;
+            public bool Exposed;
+            public int Kills;
+            public int Sabotages;
+            public bool SurvivedTilLate;
+        }
+
         public struct SnapshotBodyEntry
         {
             public int Id;
@@ -125,6 +160,12 @@ namespace GanglandUndercover.Online
         public struct SnapshotVoteEntry
         {
             public ulong VoterClientId;
+            public ulong TargetClientId;
+        }
+
+        public struct SnapshotAccusationEntry
+        {
+            public ulong AccuserClientId;
             public ulong TargetClientId;
         }
 
@@ -151,9 +192,14 @@ namespace GanglandUndercover.Online
             {
                 Players = new List<SnapshotPlayerEntry>(),
                 PrivateRoles = new List<SnapshotRoleEntry>(),
+                UndercoverStates = new List<SnapshotUndercoverStateEntry>(),
+                MoleStates = new List<SnapshotMoleStateEntry>(),
                 Tasks = new List<SnapshotTaskEntry>(),
+                TaskAssignments = new List<SnapshotTaskAssignmentEntry>(),
+                CriticalEvidenceRepairStations = new List<int>(),
                 Bodies = new List<SnapshotBodyEntry>(),
                 Votes = new List<SnapshotVoteEntry>(),
+                Accusations = new List<SnapshotAccusationEntry>(),
                 CaseLog = new List<string>(),
                 KillCooldowns = new List<SnapshotCooldownEntry>(),
                 AbilityCooldowns = new List<SnapshotCooldownEntry>(),
@@ -209,6 +255,13 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(CriticalTaskActive);
             writer.WriteValueSafe(CriticalTaskType);
             writer.WriteValueSafe(CriticalTaskTimeRemaining);
+            List<int> repairStations = CriticalEvidenceRepairStations ?? new List<int>();
+            writer.WriteValueSafe(repairStations.Count);
+            foreach (int stationId in repairStations)
+            {
+                writer.WriteValueSafe(stationId);
+            }
+            writer.WriteValueSafe(GangPositionRevealTimeRemaining);
 
             // ── 玩家列表 ──
             writer.WriteValueSafe(Players.Count);
@@ -225,14 +278,48 @@ namespace GanglandUndercover.Online
                 writer.WriteValueSafe((int)r.Role);
             }
 
+            List<SnapshotUndercoverStateEntry> undercoverStates = UndercoverStates ?? new List<SnapshotUndercoverStateEntry>();
+            writer.WriteValueSafe(undercoverStates.Count);
+            foreach (SnapshotUndercoverStateEntry state in undercoverStates)
+            {
+                writer.WriteValueSafe(state.ClientId);
+                writer.WriteValueSafe(state.Intel);
+                writer.WriteValueSafe(state.MissionsDone);
+                writer.WriteValueSafe(state.Betrayed);
+            }
+
+            List<SnapshotMoleStateEntry> moleStates = MoleStates ?? new List<SnapshotMoleStateEntry>();
+            writer.WriteValueSafe(moleStates.Count);
+            foreach (SnapshotMoleStateEntry state in moleStates)
+            {
+                writer.WriteValueSafe(state.ClientId);
+                writer.WriteValueSafe(state.Intel);
+                writer.WriteValueSafe(state.HasHitTarget);
+                writer.WriteValueSafe(state.HitTargetClientId);
+                writer.WriteValueSafe(state.Exposed);
+                writer.WriteValueSafe(state.Kills);
+                writer.WriteValueSafe(state.Sabotages);
+                writer.WriteValueSafe(state.SurvivedTilLate);
+            }
+
             // ── 任务 ──
             SnapshotIO.WriteTasksMigration(writer, Tasks);
+            SnapshotIO.WriteTaskAssignments(writer, TaskAssignments ?? new List<SnapshotTaskAssignmentEntry>());
 
             // ── 尸体 ──
             SnapshotIO.WriteBodies(writer, Bodies);
 
             // ── 投票 ──
             SnapshotIO.WriteVotes(writer, Votes);
+
+            // ── 会议指证（v6） ──
+            List<SnapshotAccusationEntry> accusations = Accusations ?? new List<SnapshotAccusationEntry>();
+            writer.WriteValueSafe(accusations.Count);
+            foreach (SnapshotAccusationEntry accusation in accusations)
+            {
+                writer.WriteValueSafe(accusation.AccuserClientId);
+                writer.WriteValueSafe(accusation.TargetClientId);
+            }
 
             // ── 案卷 ──
             SnapshotIO.WriteCaseLog(writer, CaseLog);
@@ -346,6 +433,27 @@ namespace GanglandUndercover.Online
             snap.CriticalTaskActive = criticalTaskActive;
             snap.CriticalTaskType = criticalTaskType;
             snap.CriticalTaskTimeRemaining = criticalTaskTimeRemaining;
+            snap.CriticalEvidenceRepairStations = new List<int>();
+            snap.GangPositionRevealTimeRemaining = 0f;
+            if (snapshotVersion >= 7)
+            {
+                reader.ReadValueSafe(out int repairStationCount);
+                if (repairStationCount < 0 || repairStationCount > 2)
+                {
+                    Debug.LogWarning($"[GameStateSnapshot] 非法紧急修复站数量: {repairStationCount}。");
+                    return snap;
+                }
+                for (int i = 0; i < repairStationCount; i++)
+                {
+                    reader.ReadValueSafe(out int stationId);
+                    if (stationId >= 0)
+                    {
+                        snap.CriticalEvidenceRepairStations.Add(stationId);
+                    }
+                }
+                reader.ReadValueSafe(out float gangPositionRevealTimeRemaining);
+                snap.GangPositionRevealTimeRemaining = Mathf.Max(0f, gangPositionRevealTimeRemaining);
+            }
 
             // ── 玩家列表 ──
             reader.ReadValueSafe(out int playerCount);
@@ -365,9 +473,70 @@ namespace GanglandUndercover.Online
                 snap.PrivateRoles.Add(new SnapshotRoleEntry { ClientId = clientId, Role = (OnlineRole)roleValue });
             }
 
+            snap.UndercoverStates = new List<SnapshotUndercoverStateEntry>();
+            snap.MoleStates = new List<SnapshotMoleStateEntry>();
+            if (snapshotVersion >= 5)
+            {
+                reader.ReadValueSafe(out int undercoverStateCount);
+                snap.UndercoverStates = new List<SnapshotUndercoverStateEntry>(undercoverStateCount);
+                for (int i = 0; i < undercoverStateCount; i++)
+                {
+                    reader.ReadValueSafe(out ulong clientId);
+                    reader.ReadValueSafe(out int intel);
+                    reader.ReadValueSafe(out int missionsDone);
+                    reader.ReadValueSafe(out bool betrayed);
+                    snap.UndercoverStates.Add(new SnapshotUndercoverStateEntry
+                    {
+                        ClientId = clientId,
+                        Intel = intel,
+                        MissionsDone = missionsDone,
+                        Betrayed = betrayed,
+                    });
+                }
+
+                reader.ReadValueSafe(out int moleStateCount);
+                snap.MoleStates = new List<SnapshotMoleStateEntry>(moleStateCount);
+                for (int i = 0; i < moleStateCount; i++)
+                {
+                    reader.ReadValueSafe(out ulong clientId);
+                    reader.ReadValueSafe(out int intel);
+                    reader.ReadValueSafe(out bool hasHitTarget);
+                    reader.ReadValueSafe(out ulong hitTargetClientId);
+                    reader.ReadValueSafe(out bool exposed);
+                    reader.ReadValueSafe(out int kills);
+                    reader.ReadValueSafe(out int sabotages);
+                    reader.ReadValueSafe(out bool survivedTilLate);
+                    snap.MoleStates.Add(new SnapshotMoleStateEntry
+                    {
+                        ClientId = clientId,
+                        Intel = intel,
+                        HasHitTarget = hasHitTarget,
+                        HitTargetClientId = hitTargetClientId,
+                        Exposed = exposed,
+                        Kills = kills,
+                        Sabotages = sabotages,
+                        SurvivedTilLate = survivedTilLate,
+                    });
+                }
+            }
+
             // ── 任务 ──
             reader.ReadValueSafe(out int taskCount);
             snap.Tasks = SnapshotIO.ReadTasksAsEntries(reader, taskCount);
+            if (snapshotVersion >= 4)
+            {
+                reader.ReadValueSafe(out int taskAssignmentCount);
+                snap.TaskAssignments = SnapshotIO.ReadTaskAssignments(reader, taskAssignmentCount);
+            }
+            else if (snapshotVersion >= 3)
+            {
+                reader.ReadValueSafe(out int taskAssignmentCount);
+                snap.TaskAssignments = SnapshotIO.ReadLegacyTaskAssignments(reader, taskAssignmentCount);
+            }
+            else
+            {
+                snap.TaskAssignments = new List<SnapshotTaskAssignmentEntry>();
+            }
 
             // ── 尸体 ──
             reader.ReadValueSafe(out int bodyCount);
@@ -376,6 +545,24 @@ namespace GanglandUndercover.Online
             // ── 投票 ──
             reader.ReadValueSafe(out int voteCount);
             snap.Votes = SnapshotIO.ReadVotesAsEntries(reader, voteCount);
+
+            // ── 会议指证（v6） ──
+            snap.Accusations = new List<SnapshotAccusationEntry>();
+            if (snapshotVersion >= 6)
+            {
+                reader.ReadValueSafe(out int accusationCount);
+                snap.Accusations = new List<SnapshotAccusationEntry>(accusationCount);
+                for (int i = 0; i < accusationCount; i++)
+                {
+                    reader.ReadValueSafe(out ulong accuserClientId);
+                    reader.ReadValueSafe(out ulong targetClientId);
+                    snap.Accusations.Add(new SnapshotAccusationEntry
+                    {
+                        AccuserClientId = accuserClientId,
+                        TargetClientId = targetClientId,
+                    });
+                }
+            }
 
             // ── 案卷 ──
             reader.ReadValueSafe(out int caseLogCount);
@@ -446,6 +633,11 @@ namespace GanglandUndercover.Online
                 return false;
             }
 
+            if (CriticalEvidenceRepairStations == null)
+            {
+                CriticalEvidenceRepairStations = new List<int>();
+            }
+
             // 对局已开始但无玩家视为异常
             if (MatchStarted && Players.Count == 0)
             {
@@ -458,6 +650,26 @@ namespace GanglandUndercover.Online
             {
                 Debug.LogError("[GameStateSnapshot] IsValid 失败: 对局已开始但任务数为 0");
                 return false;
+            }
+
+            if (TaskAssignments == null)
+            {
+                TaskAssignments = new List<SnapshotTaskAssignmentEntry>();
+            }
+
+            if (Accusations == null)
+            {
+                Accusations = new List<SnapshotAccusationEntry>();
+            }
+
+            if (UndercoverStates == null)
+            {
+                UndercoverStates = new List<SnapshotUndercoverStateEntry>();
+            }
+
+            if (MoleStates == null)
+            {
+                MoleStates = new List<SnapshotMoleStateEntry>();
             }
 
             // Version 必须 >= 1
@@ -492,6 +704,25 @@ namespace GanglandUndercover.Online
                 mismatches.Add($"EmergencyMeetingsLeft: {EmergencyMeetingsLeft} vs {other.EmergencyMeetingsLeft}");
             if (EvidenceMilestoneIndex != other.EvidenceMilestoneIndex)
                 mismatches.Add($"EvidenceMilestoneIndex: {EvidenceMilestoneIndex} vs {other.EvidenceMilestoneIndex}");
+            if (CriticalTaskActive != other.CriticalTaskActive
+                || CriticalTaskType != other.CriticalTaskType
+                || Mathf.Abs(CriticalTaskTimeRemaining - other.CriticalTaskTimeRemaining) > 0.01f
+                || Mathf.Abs(GangPositionRevealTimeRemaining - other.GangPositionRevealTimeRemaining) > 0.01f)
+            {
+                mismatches.Add("CriticalTask state differs");
+            }
+            int criticalRepairStationCount = CriticalEvidenceRepairStations?.Count ?? 0;
+            int otherCriticalRepairStationCount = other.CriticalEvidenceRepairStations?.Count ?? 0;
+            if (criticalRepairStationCount != otherCriticalRepairStationCount)
+            {
+                mismatches.Add($"CriticalRepairStationCount: {criticalRepairStationCount} vs {otherCriticalRepairStationCount}");
+            }
+            else if (criticalRepairStationCount > 0
+                && !new HashSet<int>(CriticalEvidenceRepairStations)
+                    .SetEquals(other.CriticalEvidenceRepairStations))
+            {
+                mismatches.Add("CriticalRepairStations differ");
+            }
 
             // 玩家数量与关键状态
             if (Players?.Count != other.Players?.Count)
@@ -537,6 +768,73 @@ namespace GanglandUndercover.Online
             // 投票
             if (Votes?.Count != other.Votes?.Count)
                 mismatches.Add($"VoteCount: {Votes?.Count ?? 0} vs {other.Votes?.Count ?? 0}");
+
+            // 会议指证
+            if (Accusations?.Count != other.Accusations?.Count)
+                mismatches.Add($"AccusationCount: {Accusations?.Count ?? 0} vs {other.Accusations?.Count ?? 0}");
+
+            if (TaskAssignments?.Count != other.TaskAssignments?.Count)
+            {
+                mismatches.Add($"TaskAssignmentCount: {TaskAssignments?.Count ?? 0} vs {other.TaskAssignments?.Count ?? 0}");
+            }
+            else if (TaskAssignments != null && other.TaskAssignments != null)
+            {
+                for (int i = 0; i < TaskAssignments.Count; i++)
+                {
+                    if (TaskAssignments[i].ClientId != other.TaskAssignments[i].ClientId
+                        || TaskAssignments[i].TaskId != other.TaskAssignments[i].TaskId
+                        || TaskAssignments[i].Progress != other.TaskAssignments[i].Progress
+                        || TaskAssignments[i].RequiredProgress != other.TaskAssignments[i].RequiredProgress
+                        || TaskAssignments[i].Completed != other.TaskAssignments[i].Completed)
+                    {
+                        mismatches.Add($"TaskAssignment[{i}] differs");
+                    }
+                }
+            }
+
+            if (UndercoverStates?.Count != other.UndercoverStates?.Count)
+            {
+                mismatches.Add($"UndercoverStateCount: {UndercoverStates?.Count ?? 0} vs {other.UndercoverStates?.Count ?? 0}");
+            }
+            else if (UndercoverStates != null && other.UndercoverStates != null)
+            {
+                for (int i = 0; i < UndercoverStates.Count; i++)
+                {
+                    SnapshotUndercoverStateEntry a = UndercoverStates[i];
+                    SnapshotUndercoverStateEntry b = other.UndercoverStates[i];
+                    if (a.ClientId != b.ClientId
+                        || a.Intel != b.Intel
+                        || a.MissionsDone != b.MissionsDone
+                        || a.Betrayed != b.Betrayed)
+                    {
+                        mismatches.Add($"UndercoverState[{i}] differs");
+                    }
+                }
+            }
+
+            if (MoleStates?.Count != other.MoleStates?.Count)
+            {
+                mismatches.Add($"MoleStateCount: {MoleStates?.Count ?? 0} vs {other.MoleStates?.Count ?? 0}");
+            }
+            else if (MoleStates != null && other.MoleStates != null)
+            {
+                for (int i = 0; i < MoleStates.Count; i++)
+                {
+                    SnapshotMoleStateEntry a = MoleStates[i];
+                    SnapshotMoleStateEntry b = other.MoleStates[i];
+                    if (a.ClientId != b.ClientId
+                        || a.Intel != b.Intel
+                        || a.HasHitTarget != b.HasHitTarget
+                        || a.HitTargetClientId != b.HitTargetClientId
+                        || a.Exposed != b.Exposed
+                        || a.Kills != b.Kills
+                        || a.Sabotages != b.Sabotages
+                        || a.SurvivedTilLate != b.SurvivedTilLate)
+                    {
+                        mismatches.Add($"MoleState[{i}] differs");
+                    }
+                }
+            }
 
             // 案卷数量
             if (CaseLog?.Count != other.CaseLog?.Count)

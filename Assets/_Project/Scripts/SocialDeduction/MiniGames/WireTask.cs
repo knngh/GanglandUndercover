@@ -71,6 +71,20 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             panelRT.offsetMin = Vector2.zero;
             panelRT.offsetMax = Vector2.zero;
 
+            // 优先使用 Resources 面板背景 sprite
+            var panelBgSprite = GanglandUndercover.Art.MinigameArtCache.WirePanelBg
+                             ?? GanglandUndercover.Art.MinigameArtCache.PanelBackground;
+            if (panelBgSprite != null)
+            {
+                var panelImg = panel.GetComponent<Image>();
+                if (panelImg != null)
+                {
+                    panelImg.sprite = panelBgSprite;
+                    panelImg.type = Image.Type.Sliced;
+                    panelImg.color = Color.white;
+                }
+            }
+
             // 标题
             CreateLabel(canvasObj, "标题：连接相同颜色的线", 24, new Vector2(0.5f, 0.92f), new Vector2(0.5f, 0.92f));
 
@@ -119,7 +133,20 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             endpoint.transform.SetParent(parent.transform);
 
             Image img = endpoint.AddComponent<Image>();
-            img.color = color;
+
+            // 优先使用 Resources sprite，回退纯色
+            Sprite nodeSprite = GanglandUndercover.Art.MinigameArtCache.WireNodeForColor(color);
+            if (nodeSprite != null)
+            {
+                img.sprite = nodeSprite;
+                img.color = Color.white;
+                img.type = Image.Type.Simple;
+                img.preserveAspect = true;
+            }
+            else
+            {
+                img.color = color;
+            }
 
             Button btn = endpoint.AddComponent<Button>();
             ColorBlock cb = btn.colors;

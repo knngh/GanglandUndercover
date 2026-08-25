@@ -14,7 +14,7 @@ namespace GanglandUndercover.Tests
             ArtAssetReadinessReport.Summary summary = ArtAssetReadinessReport.BuildSummary();
 
             Assert.IsTrue(summary.IsReady, ArtAssetReadinessReport.ToMarkdown(summary));
-            Assert.AreEqual(373, summary.RuntimeSpritePngCount);
+            Assert.AreEqual(392, summary.RuntimeSpritePngCount);
             Assert.AreEqual(summary.RuntimeSpritePngCount, summary.RuntimeSpriteMetaCount);
             Assert.AreEqual(0, summary.MisconfiguredSpriteImportCount);
             Assert.AreEqual(5, summary.RuntimeMapPropSpriteCount);
@@ -24,7 +24,8 @@ namespace GanglandUndercover.Tests
             Assert.AreEqual(0, summary.CharacterSpriteDimensionMismatchCount);
             Assert.AreEqual(64, summary.VfxFrameCount);
             Assert.AreEqual(0, summary.VfxFrameDimensionMismatchCount);
-            Assert.AreEqual(4, summary.UiSpriteCount);
+            Assert.AreEqual(20, summary.UiSpriteCount);
+            StringAssert.Contains("Quarantined watermarked draft PNG | 59", ArtAssetReadinessReport.ToMarkdown(summary));
         }
 
         [Test]
@@ -63,8 +64,66 @@ namespace GanglandUndercover.Tests
             StringAssert.Contains("Character polish", markdown);
             StringAssert.Contains("Map polish", markdown);
             StringAssert.Contains("VFX polish", markdown);
+            StringAssert.Contains("blackout, comms jam, door lock, patrol alert", markdown);
             StringAssert.Contains("UI polish", markdown);
             StringAssert.Contains("VFX frame dimension mismatch", markdown);
+            StringAssert.Contains("watermarked draft", markdown);
+        }
+
+        [Test]
+        public void RuntimeUiSkin_UsesCleanNoirAssets()
+        {
+            UIArtCache.ClearCache();
+            UIArtCache.Ensure();
+
+            Assert.IsNotNull(UIArtCache.ButtonNormal);
+            Assert.IsNotNull(UIArtCache.PanelFrame);
+            Assert.IsNotNull(UIArtCache.MeetingTableBg);
+            Assert.IsNotNull(UIArtCache.VoteCard);
+            Assert.IsNotNull(UIArtCache.ProgressBar);
+            Assert.AreEqual("button_noir_clean", UIArtCache.ButtonNormal.texture.name);
+            Assert.AreEqual("panel_noir_clean", UIArtCache.PanelFrame.texture.name);
+            Assert.AreEqual("meeting_panel_clean", UIArtCache.MeetingTableBg.texture.name);
+            Assert.AreEqual("vote_card_clean", UIArtCache.VoteCard.texture.name);
+            Assert.AreEqual("progress_clean", UIArtCache.ProgressBar.texture.name);
+            Assert.AreEqual(UnityEngine.FilterMode.Point, UIArtCache.PanelFrame.texture.filterMode);
+            Assert.AreNotEqual(UnityEngine.Vector4.zero, UIArtCache.PanelFrame.border);
+            Assert.AreNotEqual(UnityEngine.Vector4.zero, UIArtCache.ButtonNormal.border);
+        }
+
+        [Test]
+        public void RuntimeUiIconBatch_UsesReviewedCleanAssets()
+        {
+            UIArtCache.ClearCache();
+            UIArtCache.Ensure();
+
+            UnityEngine.Sprite[] icons =
+            {
+                UIArtCache.IconSabotageBlackout,
+                UIArtCache.IconSabotageLockdown,
+                UIArtCache.IconSabotageCommJam,
+                UIArtCache.IconSabotageEvidence,
+                UIArtCache.IconSabotagePatrol,
+                UIArtCache.IconTaskWire,
+                UIArtCache.IconTaskKeypad,
+                UIArtCache.IconTaskScan,
+                UIArtCache.IconTaskDownload,
+                UIArtCache.IconTaskMemory,
+                UIArtCache.IconTaskSwipe,
+            };
+
+            Assert.AreEqual(11, icons.Length);
+            foreach (UnityEngine.Sprite icon in icons)
+            {
+                Assert.IsNotNull(icon);
+                StringAssert.EndsWith("_clean", icon.texture.name);
+                Assert.AreEqual(64, icon.texture.width);
+                Assert.AreEqual(64, icon.texture.height);
+                Assert.AreEqual(UnityEngine.FilterMode.Point, icon.texture.filterMode);
+            }
+
+            Assert.AreSame(UIArtCache.IconSabotageCommJam, UIArtCache.SabotageIcon(SabotageType.Communications.ToString()));
+            Assert.AreSame(UIArtCache.IconSabotagePatrol, UIArtCache.SabotageIcon(SabotageType.PatrolAlert.ToString()));
         }
     }
 }

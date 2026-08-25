@@ -82,6 +82,10 @@ namespace GanglandUndercover.SocialDeduction
         // ─── O2 状态 ──────────────────────────────────
         public float O2Progress { get; private set; }
 
+        // ─── 在线紧急任务状态 ─────────────────────────
+        private readonly HashSet<int> evidenceRepairStations = new HashSet<int>();
+        public int EvidenceRepairStationCount => evidenceRepairStations.Count;
+
         // ─── Reactor 状态 ─────────────────────────────
         private bool reactorButtonAHeld;
         private bool reactorButtonBHeld;
@@ -116,37 +120,7 @@ namespace GanglandUndercover.SocialDeduction
                 return;
             }
 
-            ActiveType = type;
-            State = CriticalTaskState.Active;
-
-            switch (type)
-            {
-                case CriticalTaskType.O2:
-                    TotalTime = O2TimeLimit;
-                    O2Progress = 0f;
-                    break;
-                case CriticalTaskType.Reactor:
-                    TotalTime = ReactorTimeLimit;
-                    reactorButtonAHeld = false;
-                    reactorButtonBHeld = false;
-                    reactorSimultaneousTimer = 0f;
-                    reactorSuccessCount = 0;
-                    break;
-                case CriticalTaskType.EvidenceDestruction:
-                    TotalTime = EvidenceDestructionTimeLimit;
-                    O2Progress = 0f; // 复用进度条
-                    break;
-                case CriticalTaskType.PoliceReinforcement:
-                    TotalTime = PoliceReinforcementTimeLimit;
-                    reactorButtonAHeld = false;
-                    reactorButtonBHeld = false;
-                    reactorSimultaneousTimer = 0f;
-                    reactorSuccessCount = 0;
-                    break;
-            }
-
-            TimeRemaining = TotalTime;
-            ShowAlarmOverlay();
+            ActivateTask(type);
             AudioManager.Instance?.PlaySFX(SoundEffect.Emergency);
 
             OnCriticalTaskStarted?.Invoke(type);
@@ -163,6 +137,61 @@ namespace GanglandUndercover.SocialDeduction
             {
                 Complete();
             }
+        }
+
+        /// <summary>
+        /// 在线证据销毁修复入口。每个独立站点只能计入一次，两个站点都完成后任务成功。
+        /// 服务器负责校验玩家身份、距离和站点合法性，本组件只维护紧急任务状态。
+        /// </summary>
+        public bool SubmitEvidenceRepair(int stationId)
+        {
+            if (State != CriticalTaskState.Active || ActiveType != CriticalTaskType.EvidenceDestruction
+                || stationId < 0 || !evidenceRepairStations.Add(stationId))
+            {
+                return false;
+            }
+
+            O2Progress = Mathf.Clamp01(evidenceRepairStations.Count / 2f);
+            if (evidenceRepairStations.Count >= 2)
+            {
+                Complete();
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 在线警方增援入口。通讯塔破坏成功后由服务器调用。
+        /// </summary>
+        public bool SubmitPoliceReinforcementSabotage()
+        {
+            if (State != CriticalTaskState.Active || ActiveType != CriticalTaskType.PoliceReinforcement)
+            {
+                return false;
+            }
+
+            Complete();
+            return true;
+        }
+
+        /// <summary>
+        /// 恢复主机迁移快照中的活动紧急任务，不重复触发开始事件。
+        /// </summary>
+        public void RestoreActive(CriticalTaskType type, float remaining)
+        {
+            if (type == CriticalTaskType.None || remaining <= 0f)
+            {
+                Cancel();
+                return;
+            }
+
+            if (State != CriticalTaskState.Inactive)
+            {
+                Cancel();
+            }
+
+            ActivateTask(type);
+            TimeRemaining = Mathf.Clamp(remaining, 0f, TotalTime);
         }
 
         /// <summary>Reactor 按钮 A 按住/松开。</summary>
@@ -187,11 +216,53 @@ namespace GanglandUndercover.SocialDeduction
             if (State == CriticalTaskState.Inactive) return;
             State = CriticalTaskState.Inactive;
             ActiveType = CriticalTaskType.None;
+            evidenceRepairStations.Clear();
+            O2Progress = 0f;
             HideAlarmOverlay();
             Debug.Log("[CriticalTaskSystem] 紧急任务已取消。");
         }
 
         // ─── 内部逻辑 ────────────────────────────────
+
+        private void ActivateTask(CriticalTaskType type)
+        {
+            ActiveType = type;
+            State = CriticalTaskState.Active;
+            evidenceRepairStations.Clear();
+            O2Progress = 0f;
+
+            switch (type)
+            {
+                case CriticalTaskType.O2:
+                    TotalTime = O2TimeLimit;
+                    break;
+                case CriticalTaskType.Reactor:
+                    TotalTime = ReactorTimeLimit;
+                    ResetReactorState();
+                    break;
+                case CriticalTaskType.EvidenceDestruction:
+                    TotalTime = EvidenceDestructionTimeLimit;
+                    break;
+                case CriticalTaskType.PoliceReinforcement:
+                    TotalTime = PoliceReinforcementTimeLimit;
+                    ResetReactorState();
+                    break;
+                default:
+                    TotalTime = 0f;
+                    break;
+            }
+
+            TimeRemaining = TotalTime;
+            ShowAlarmOverlay();
+        }
+
+        private void ResetReactorState()
+        {
+            reactorButtonAHeld = false;
+            reactorButtonBHeld = false;
+            reactorSimultaneousTimer = 0f;
+            reactorSuccessCount = 0;
+        }
 
         private void CheckReactorSimultaneous()
         {
@@ -312,7 +383,14 @@ namespace GanglandUndercover.SocialDeduction
         {
             if (alarmOverlay != null)
             {
-                Destroy(alarmOverlay);
+                if (Application.isPlaying)
+                {
+                    Destroy(alarmOverlay);
+                }
+                else
+                {
+                    DestroyImmediate(alarmOverlay);
+                }
                 alarmOverlay = null;
                 alarmMaterial = null;
             }

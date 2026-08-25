@@ -241,8 +241,8 @@ namespace GanglandUndercover.PlayTests
 
         private bool TaskLockOwnedBy(int taskId, ulong clientId)
         {
-            IDictionary locks = GetField("activeTaskUsers") as IDictionary;
-            return locks != null && locks.Contains(taskId) && (ulong)locks[taskId] == clientId;
+            IDictionary locks = GetField("activeTaskByPlayer") as IDictionary;
+            return locks != null && locks.Contains(clientId) && (int)locks[clientId] == taskId;
         }
 
         private object GetField(string fieldName)

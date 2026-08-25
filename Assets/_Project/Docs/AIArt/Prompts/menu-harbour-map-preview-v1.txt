@@ -1,0 +1,13 @@
+Use case: stylized-concept
+Asset type: production game menu map preview
+Primary request: rain-soaked covert police operation district in a dense East Asian industrial harbour at night, designed as a visual location plate for a tactical social-deduction game
+Scene/backdrop: cargo docks, stacked containers, warehouse roofs, narrow elevated roads, a distant police checkpoint, wet pavement, discreet surveillance equipment, and layered harbour depth
+Subject: the playable 九龙港区 district itself, with a readable main road, cargo yard, market-side buildings, and a small evidence-search light; no prominent character
+Style/medium: premium 2D environment painting with grounded industrial realism, restrained painterly detail, crisp readable silhouettes, compatible with a dark noir UI and purchased 2D tile/prop assets
+Composition/framing: wide 16:9 establishing view, slightly elevated tactical camera, road and district landmarks readable at thumbnail size, darker lower edge for a map label overlay, balanced visual hierarchy
+Lighting/mood: humid rain at night, oxidized teal fog, tungsten dock lamps, restrained red warning lights, tense investigative mood, readable midtones
+Color palette: charcoal, oxidized teal, dirty cyan, tungsten amber, restrained signal red; no dominant purple or electric-blue cyberpunk
+Materials/textures: wet concrete, painted steel, corrugated metal, stained masonry, worn road markings, container surfaces
+Text (verbatim): ""
+Constraints: no logos, no trademarks, no watermark, no UI panels, no interface icons, no readable words, no title text, no close-up faces, no fantasy or science-fiction technology
+Avoid: generic cyberpunk skyline, purple-dominated palette, empty atmospheric alley, blurred stock-photo look, pseudo-Chinese lettering, giant police badge, centered hero character, excessive darkness

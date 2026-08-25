@@ -19,6 +19,20 @@
 *.log
 mono_crash*.json
 
+# Local OS and editor/test artifacts
+.DS_Store
+**/.DS_Store
+/Assets/InitTestScene*.unity
+/Assets/InitTestScene*.unity.meta
+
+# Local Unity MCP/NuGet bridge. Runtime dependencies belong in Packages/.
+/Assets/Plugins.meta
+/Assets/Plugins/NuGet.meta
+/Assets/Plugins/NuGet/
+
+# QA capture output is regenerated locally and documented by markdown reports.
+/Screenshots/
+
 # macOS Apple Double files (especially on exFAT/FAT32 volumes)
 ._*
 

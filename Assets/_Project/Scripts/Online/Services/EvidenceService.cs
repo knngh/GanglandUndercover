@@ -204,6 +204,55 @@ namespace GanglandUndercover.Online.Services
         }
 
         /// <summary>
+        /// 服务端入口：验证并记录一次会议指证。
+        /// 指证只能在讨论阶段提交，且每位存活玩家每轮只能提交一次。
+        /// </summary>
+        public bool TryAccusePlayer(ulong accuserId, ulong targetId)
+        {
+            if (controller == null || controller.Phase != OnlineMatchPhase.Meeting)
+            {
+                return false;
+            }
+
+            if (!controller.Players.TryGetValue(accuserId, out OnlinePlayerState accuser)
+                || !accuser.Alive
+                || accuserId == targetId
+                || accusationTargets.ContainsKey(accuserId))
+            {
+                return false;
+            }
+
+            if (!controller.Players.TryGetValue(targetId, out OnlinePlayerState target) || !target.Alive)
+            {
+                return false;
+            }
+
+            AccusePlayer(accuserId, targetId);
+            return true;
+        }
+
+        /// <summary>检查玩家本轮是否已经提交指证。</summary>
+        public bool HasAccused(ulong accuserId)
+        {
+            return accusationTargets.ContainsKey(accuserId);
+        }
+
+        /// <summary>从权威快照恢复公开指证记录。</summary>
+        public void LoadAccusations(IEnumerable<KeyValuePair<ulong, ulong>> snapshotAccusations)
+        {
+            accusationTargets.Clear();
+            if (snapshotAccusations == null)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<ulong, ulong> accusation in snapshotAccusations)
+            {
+                accusationTargets[accusation.Key] = accusation.Value;
+            }
+        }
+
+        /// <summary>
         /// 清除所有指证（新会议开始时调用）。
         /// </summary>
         public void ClearAccusations()
@@ -310,11 +359,14 @@ namespace GanglandUndercover.Online.Services
         /// </summary>
         public static int EvidenceGainFor(int taskId, OnlineProfession profession, OnlineRole role)
         {
+            if (role != OnlineRole.Police)
+            {
+                return 0;
+            }
+
             int gain = TaskEvidenceValue(taskId);
 
             if (profession == OnlineProfession.Forensics) gain++;
-            if (role == OnlineRole.Undercover || profession == OnlineProfession.UndercoverAgent) gain++;
-
             return Mathf.Clamp(gain, 1, 4);
         }
 
@@ -453,7 +505,10 @@ namespace GanglandUndercover.Online.Services
             if (controller.players.TryGetValue(evt.PlayerId, out OnlinePlayerState player))
             {
                 profession = player.Profession;
-                role = player.PublicRole;
+                OnlineRole privateRole = controller.GetPrivateRole(evt.PlayerId);
+                role = privateRole == OnlineRole.Undercover && player.PublicRole == OnlineRole.Police
+                    ? OnlineRole.Police
+                    : privateRole;
             }
 
             int gain = EvidenceGainFor(evt.TaskIndex, profession, role);

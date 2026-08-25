@@ -72,7 +72,12 @@ namespace GanglandUndercover.Online
         private GameObject taskOverlay;
         private GameObject mapOverlay;
         private GameObject compactActionHud;
+        private GameObject criticalTaskBanner;
         private GameObject chatGroup;
+        private RectTransform rightDockRect;
+        private Image rightDockImage;
+        private VerticalLayoutGroup rightDockLayout;
+        private bool? rightDockCompactMode;
 
         private Text titleText;
         private Text phaseText;
@@ -89,6 +94,7 @@ namespace GanglandUndercover.Online
         private Text footerText;
         private Text meetingTitleText;
         private Text meetingBodyText;
+        private Text meetingActionHeaderText;
         private RectTransform meetingSeatRoot;
         private Text resultTitleText;
         private Text resultBodyText;
@@ -98,9 +104,13 @@ namespace GanglandUndercover.Online
         private Text mapTitleText;
         private Text mapLegendText;
         private Text compactTopText;
+        private Text compactEvidenceText;
+        private Text compactTaskText;
+        private Text compactHazardText;
         private Text compactPromptText;
         private Text compactAbilityText;
         private Text compactActionBarText;
+        private Text criticalTaskBannerText;
         private Text chatTitleText;
         private Text chatFeedText;
         private Text chatInputStatusText;
@@ -116,6 +126,11 @@ namespace GanglandUndercover.Online
         private RectTransform resultSurvivalFill;
         private RectTransform taskProgressFill;
         private RectTransform taskMiniGameRoot;
+        private RectTransform criticalTaskBannerFill;
+        private RectTransform compactEvidenceFill;
+        private RectTransform compactTaskFill;
+        private Image taskStationPreviewImage;
+        private Image compactIdentityAccentImage;
         private RectTransform mapStaticRoot;
         private RectTransform mapMarkerRoot;
 
@@ -155,6 +170,12 @@ namespace GanglandUndercover.Online
         private Button chatReportButton;
         private Button chatBlockButton;
         private Button chatSendButton;
+        private Button compactInteractButton;
+        private Button compactReportButton;
+        private Button compactKillButton;
+        private Button compactAbilityButton;
+        private Button compactMapButton;
+        private Button compactIntelButton;
 
         private Transform voteButtonRoot;
 
@@ -165,7 +186,10 @@ namespace GanglandUndercover.Online
         public int MeetingSeatCanvasElementCount => meetingSeatRoot == null ? 0 : CountNamedChildren(meetingSeatRoot, "Meeting Seat");
         public int MeetingOverlayVisualElementCount => meetingOverlay == null ? 0 : CountNamedChildren(meetingOverlay.transform, "Meeting Visual");
         public int MeetingOverlay2DAssetElementCount => meetingOverlay == null ? 0 : CountImagesWithSprites(meetingOverlay.transform);
+        public int MeetingAccusationButtonCount => meetingOverlay == null ? 0 : CountNamedChildren(meetingOverlay.transform, "Meeting Visual Accusation");
         public int CompactActionHudVisualElementCount => compactActionHud == null ? 0 : CountNamedChildren(compactActionHud.transform, "Compact Visual");
+        public int CompactActionCommandSlotCount => compactActionHud == null ? 0 : CountNamedChildren(compactActionHud.transform, "Compact Visual Command Slot");
+        public bool CompactActionHudActive => compactActionHud != null && compactActionHud.activeSelf;
         public int ButtonSfxFeedbackCount => canvas == null ? 0 : canvas.GetComponentsInChildren<UiButtonSfx>(true).Length;
         public int ChatPanelCanvasElementCount => chatGroup == null ? 0 : CountNamedChildren(chatGroup.transform, "Chat Canvas");
         public int ChatSafetyCanvasActionCount => CountChatSafetyCanvasActions();
@@ -289,7 +313,11 @@ namespace GanglandUndercover.Online
                 && taskOverlay != null
                 && mapOverlay != null
                 && compactActionHud != null
+                && criticalTaskBanner != null
                 && chatGroup != null
+                && rightDockRect != null
+                && rightDockImage != null
+                && rightDockLayout != null
                 && titleText != null
                 && phaseText != null
                 && voiceText != null
@@ -314,9 +342,13 @@ namespace GanglandUndercover.Online
                 && mapTitleText != null
                 && mapLegendText != null
                 && compactTopText != null
+                && compactEvidenceText != null
+                && compactTaskText != null
+                && compactHazardText != null
                 && compactPromptText != null
                 && compactAbilityText != null
                 && compactActionBarText != null
+                && criticalTaskBannerText != null
                 && chatTitleText != null
                 && chatFeedText != null
                 && chatInputStatusText != null
@@ -331,6 +363,10 @@ namespace GanglandUndercover.Online
                 && resultSurvivalFill != null
                 && taskProgressFill != null
                 && taskMiniGameRoot != null
+                && criticalTaskBannerFill != null
+                && compactEvidenceFill != null
+                && compactTaskFill != null
+                && compactIdentityAccentImage != null
                 && mapStaticRoot != null
                 && mapMarkerRoot != null
                 && playerNameInput != null
@@ -366,6 +402,12 @@ namespace GanglandUndercover.Online
                 && chatReportButton != null
                 && chatBlockButton != null
                 && chatSendButton != null
+                && compactInteractButton != null
+                && compactReportButton != null
+                && compactKillButton != null
+                && compactAbilityButton != null
+                && compactMapButton != null
+                && compactIntelButton != null
                 && voteButtonRoot != null;
         }
 
@@ -415,7 +457,12 @@ namespace GanglandUndercover.Online
             taskOverlay = null;
             mapOverlay = null;
             compactActionHud = null;
+            criticalTaskBanner = null;
             chatGroup = null;
+            rightDockRect = null;
+            rightDockImage = null;
+            rightDockLayout = null;
+            rightDockCompactMode = null;
             titleText = null;
             phaseText = null;
             voiceText = null;
@@ -440,9 +487,13 @@ namespace GanglandUndercover.Online
             mapTitleText = null;
             mapLegendText = null;
             compactTopText = null;
+            compactEvidenceText = null;
+            compactTaskText = null;
+            compactHazardText = null;
             compactPromptText = null;
             compactAbilityText = null;
             compactActionBarText = null;
+            criticalTaskBannerText = null;
             chatTitleText = null;
             chatFeedText = null;
             chatInputStatusText = null;
@@ -457,6 +508,11 @@ namespace GanglandUndercover.Online
             resultSurvivalFill = null;
             taskProgressFill = null;
             taskMiniGameRoot = null;
+            criticalTaskBannerFill = null;
+            compactEvidenceFill = null;
+            compactTaskFill = null;
+            taskStationPreviewImage = null;
+            compactIdentityAccentImage = null;
             mapStaticRoot = null;
             mapMarkerRoot = null;
             playerNameInput = null;
@@ -492,12 +548,19 @@ namespace GanglandUndercover.Online
             chatReportButton = null;
             chatBlockButton = null;
             chatSendButton = null;
+            compactInteractButton = null;
+            compactReportButton = null;
+            compactKillButton = null;
+            compactAbilityButton = null;
+            compactMapButton = null;
+            compactIntelButton = null;
             voteButtonRoot = null;
         }
 
         private void BuildLayout()
         {
             EnsureEventSystem();
+            EnsureTaskAssetSprites();
 
             canvas = GetOrAddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceCamera;
@@ -574,6 +637,9 @@ namespace GanglandUndercover.Online
                 new RectOffset(12, 12, 12, 12),
                 10f);
             rightDockGroup = rightDock.gameObject;
+            rightDockRect = rightDock.GetComponent<RectTransform>();
+            rightDockImage = rightDock.GetComponent<Image>();
+            rightDockLayout = rightDock.GetComponent<VerticalLayoutGroup>();
             BuildRightDock(rightDock);
 
             Transform footer = CreateHorizontalPanel(
@@ -712,14 +778,16 @@ namespace GanglandUndercover.Online
 
         private void BuildChatSection(Transform rightDock)
         {
-            Transform chat = CreateSection("文本聊天", rightDock, 300f);
+            Transform chat = CreateSection("文本聊天", rightDock, 264f);
             chat.name = "Chat Canvas Panel";
             chatGroup = chat.gameObject;
+            ApplySpriteSkin(chatGroup, taskPanelSprite, PanelColor);
+            AddAccentEdge(chatGroup, "Chat Canvas Accent", BlueAccent, 3f, true);
 
             chatTitleText = CreateText("Chat Canvas Title", chat, 15, TextAnchor.UpperLeft, AmberAccent);
             AddLayout(chatTitleText.gameObject, 22f, 0f, 0f);
 
-            chatFeedText = CreateScrollText("Chat Canvas Feed", chat, 104f);
+            chatFeedText = CreateScrollText("Chat Canvas Feed", chat, 70f);
 
             chatInput = CreateInputRow(chat, "发言", "输入消息", _ => { });
             chatInput.characterLimit = 256;
@@ -730,12 +798,13 @@ namespace GanglandUndercover.Online
             });
 
             chatInputStatusText = CreateText("Chat Canvas Input Status", chat, 12, TextAnchor.UpperLeft, MutedTextColor);
+            chatInputStatusText.verticalOverflow = VerticalWrapMode.Truncate;
             AddLayout(chatInputStatusText.gameObject, 18f, 0f, 0f);
 
             Transform chatRow = CreateButtonRow(chat, 34f);
-            chatSendButton = CreateButton("发送", chatRow, 34f, SendChatInput);
-            chatReportButton = CreateButton("举报最近", chatRow, 34f, () => controller.RequestReportLatestChatMessage());
-            chatBlockButton = CreateButton("屏蔽最近", chatRow, 34f, () => controller.RequestBlockLatestChatSender());
+            chatSendButton = CreateButton("发送消息", chatRow, 34f, SendChatInput);
+            chatReportButton = CreateButton("举报", chatRow, 34f, () => controller.RequestReportLatestChatMessage());
+            chatBlockButton = CreateButton("屏蔽", chatRow, 34f, () => controller.RequestBlockLatestChatSender());
         }
 
         private void BuildMeetingOverlay()
@@ -824,9 +893,9 @@ namespace GanglandUndercover.Online
             AddAccentEdge(voteColumn.gameObject, "Meeting Visual Vote Accent", RedAccent, 3f, true);
             AddLayout(voteColumn.gameObject, 0f, 318f, 0f, 1f);
 
-            Text voteHeader = CreateText("Vote Header", voteColumn, 17, TextAnchor.UpperLeft, AmberAccent);
-            voteHeader.text = "投票面板";
-            AddLayout(voteHeader.gameObject, 28f, 0f, 0f);
+            meetingActionHeaderText = CreateText("Meeting Action Header", voteColumn, 17, TextAnchor.UpperLeft, AmberAccent);
+            meetingActionHeaderText.text = "会议指证";
+            AddLayout(meetingActionHeaderText.gameObject, 28f, 0f, 0f);
 
             GameObject voteScrollObject = CreatePanel("Meeting Visual Vote Scroll", voteColumn, PanelDeepColor);
             ApplySpriteSkin(voteScrollObject, meetingVoteCardSprite, PanelDeepColor);
@@ -941,6 +1010,8 @@ namespace GanglandUndercover.Online
 
             GameObject stationObject = CreatePanel("Task Visual Station Preview", briefRow, new Color(1f, 1f, 1f, 0.10f));
             ApplySpriteSkin(stationObject, taskTileSprite, Color.white);
+            taskStationPreviewImage = stationObject.GetComponent<Image>();
+            taskStationPreviewImage.preserveAspect = true;
             AddPanelBorder(stationObject, UIStyle.BorderStrong, 1f);
             AddLayout(stationObject, 0f, 94f, 0f);
 
@@ -991,40 +1062,130 @@ namespace GanglandUndercover.Online
             Transform topLeft = CreateVerticalPanel(
                 "Compact Visual Status Card",
                 compactActionHud.transform,
-                new Color(0.020f, 0.027f, 0.032f, 0.88f),
-                new Vector2(0.018f, 0.772f),
-                new Vector2(0.322f, 0.972f),
-                new RectOffset(16, 16, 12, 12),
-                6f);
-            AddAccentEdge(topLeft.gameObject, "Compact Visual Status Accent", BlueAccent, 4f, true);
-            compactTopText = CreateText("Compact Top Text", topLeft, 15, TextAnchor.UpperLeft, TextColor);
-            AddLayout(compactTopText.gameObject, 112f, 0f, 0f);
-
-            Transform bottomCenter = CreateVerticalPanel(
-                "Compact Visual Command Bar",
-                compactActionHud.transform,
-                new Color(0.018f, 0.023f, 0.027f, 0.94f),
-                new Vector2(0.245f, 0.018f),
-                new Vector2(0.755f, 0.145f),
-                new RectOffset(18, 18, 9, 9),
+                new Color(0.020f, 0.027f, 0.032f, 0.92f),
+                new Vector2(0.018f, 0.79f),
+                new Vector2(0.335f, 0.975f),
+                new RectOffset(14, 14, 10, 10),
                 5f);
-            AddAccentEdge(bottomCenter.gameObject, "Compact Visual Command Accent", AmberAccent, 3f, false);
-            compactActionBarText = CreateText("Compact Action Bar", bottomCenter, 16, TextAnchor.MiddleCenter, TextColor);
-            AddLayout(compactActionBarText.gameObject, 34f, 0f, 0f);
-            compactPromptText = CreateText("Compact Prompt", bottomCenter, 13, TextAnchor.MiddleCenter, MutedTextColor);
-            AddLayout(compactPromptText.gameObject, 32f, 0f, 0f);
+            ApplySpriteSkin(topLeft.gameObject, taskPanelSprite, new Color(0.020f, 0.027f, 0.032f, 0.92f));
+            AddAccentEdge(topLeft.gameObject, "Compact Visual Status Accent", BlueAccent, 4f, true);
+            compactTopText = CreateText("Compact Top Text", topLeft, 14, TextAnchor.UpperLeft, TextColor);
+            compactTopText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddLayout(compactTopText.gameObject, 38f, 0f, 0f);
+            compactEvidenceFill = CreateCompactProgressBar(
+                "Evidence",
+                topLeft,
+                BlueAccent,
+                out compactEvidenceText);
+            compactTaskFill = CreateCompactProgressBar(
+                "Personal Task",
+                topLeft,
+                AmberAccent,
+                out compactTaskText);
+            compactHazardText = CreateText("Compact Hazard Text", topLeft, 12, TextAnchor.MiddleLeft, MutedTextColor);
+            compactHazardText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddLayout(compactHazardText.gameObject, 24f, 0f, 0f);
 
-            Transform bottomRight = CreateVerticalPanel(
+            criticalTaskBanner = CreatePanel(
+                "Compact Visual Critical Task Banner",
+                compactActionHud.transform,
+                new Color(0.085f, 0.018f, 0.018f, 0.96f));
+            Stretch(
+                criticalTaskBanner.GetComponent<RectTransform>(),
+                new Vector2(0.345f, 0.875f),
+                new Vector2(0.655f, 0.965f),
+                Vector2.zero,
+                Vector2.zero);
+            AddPanelBorder(criticalTaskBanner, new Color(RedAccent.r, RedAccent.g, RedAccent.b, 0.72f), 2f);
+            AddAccentEdge(criticalTaskBanner, "Compact Visual Critical Task Accent", RedAccent, 4f, true);
+
+            criticalTaskBannerText = CreateText(
+                "Compact Critical Task Text",
+                criticalTaskBanner.transform,
+                15,
+                TextAnchor.UpperCenter,
+                TextColor);
+            Stretch(
+                criticalTaskBannerText.GetComponent<RectTransform>(),
+                new Vector2(0.04f, 0.34f),
+                new Vector2(0.96f, 0.92f),
+                Vector2.zero,
+                Vector2.zero);
+
+            GameObject criticalTrack = CreatePanel(
+                "Compact Critical Task Track",
+                criticalTaskBanner.transform,
+                new Color(0.15f, 0.07f, 0.07f, 1f));
+            Stretch(
+                criticalTrack.GetComponent<RectTransform>(),
+                new Vector2(0.04f, 0.12f),
+                new Vector2(0.96f, 0.25f),
+                Vector2.zero,
+                Vector2.zero);
+            GameObject criticalFill = CreatePanel(
+                "Compact Critical Task Fill",
+                criticalTrack.transform,
+                RedAccent);
+            criticalTaskBannerFill = criticalFill.GetComponent<RectTransform>();
+            criticalTaskBannerFill.anchorMin = Vector2.zero;
+            criticalTaskBannerFill.anchorMax = Vector2.one;
+            criticalTaskBannerFill.pivot = new Vector2(0f, 0.5f);
+            criticalTaskBannerFill.offsetMin = Vector2.zero;
+            criticalTaskBannerFill.offsetMax = Vector2.zero;
+
+            Transform identityCard = CreateVerticalPanel(
                 "Compact Visual Identity Card",
                 compactActionHud.transform,
-                new Color(0.020f, 0.026f, 0.030f, 0.88f),
-                new Vector2(0.735f, 0.018f),
-                new Vector2(0.982f, 0.188f),
-                new RectOffset(16, 16, 12, 12),
+                new Color(0.020f, 0.026f, 0.030f, 0.92f),
+                new Vector2(0.018f, 0.60f),
+                new Vector2(0.335f, 0.775f),
+                new RectOffset(14, 14, 10, 10),
                 5f);
-            AddAccentEdge(bottomRight.gameObject, "Compact Visual Identity Accent", GreenAccent, 4f, true);
-            compactAbilityText = CreateText("Compact Ability", bottomRight, 14, TextAnchor.UpperLeft, TextColor);
-            AddLayout(compactAbilityText.gameObject, 78f, 0f, 0f);
+            ApplySpriteSkin(identityCard.gameObject, taskPanelSprite, new Color(0.020f, 0.026f, 0.030f, 0.92f));
+            AddAccentEdge(identityCard.gameObject, "Compact Visual Identity Accent", RoleAccent(controller.LocalRole), 4f, true);
+            Transform identityAccent = identityCard.Find("Compact Visual Identity Accent");
+            compactIdentityAccentImage = identityAccent == null ? null : identityAccent.GetComponent<Image>();
+            compactAbilityText = CreateText("Compact Ability", identityCard, 13, TextAnchor.UpperLeft, TextColor);
+            compactAbilityText.verticalOverflow = VerticalWrapMode.Truncate;
+            AddLayout(compactAbilityText.gameObject, 116f, 0f, 0f);
+
+            GameObject promptPanel = CreatePanel(
+                "Compact Visual Context Prompt",
+                compactActionHud.transform,
+                new Color(0.014f, 0.019f, 0.022f, 0.86f));
+            Stretch(
+                promptPanel.GetComponent<RectTransform>(),
+                new Vector2(0.25f, 0.13f),
+                new Vector2(0.75f, 0.185f),
+                Vector2.zero,
+                Vector2.zero);
+            ApplySpriteSkin(promptPanel, taskBoardSprite, new Color(0.014f, 0.019f, 0.022f, 0.86f));
+            AddPanelBorder(promptPanel, UIStyle.BorderGold, 1f);
+            compactPromptText = CreateText("Compact Prompt", promptPanel.transform, 13, TextAnchor.MiddleCenter, TextColor);
+            compactPromptText.verticalOverflow = VerticalWrapMode.Truncate;
+            Stretch(compactPromptText.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(14f, 4f), new Vector2(-14f, -4f));
+
+            Transform commandBar = CreateHorizontalPanel(
+                "Compact Visual Command Bar",
+                compactActionHud.transform,
+                new Color(0.018f, 0.023f, 0.027f, 0.96f),
+                new Vector2(0.22f, 0.02f),
+                new Vector2(0.78f, 0.125f),
+                new RectOffset(10, 10, 8, 8),
+                7f);
+            ApplySpriteSkin(commandBar.gameObject, taskPanelSprite, new Color(0.018f, 0.023f, 0.027f, 0.96f));
+            AddAccentEdge(commandBar.gameObject, "Compact Visual Command Accent", AmberAccent, 3f, false);
+
+            compactActionBarText = CreateText("Compact Action Bar", commandBar, 12, TextAnchor.MiddleCenter, AmberAccent);
+            compactActionBarText.text = "现场";
+            AddLayout(compactActionBarText.gameObject, 0f, 42f, 0f);
+
+            compactInteractButton = CreateCompactCommandButton("E\n互动", "Interact", commandBar, () => controller.RequestAction(OnlineActionType.Interact));
+            compactReportButton = CreateCompactCommandButton("R\n报案", "Report", commandBar, () => controller.RequestAction(OnlineActionType.Report));
+            compactKillButton = CreateCompactCommandButton("Q\n击倒", "Kill", commandBar, () => controller.RequestAction(OnlineActionType.Kill));
+            compactAbilityButton = CreateCompactCommandButton("F\n技能", "Ability", commandBar, () => controller.RequestAction(OnlineActionType.Ability));
+            compactMapButton = CreateCompactCommandButton("M\n地图", "Map", commandBar, () => controller.ToggleTacticalMap());
+            compactIntelButton = CreateCompactCommandButton("I\n案情", "Intel", commandBar, () => controller.ToggleIntelBoard());
         }
 
         private void BuildMapOverlay()
@@ -1098,6 +1259,7 @@ namespace GanglandUndercover.Online
             OnlineMatchPhase phase = controller.Phase;
             connectionGroup.SetActive(!online);
             bool compactAction = online && phase == OnlineMatchPhase.Action && !controller.IntelBoardOpen && !controller.TacticalMapOpen && !controller.LocalTaskInputGateActive;
+            ApplyRightDockMode(compactAction);
             hudBackdrop.SetActive(!compactAction);
             headerGroup.SetActive(!compactAction);
             leftDockGroup.SetActive(!compactAction);
@@ -1133,6 +1295,45 @@ namespace GanglandUndercover.Online
             }
         }
 
+        private void ApplyRightDockMode(bool compactAction)
+        {
+            if (rightDockRect == null || rightDockImage == null || rightDockLayout == null)
+            {
+                return;
+            }
+
+            if (rightDockCompactMode.HasValue && rightDockCompactMode.Value == compactAction)
+            {
+                return;
+            }
+
+            rightDockCompactMode = compactAction;
+
+            if (compactAction)
+            {
+                Stretch(
+                    rightDockRect,
+                    new Vector2(0.755f, 0.64f),
+                    new Vector2(0.985f, 0.945f),
+                    Vector2.zero,
+                    Vector2.zero);
+                rightDockImage.color = Color.clear;
+                rightDockLayout.padding = new RectOffset(0, 0, 0, 0);
+                rightDockLayout.spacing = 0f;
+                return;
+            }
+
+            Stretch(
+                rightDockRect,
+                new Vector2(0.705f, 0.095f),
+                new Vector2(0.985f, 0.895f),
+                Vector2.zero,
+                Vector2.zero);
+            rightDockImage.color = DockColor;
+            rightDockLayout.padding = new RectOffset(12, 12, 12, 12);
+            rightDockLayout.spacing = 10f;
+        }
+
         private string BuildDynamicKey()
         {
             StringBuilder builder = new StringBuilder();
@@ -1144,9 +1345,10 @@ namespace GanglandUndercover.Online
                 .Append('|').Append(controller.LocalReady)
                 .Append('|').Append(controller.CanStartMatch)
                 .Append('|').Append(controller.EvidenceScore)
-                .Append('|').Append(controller.CompletedTaskCount)
+                .Append('|').Append(controller.PersonalCompletedTaskCount)
                 .Append('|').Append(controller.SabotagedTaskCount)
                 .Append('|').Append(controller.VoteTallySummary)
+                .Append('|').Append(controller.AccusationCount)
                 .Append('|').Append(controller.LocalTaskInputGateActive);
             return builder.ToString();
         }
@@ -1199,12 +1401,23 @@ namespace GanglandUndercover.Online
             fillBotsButton.interactable = controller.IsHost && controller.Phase == OnlineMatchPhase.Lobby;
 
             bool actionPlayable = controller.Phase == OnlineMatchPhase.Action && controller.LocalAlive;
+            bool killRole = controller.LocalRole == OnlineRole.Gang || controller.LocalRole == OnlineRole.Mole;
+            bool killPlayable = actionPlayable
+                && killRole
+                && controller.HasLocalKillTarget
+                && controller.LocalKillCooldown <= 0f;
             interactButton.interactable = actionPlayable;
             reportButton.interactable = actionPlayable;
-            killButton.interactable = actionPlayable && controller.LocalRole == OnlineRole.Gang;
+            killButton.interactable = killPlayable;
             abilityButton.interactable = actionPlayable;
             mapButton.interactable = controller.IsOnline;
             intelButton.interactable = controller.IsOnline;
+            compactInteractButton.interactable = actionPlayable;
+            compactReportButton.interactable = actionPlayable;
+            compactKillButton.interactable = killPlayable;
+            compactAbilityButton.interactable = actionPlayable && controller.LocalAbilityCooldown <= 0f;
+            compactMapButton.interactable = controller.IsOnline;
+            compactIntelButton.interactable = controller.IsOnline;
             chatSendButton.interactable = controller.CanSendChatNow
                 && chatInput != null
                 && !string.IsNullOrWhiteSpace(chatInput.text);
@@ -1244,24 +1457,32 @@ namespace GanglandUndercover.Online
             centerBodyText.text = BuildCenterBody();
             notebookTitleText.text = NotebookTitle();
             notebookBodyText.text = NotebookBody();
-            chatTitleText.text = controller.ChatChannelDisplayName
-                + " | " + controller.ChatMessageCount + " 条"
-                + " | 安全 " + (controller.HasChatSafetyTarget ? "可处理" : "无目标");
+            bool compactAction = compactActionHud.activeSelf;
+            chatTitleText.text = compactAction
+                ? controller.ChatChannelDisplayName + " | " + controller.ChatMessageCount + " 条"
+                : controller.ChatChannelDisplayName
+                    + " | " + controller.ChatMessageCount + " 条"
+                    + " | 安全 " + (controller.HasChatSafetyTarget ? "可处理" : "无目标");
             chatFeedText.text = controller.ChatFeedText;
             chatInputStatusText.text = controller.ChatInputStatusLine;
             compactTopText.text = controller.RoomName
-                + "\n行动态势 | " + controller.PhaseDisplayName
+                + "\n" + controller.PhaseDisplayName
                 + " | " + controller.MatchTimeText + "/20:00"
-                + "\n证据 " + controller.EvidenceScore + "/" + controller.EvidenceTarget
-                + " | 存活 " + controller.AlivePlayerCount + "/" + Mathf.Max(1, controller.Players.Count)
-                + "\n" + controller.HazardSummary
-                + "\n" + controller.VoiceHudLine;
-            compactActionBarText.text = BuildCompactActionBar();
+                + " | 存活 " + controller.AlivePlayerCount + "/" + Mathf.Max(1, controller.Players.Count);
+            compactEvidenceText.text = "证据链  " + controller.EvidenceScore + " / " + controller.EvidenceTarget;
+            compactTaskText.text = "个人任务  " + controller.PersonalCompletedTaskCount + " / " + Mathf.Max(1, controller.PersonalTaskCount);
+            compactHazardText.text = "态势 | " + controller.HazardSummary;
+            compactActionBarText.text = "现场";
             compactPromptText.text = controller.OnboardingActionPrompt;
             compactAbilityText.text = controller.OnboardingBriefingTitle
-                + "\n职责 " + controller.LocalProfessionDisplayName
-                + "\n目标 " + controller.LocalObjectiveSummary
-                + "\n技能 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s | 击倒 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s";
+                + "\n职责 | " + controller.LocalProfessionDisplayName
+                + "\n" + controller.LocalObjectiveSummary;
+            if (compactIdentityAccentImage != null)
+            {
+                compactIdentityAccentImage.color = RoleAccent(controller.LocalRole);
+            }
+            RefreshCompactCommandLabels();
+            criticalTaskBannerText.text = BuildCriticalTaskBannerText();
             footerText.text = controller.Status
                 + " | " + Localization.T("hud.compact.hint");
 
@@ -1269,9 +1490,11 @@ namespace GanglandUndercover.Online
                 + " " + Mathf.CeilToInt(controller.PhaseTimer) + "s";
             meetingBodyText.text = Localization.T("meeting.reason") + controller.LastMeetingReason
                 + "\n" + Localization.T("meeting.evidence") + controller.MeetingEvidenceDossier
+                + "\n指证记录：" + controller.AccusationSummary
                 + "\n" + Localization.T("meeting.tally") + controller.VoteTallySummary
                 + "\n聊天：" + controller.VoiceHudLine
                 + "\n" + Localization.T("meeting.outcome") + controller.LastVoteOutcome;
+            meetingActionHeaderText.text = controller.Phase == OnlineMatchPhase.Meeting ? "会议指证" : "投票面板";
 
             resultTitleText.text = Localization.T("result.title");
             resultBodyText.text = controller.ResultSummary + "\n\n" + controller.ResultRosterLine + "\n\n" + controller.MatchPressureSummary;
@@ -1314,6 +1537,9 @@ namespace GanglandUndercover.Online
             UIStyle.StylizeText(chatFeedText);
             UIStyle.StylizeText(chatInputStatusText);
             UIStyle.StylizeText(compactTopText);
+            UIStyle.StylizeText(compactEvidenceText);
+            UIStyle.StylizeText(compactTaskText);
+            UIStyle.StylizeText(compactHazardText);
             UIStyle.StylizeText(compactActionBarText);
             UIStyle.StylizeText(compactPromptText);
             UIStyle.StylizeText(compactAbilityText);
@@ -1332,7 +1558,7 @@ namespace GanglandUndercover.Online
         private void RefreshProgressBars()
         {
             float evidenceRatio = controller.EvidenceScore / (float)Mathf.Max(1, controller.EvidenceTarget);
-            float taskRatio = controller.CompletedTaskCount / (float)Mathf.Max(1, controller.TaskCount);
+            float taskRatio = controller.PersonalCompletedTaskCount / (float)Mathf.Max(1, controller.PersonalTaskCount);
             float survivalRatio = controller.AlivePlayerCount / (float)Mathf.Max(1, controller.Players.Count);
             SetProgress(evidenceFill, evidenceRatio);
             SetProgress(taskFill, taskRatio);
@@ -1341,18 +1567,55 @@ namespace GanglandUndercover.Online
             SetProgress(resultTaskFill, taskRatio);
             SetProgress(resultSurvivalFill, survivalRatio);
             SetProgress(taskProgressFill, controller.ActiveTaskChargeValue);
+            SetProgress(compactEvidenceFill, evidenceRatio);
+            SetProgress(compactTaskFill, taskRatio);
+            SetProgress(
+                criticalTaskBannerFill,
+                controller.CriticalTaskTotalTime > 0f
+                    ? controller.CriticalTaskTimeRemaining / controller.CriticalTaskTotalTime
+                    : 0f);
+            criticalTaskBanner.SetActive(
+                controller.Phase == OnlineMatchPhase.Action && controller.CriticalTaskActive);
         }
 
-        private string BuildCompactActionBar()
+        private string BuildCriticalTaskBannerText()
+        {
+            int seconds = Mathf.CeilToInt(controller.CriticalTaskTimeRemaining);
+            switch (controller.ActiveCriticalTaskType)
+            {
+                case GanglandUndercover.SocialDeduction.CriticalTaskType.EvidenceDestruction:
+                    return "证据销毁警报  " + seconds + "s  |  修复站 "
+                        + controller.CriticalEvidenceRepairStationCount + "/2";
+                case GanglandUndercover.SocialDeduction.CriticalTaskType.PoliceReinforcement:
+                    return "警方增援逼近  " + seconds + "s  |  黑帮破坏通讯塔";
+                default:
+                    return "紧急任务  " + seconds + "s";
+            }
+        }
+
+        private void RefreshCompactCommandLabels()
         {
             bool actionPlayable = controller.Phase == OnlineMatchPhase.Action && controller.LocalAlive;
-            string interact = actionPlayable ? "E 互动" : "E -";
-            string kill = actionPlayable && controller.LocalRole == OnlineRole.Gang
-                ? "Q 击倒 " + Mathf.CeilToInt(controller.LocalKillCooldown) + "s"
-                : "Q -";
-            string report = actionPlayable ? "R 报案" : "R -";
-            string ability = actionPlayable ? "F 技能 " + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s" : "F -";
-            return interact + "   " + report + "   " + kill + "   " + ability + "   M 地图   I 案情";
+            bool killRole = controller.LocalRole == OnlineRole.Gang || controller.LocalRole == OnlineRole.Mole;
+
+            SetButtonText(compactInteractButton, actionPlayable ? "E\n互动" : "E\n不可用");
+            SetButtonText(compactReportButton, actionPlayable ? "R\n报案" : "R\n不可用");
+
+            string killLabel = !actionPlayable || !killRole
+                ? "Q\n不可用"
+                : controller.LocalKillCooldown > 0f
+                    ? "Q\n" + Mathf.CeilToInt(controller.LocalKillCooldown) + "s"
+                    : controller.HasLocalKillTarget ? "Q\n击倒" : "Q\n无目标";
+            SetButtonText(compactKillButton, killLabel);
+
+            string abilityLabel = !actionPlayable
+                ? "F\n不可用"
+                : controller.LocalAbilityCooldown > 0f
+                    ? "F\n" + Mathf.CeilToInt(controller.LocalAbilityCooldown) + "s"
+                    : "F\n技能";
+            SetButtonText(compactAbilityButton, abilityLabel);
+            SetButtonText(compactMapButton, "M\n地图");
+            SetButtonText(compactIntelButton, "I\n案情");
         }
 
         private string BuildCenterTitle()
@@ -1498,7 +1761,13 @@ namespace GanglandUndercover.Online
             }
 
             ClearGameObjects(voteButtons);
-            bool canVote = controller.LocalAlive && (controller.Phase == OnlineMatchPhase.Meeting || controller.Phase == OnlineMatchPhase.Voting);
+            bool inDiscussion = controller.Phase == OnlineMatchPhase.Meeting;
+            bool canVote = controller.LocalAlive
+                && !controller.HasVoted(controller.LocalClientIdValue)
+                && controller.Phase == OnlineMatchPhase.Voting;
+            bool canAccuse = controller.LocalAlive
+                && !controller.HasAccused(controller.LocalClientIdValue)
+                && inDiscussion;
 
             foreach (KeyValuePair<ulong, OnlinePlayerState> pair in controller.Players)
             {
@@ -1510,28 +1779,35 @@ namespace GanglandUndercover.Online
                 }
 
                 ulong captured = pair.Key;
-                Button voteButton = CreateVoteButton(
-                    "Meeting Visual Vote Player " + pair.Key,
-                    state.DisplayName + (state.IsBot ? " [AI]" : string.Empty),
-                    "嫌疑 " + state.Suspicion + " | " + controller.ProfessionDisplayName(state.Profession),
-                    RoleAccent(state.PublicRole, state.Profession),
+                Button actionButton = CreateVoteButton(
+                    inDiscussion ? "Meeting Visual Accusation Player " + pair.Key : "Meeting Visual Vote Player " + pair.Key,
+                    (inDiscussion ? "指证 " : "投票 ") + state.DisplayName + (state.IsBot ? " [AI]" : string.Empty),
+                    inDiscussion
+                        ? "提交当前证据链，目标票权 +2（仅强链生效）"
+                        : "嫌疑 " + state.Suspicion + " | " + controller.PresentationIdentityFor(pair.Key, state),
+                    RoleAccent(state.PublicRole),
                     voteButtonRoot,
                     54f,
-                    () => controller.RequestVote(captured));
-                voteButton.interactable = canVote;
-                voteButtons.Add(voteButton.gameObject);
+                    inDiscussion
+                        ? () => controller.RequestAccusation(captured)
+                        : () => controller.RequestVote(captured));
+                actionButton.interactable = inDiscussion ? canAccuse : canVote;
+                voteButtons.Add(actionButton.gameObject);
             }
 
-            Button skipButton = CreateVoteButton(
-                "Meeting Visual Vote Skip",
-                "跳过投票",
-                "保留疑点, 等待下一轮证据",
-                AmberAccent,
-                voteButtonRoot,
-                54f,
-                () => controller.RequestSkipVote());
-            skipButton.interactable = canVote;
-            voteButtons.Add(skipButton.gameObject);
+            if (!inDiscussion)
+            {
+                Button skipButton = CreateVoteButton(
+                    "Meeting Visual Vote Skip",
+                    "跳过投票",
+                    "保留疑点, 等待下一轮证据",
+                    AmberAccent,
+                    voteButtonRoot,
+                    54f,
+                    () => controller.RequestSkipVote());
+                skipButton.interactable = canVote;
+                voteButtons.Add(skipButton.gameObject);
+            }
         }
 
         private void RefreshMeetingSeatBoard()
@@ -1544,7 +1820,7 @@ namespace GanglandUndercover.Online
             ClearChildren(meetingSeatRoot);
             CreateMeetingBoardBlock("Meeting Seat Round Table", new Vector2(0.27f, 0.17f), new Vector2(0.73f, 0.83f), new Color(0.070f, 0.078f, 0.074f, 0.96f), "会议圆桌");
             CreateMeetingBoardBlock("Meeting Seat Evidence Wall Meeting Visual", new Vector2(0.035f, 0.12f), new Vector2(0.235f, 0.88f), new Color(0.030f, 0.042f, 0.048f, 0.98f), "证据墙");
-            CreateMeetingBoardBlock("Meeting Seat Voice Channel Meeting Visual", new Vector2(0.765f, 0.62f), new Vector2(0.965f, 0.88f), BlueAccent, "语音全员");
+            CreateMeetingBoardBlock("Meeting Seat Voice Channel Meeting Visual", new Vector2(0.765f, 0.62f), new Vector2(0.965f, 0.88f), BlueAccent, "存活频道");
             CreateMeetingBoardBlock("Meeting Seat Vote Clock Meeting Visual", new Vector2(0.765f, 0.12f), new Vector2(0.965f, 0.56f), AmberAccent, Mathf.CeilToInt(controller.PhaseTimer) + "s");
 
             int index = 0;
@@ -1584,7 +1860,7 @@ namespace GanglandUndercover.Online
         private void CreateMeetingPlayerCard(ulong clientId, OnlinePlayerState state, Vector2 anchorMin, Vector2 anchorMax)
         {
             Color accent = state.Alive
-                ? clientId == controller.LocalClientIdValue ? GreenAccent : RoleAccent(state.PublicRole, state.Profession)
+                ? clientId == controller.LocalClientIdValue ? GreenAccent : RoleAccent(state.PublicRole)
                 : new Color(0.22f, 0.23f, 0.24f, 0.92f);
             GameObject card = CreatePanel("Meeting Seat Player " + clientId + " Meeting Visual Card", meetingSeatRoot, new Color(0.026f, 0.032f, 0.035f, 0.96f));
             ApplySpriteSkin(card, meetingVoteCardSprite, new Color(0.026f, 0.032f, 0.035f, 0.96f));
@@ -1598,7 +1874,7 @@ namespace GanglandUndercover.Online
 
             GameObject portrait = CreatePanel("Meeting Visual Player Portrait", card.transform, Color.white);
             Image portraitImage = portrait.GetComponent<Image>();
-            portraitImage.sprite = MeetingPortraitSprite(state.Profession);
+            portraitImage.sprite = MeetingPortraitSprite(controller.PresentationProfessionFor(clientId, state));
             portraitImage.preserveAspect = true;
             portraitImage.color = state.Alive ? Color.white : new Color(0.42f, 0.42f, 0.46f, 0.72f);
             Stretch(portrait.GetComponent<RectTransform>(), new Vector2(0.24f, 0.45f), new Vector2(0.76f, 0.88f), Vector2.zero, Vector2.zero);
@@ -1608,7 +1884,7 @@ namespace GanglandUndercover.Online
             Stretch(nameText.GetComponent<RectTransform>(), new Vector2(0.06f, 0.18f), new Vector2(0.94f, 0.38f), Vector2.zero, Vector2.zero);
 
             Text metaText = CreateText("Meeting Visual Player Meta", card.transform, 9, TextAnchor.MiddleCenter, MutedTextColor);
-            metaText.text = state.IsBot ? "AI" : controller.ProfessionDisplayName(state.Profession);
+            metaText.text = (state.IsBot ? "AI | " : string.Empty) + controller.PresentationIdentityFor(clientId, state);
             Stretch(metaText.GetComponent<RectTransform>(), new Vector2(0.06f, 0.04f), new Vector2(0.94f, 0.18f), Vector2.zero, Vector2.zero);
         }
 
@@ -1668,13 +1944,8 @@ namespace GanglandUndercover.Online
             return Sprite2DAssetCache.CharBody_Front;
         }
 
-        private static Color RoleAccent(OnlineRole publicRole, OnlineProfession profession)
+        private static Color RoleAccent(OnlineRole publicRole)
         {
-            if (profession == OnlineProfession.Mole)
-            {
-                return new Color(RedAccent.r, RedAccent.g, RedAccent.b, 0.98f);
-            }
-
             switch (publicRole)
             {
                 case OnlineRole.Gang:
@@ -1713,8 +1984,14 @@ namespace GanglandUndercover.Online
 
             foreach (OnlineTaskState task in controller.Tasks)
             {
-                Color color = task.Completed ? GreenAccent : task.Sabotaged ? RedAccent : BlueAccent;
-                AddMapMarker(task.Position, controller.TaskMapCodeDisplayName(task.Id), color, 12f);
+                if (!controller.IsTaskVisibleToLocalPlayer(task))
+                {
+                    continue;
+                }
+
+                OnlineTaskState playerTask = controller.TaskForLocalPlayer(task);
+                Color color = playerTask.Sabotaged ? RedAccent : playerTask.Completed ? GreenAccent : BlueAccent;
+                AddMapMarker(playerTask.Position, controller.TaskMapCodeDisplayName(playerTask.Id), color, 12f);
             }
 
             foreach (OnlineBodyState body in controller.Bodies)
@@ -1728,6 +2005,14 @@ namespace GanglandUndercover.Online
             foreach (KeyValuePair<ulong, OnlinePlayerState> pair in controller.Players)
             {
                 OnlinePlayerState state = pair.Value;
+                if (!state.Alive && controller.LocalAlive)
+                {
+                    continue;
+                }
+                if (!controller.ShouldRevealPlayerPosition(controller.LocalClientIdValue, pair.Key))
+                {
+                    continue;
+                }
                 Color color = pair.Key == controller.LocalClientIdValue
                     ? AmberAccent
                     : state.Alive ? new Color(0.92f, 0.9f, 0.48f, 1f) : new Color(0.42f, 0.44f, 0.44f, 1f);
@@ -1853,6 +2138,10 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            int taskId = controller.ActiveTaskIdValue;
+            int mode = TaskCanvasTemplateMode(taskId);
+            RefreshTaskStationIcon(taskId, mode);
+
             string key = controller.ActiveTaskIdValue
                 + ":"
                 + controller.ActiveTaskStepValue
@@ -1870,9 +2159,6 @@ namespace GanglandUndercover.Online
 
             taskMiniGameKey = key;
             ClearChildren(taskMiniGameRoot);
-
-            int taskId = controller.ActiveTaskIdValue;
-            int mode = TaskCanvasTemplateMode(taskId);
 
             if (mode == 0)
             {
@@ -1896,6 +2182,49 @@ namespace GanglandUndercover.Online
             }
 
             BuildTaskMiniGameStatusRail();
+        }
+
+        private void RefreshTaskStationIcon(int taskId, int mode)
+        {
+            if (taskStationPreviewImage == null)
+            {
+                return;
+            }
+
+            string iconKey;
+            switch (mode)
+            {
+                case 0:
+                    iconKey = "memory";
+                    break;
+                case 1:
+                    iconKey = "scan";
+                    break;
+                case 2:
+                    iconKey = "wire";
+                    break;
+                case 3:
+                    iconKey = "swipe";
+                    break;
+                default:
+                    iconKey = taskId % 2 == 0 ? "download" : "keypad";
+                    break;
+            }
+
+            Sprite reviewedIcon = null;
+            foreach (OnlineTaskState task in controller.Tasks)
+            {
+                if (task.Id == taskId && task.Sabotaged)
+                {
+                    reviewedIcon = UIArtCache.SabotageIcon(OnlineMatchUtils.SabotageForTask(taskId).ToString());
+                    break;
+                }
+            }
+
+            taskStationPreviewImage.sprite = reviewedIcon ?? UIArtCache.TaskIcon(iconKey) ?? taskTileSprite;
+            taskStationPreviewImage.type = Image.Type.Simple;
+            taskStationPreviewImage.preserveAspect = true;
+            taskStationPreviewImage.color = Color.white;
         }
 
         private void BuildTaskMiniGameStatusRail()
@@ -2136,9 +2465,21 @@ namespace GanglandUndercover.Online
 
             meetingAssetSpritesLoaded = true;
             Sprite2DAssetCache.Ensure();
-            meetingPanelSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_grey", 100f) ?? Sprite2DAssetCache.PanelBg;
-            meetingButtonSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_blue", 100f) ?? Sprite2DAssetCache.ButtonBg;
-            meetingVoteCardSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_beige", 100f) ?? Sprite2DAssetCache.VoteCardBg;
+
+            // 优先使用 UIArtCache 会议专属 sprite
+            var uiArt = GanglandUndercover.Art.UIArtCache.MeetingTableBg;
+            meetingPanelSprite = uiArt
+                ?? LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_grey", 100f)
+                ?? Sprite2DAssetCache.PanelBg;
+
+            meetingButtonSprite = GanglandUndercover.Art.UIArtCache.ButtonNormal
+                ?? LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_blue", 100f)
+                ?? Sprite2DAssetCache.ButtonBg;
+
+            meetingVoteCardSprite = GanglandUndercover.Art.UIArtCache.VoteCard
+                ?? LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_beige", 100f)
+                ?? Sprite2DAssetCache.VoteCardBg;
+
             meetingAvatarFrameSprite = Sprite2DAssetCache.AvatarFrame;
         }
 
@@ -2151,8 +2492,12 @@ namespace GanglandUndercover.Online
 
             taskAssetSpritesLoaded = true;
             Sprite2DAssetCache.Ensure();
-            taskPanelSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_grey", 100f) ?? Sprite2DAssetCache.PanelBg;
-            taskBoardSprite = LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_beige", 100f) ?? Sprite2DAssetCache.VoteCardBg;
+            taskPanelSprite = GanglandUndercover.Art.UIArtCache.PanelFrame
+                ?? LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_grey", 100f)
+                ?? Sprite2DAssetCache.PanelBg;
+            taskBoardSprite = GanglandUndercover.Art.UIArtCache.VoteCard
+                ?? LoadRuntimeSprite("Sprites/UI/Buttons/buttonSquare_beige", 100f)
+                ?? Sprite2DAssetCache.VoteCardBg;
             taskTileSprite = LoadRuntimeSprite("Sprites/Tilesets/PoliceStation/decorations/circuit-board", 32f)
                 ?? LoadRuntimeSprite("Sprites/Tilesets/PoliceStation/walls/display-screen", 32f)
                 ?? Sprite2DAssetCache.PropEvidenceBox;
@@ -2317,15 +2662,35 @@ namespace GanglandUndercover.Online
             GameObject buttonObject = new GameObject(label + " Button", typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
             Image image = buttonObject.GetComponent<Image>();
-            image.color = new Color(0.075f, 0.090f, 0.100f, 1f);
+
+            // 优先使用 Resources 按钮 sprite
+            var btnSprite = GanglandUndercover.Art.UIArtCache.ButtonNormal;
+            if (btnSprite != null)
+            {
+                image.sprite = btnSprite;
+                image.type = Image.Type.Sliced;
+                image.color = Color.white;
+            }
+            else
+            {
+                image.color = new Color(0.075f, 0.090f, 0.100f, 1f);
+            }
             AddPanelBorder(buttonObject, new Color(1f, 1f, 1f, 0.10f), 1f);
 
             Button button = buttonObject.GetComponent<Button>();
             ColorBlock colors = button.colors;
-            colors.normalColor      = new Color(0.075f, 0.090f, 0.100f, 1f);
-            colors.highlightedColor = new Color(0.16f, 0.22f, 0.25f, 1f);
-            colors.pressedColor     = new Color(0.045f, 0.055f, 0.062f, 1f);
-            colors.disabledColor    = new Color(0.055f, 0.060f, 0.064f, 0.45f);
+            colors.normalColor = btnSprite != null
+                ? new Color(0.88f, 0.88f, 0.88f, 1f)
+                : new Color(0.075f, 0.090f, 0.100f, 1f);
+            colors.highlightedColor = btnSprite != null
+                ? Color.white
+                : new Color(0.16f, 0.22f, 0.25f, 1f);
+            colors.pressedColor = btnSprite != null
+                ? new Color(0.65f, 0.72f, 0.78f, 1f)
+                : new Color(0.045f, 0.055f, 0.062f, 1f);
+            colors.disabledColor = btnSprite != null
+                ? new Color(0.55f, 0.55f, 0.55f, 0.38f)
+                : new Color(0.055f, 0.060f, 0.064f, 0.45f);
             colors.colorMultiplier  = 1f;
             colors.fadeDuration     = 0.1f;
             button.colors = colors;
@@ -2341,6 +2706,21 @@ namespace GanglandUndercover.Online
             Stretch(text.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(8f, 2f), new Vector2(-8f, -2f));
 
             AddLayout(buttonObject, height, 0f, 1f);
+            return button;
+        }
+
+        private Button CreateCompactCommandButton(string label, string key, Transform parent, UnityEngine.Events.UnityAction onClick)
+        {
+            Button button = CreateButton(label, parent, 64f, onClick);
+            button.gameObject.name = "Compact Visual Command Slot " + key;
+            Text buttonText = button.GetComponentInChildren<Text>();
+            if (buttonText != null)
+            {
+                buttonText.text = label;
+                buttonText.fontSize = 13;
+                buttonText.verticalOverflow = VerticalWrapMode.Truncate;
+            }
+
             return button;
         }
 
@@ -2491,6 +2871,32 @@ namespace GanglandUndercover.Online
             return fillRect;
         }
 
+        private RectTransform CreateCompactProgressBar(string label, Transform parent, Color color, out Text valueText)
+        {
+            GameObject bar = CreatePanel(
+                "Compact Visual Progress " + label + " Bar",
+                parent,
+                new Color(0.018f, 0.024f, 0.026f, 0.96f));
+            AddPanelBorder(bar, UIStyle.BorderSubtle, 1f);
+            AddLayout(bar, 23f, 0f, 0f);
+
+            GameObject fill = CreatePanel(
+                "Compact Visual Progress " + label + " Fill",
+                bar.transform,
+                new Color(color.r, color.g, color.b, 0.62f));
+            RectTransform fillRect = fill.GetComponent<RectTransform>();
+            Stretch(fillRect, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+
+            valueText = CreateText(
+                "Compact Visual Progress " + label + " Value",
+                bar.transform,
+                12,
+                TextAnchor.MiddleLeft,
+                TextColor);
+            Stretch(valueText.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(8f, 0f), new Vector2(-8f, 0f));
+            return fillRect;
+        }
+
         private Text CreateScrollText(string name, Transform parent, float preferredHeight)
         {
             GameObject scrollRoot = CreatePanel(name + " Scroll", parent, PanelDeepColor);
@@ -2529,8 +2935,7 @@ namespace GanglandUndercover.Online
         {
             GameObject panel = new GameObject(name, typeof(RectTransform), typeof(Image));
             panel.transform.SetParent(parent, false);
-            Image image = panel.GetComponent<Image>();
-            image.color = color;
+            panel.GetComponent<Image>().color = color;
             return panel;
         }
 
@@ -2545,7 +2950,10 @@ namespace GanglandUndercover.Online
 
         private static void ConfigureText(Text text, int fontSize, TextAnchor alignment, Color color)
         {
-            text.font = UIStyle.CJKFont;
+            // Assign a bounded fallback font while the text is empty. Refresh()
+            // calls UIStyle.StylizeText after assigning content, selecting a
+            // text-specific CJK atlas when Chinese characters are present.
+            text.font = UIStyle.GetFontForText(string.Empty, fontSize);
             text.fontSize = fontSize;
             text.alignment = alignment;
             text.color = color;
@@ -2715,7 +3123,10 @@ namespace GanglandUndercover.Online
 
             if (text != null)
             {
-                text.text = label;
+                if (text.text != label)
+                {
+                    text.text = label;
+                }
             }
         }
 

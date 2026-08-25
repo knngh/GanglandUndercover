@@ -272,18 +272,22 @@ namespace GanglandUndercover.Online
                 return "附近没有可互动任务。";
             }
 
-            if (role == OnlineRole.Gang || role == OnlineRole.Mole)
+            if (role == OnlineRole.Gang)
             {
                 // ---- 破坏 ----
                 SabotageType sabotageType = OnlineMatchUtils.SabotageForTask(nearestTask.Id);
+                if (!ApplySabotageEffect(sabotageType, nearestTask.Name, playerId))
+                {
+                    return "该类破坏仍在生效或冷却中。";
+                }
+
                 nearestTask.Sabotaged = true;
                 nearestTask.Completed = false;
                 nearestTask.Progress = Mathf.Max(0, nearestTask.Progress - 1);
                 int penalty = OnlineMatchUtils.SabotageEvidencePenalty(sabotageType);
                 evidenceServiceRef?.SubtractEvidence(penalty);
 
-                string actorLabel = role == OnlineRole.Mole ? "线人" : "黑帮";
-                string status = actorLabel + "秘密破坏了 " + nearestTask.Name + "。";
+                string status = "有人秘密破坏了 " + nearestTask.Name + "。";
                 lastSabotageEvent = status + " 影响: " + OnlineMatchUtils.SabotageName(sabotageType);
 
                 OnEvidenceChanged?.Invoke(EvidenceScore, EvidenceTarget);
@@ -295,7 +299,6 @@ namespace GanglandUndercover.Online
                     sabotageType == SabotageType.PatrolAlert ? "巡逻" : "未知");
 
                 SetTask(nearestTask);
-                ApplySabotageEffect(sabotageType, nearestTask.Name);
                 return status;
             }
             else
@@ -316,7 +319,7 @@ namespace GanglandUndercover.Online
                 else if (!nearestTask.Completed)
                 {
                     // 推进进度
-                    int progressGain = (role == OnlineRole.Undercover) ? 2 : 1;
+                    int progressGain = 1;
                     nearestTask.Progress = Mathf.Min(nearestTask.RequiredProgress,
                         nearestTask.Progress + progressGain);
 
@@ -324,7 +327,9 @@ namespace GanglandUndercover.Online
                     {
                         nearestTask.Completed = true;
                         int gain = EvidenceGainFor(nearestTask.Id, profession, role);
-                        string status = nearestTask.Name + " 完成，证据链推进。";
+                        string status = gain > 0
+                            ? nearestTask.Name + " 完成，证据链推进。"
+                            : nearestTask.Name + " 的伪装任务完成，个人情报增加。";
                         int previousMilestone = EvidenceMilestoneIndex;
                         evidenceServiceRef?.AddEvidence(gain, status);
                         OnEvidenceChanged?.Invoke(EvidenceScore, EvidenceTarget);
@@ -371,9 +376,10 @@ namespace GanglandUndercover.Online
                 evidenceLeak, patrolAlert, evidenceLeakAccum);
         }
 
-        public void ApplySabotageEffect(SabotageType sabotageType, string taskName)
+        public bool ApplySabotageEffect(SabotageType sabotageType, string taskName, ulong initiatorId = 0)
         {
-            sabotageServiceRef?.TriggerSabotage(sabotageType, 0, taskName);
+            return sabotageServiceRef != null
+                && sabotageServiceRef.TryTriggerSabotage(sabotageType, initiatorId, taskName);
         }
 
         public void RepairSabotageEffect(SabotageType sabotageType)

@@ -65,15 +65,10 @@ namespace GanglandUndercover.Online
             string onlineResult = EvaluateNativeOnline(evidenceScore, evidenceTarget, players, getPrivateRole, tasks);
             lastOnlineResult = onlineResult;
 
-            // 4. 综合判定：任一触发即返回结果
+            // 4. 联机对局只采用权威联机规则；离线映射仅保留为诊断数据。
             if (!string.IsNullOrEmpty(onlineResult))
             {
                 return new EvaluateResult(true, onlineResult, offlineResult, EvaluateSource.NativeOnline);
-            }
-
-            if (offlineHasResult)
-            {
-                return new EvaluateResult(true, offlineResult, offlineResult, EvaluateSource.OfflineEvaluator);
             }
 
             return EvaluateResult.NoChange;
@@ -93,16 +88,7 @@ namespace GanglandUndercover.Online
             result = string.Empty;
             if (matchElapsedSeconds < timeLimitSeconds) return false;
 
-            int completedCount = tasks.Count(t => t.Completed);
-            if (evidenceScore >= Mathf.CeilToInt(evidenceTarget * 0.82f) ||
-                completedCount >= Mathf.CeilToInt(tasks.Count * 0.72f))
-            {
-                result = "警方胜利：行动超时前已掌握关键证据。";
-            }
-            else
-            {
-                result = "黑帮胜利：20 分钟窗口结束，关键证据未能闭合。";
-            }
+            result = "平局：行动窗口结束，双方均未完成决定性目标。";
             return true;
         }
 
@@ -193,13 +179,15 @@ namespace GanglandUndercover.Online
             Func<ulong, OnlineRole> getPrivateRole,
             IReadOnlyList<OnlineTaskState> tasks)
         {
-            int aliveGang = 0, alivePolice = 0, aliveUndercover = 0, aliveMole = 0, totalAlive = 0;
+            int aliveGang = 0, alivePolice = 0, aliveUndercover = 0, aliveMole = 0, totalAlive = 0, totalUndercover = 0;
 
             foreach (var kv in players)
             {
+                OnlineRole role = getPrivateRole(kv.Key);
+                if (role == OnlineRole.Undercover) totalUndercover++;
                 if (!kv.Value.Alive) continue;
                 totalAlive++;
-                switch (getPrivateRole(kv.Key))
+                switch (role)
                 {
                     case OnlineRole.Gang:       aliveGang++; break;
                     case OnlineRole.Police:     alivePolice++; break;
@@ -211,40 +199,19 @@ namespace GanglandUndercover.Online
             // 阵营归属：黑帮侧 = Gang + Mole，警方侧 = Police + Undercover
             int gangSide = aliveGang + aliveMole;
             int policeSide = alivePolice + aliveUndercover;
-            int aliveNonGangSide = alivePolice + aliveUndercover + aliveMole;
 
-            // 1) 证据链闭合
+            // 卧底是警方收网的必要条件；卧底出局立即触发黑帮胜利。
+            if (totalUndercover > 0 && aliveUndercover == 0)
+                return "黑帮胜利：卧底已被拔除。";
+
             if (evidenceScore >= evidenceTarget)
-                return "警方胜利：证据链闭合。";
+                return "警方胜利：卧底存活，证据链闭合，收网成功。";
 
-            // 2) 卧底特殊胜利：卧底是最后唯一存活者（优先于阵营全灭判定）
-            if (aliveUndercover == 1 && totalAlive == 1)
-                return "卧底胜利：港区暗线完美收网。";
-
-            // 3) 黑帮全灭（Gang + Mole 均出局）
             if (gangSide == 0 && totalAlive >= 1)
                 return "警方胜利：黑帮全部出局。";
 
-            // 4) 警方全灭（Police + Undercover 均出局）
             if (policeSide == 0 && totalAlive >= 1)
                 return "黑帮胜利：警方阵营全部出局。";
-
-            // 5) 黑帮人数碾压。用 aliveGang（不含 Mole）做比较，
-            //    平局时黑帮仍有优势（旧逻辑保持兼容）。
-            if (aliveGang > 0 && (aliveNonGangSide == 0 || (totalAlive >= 4 && aliveGang >= aliveNonGangSide)))
-                return "黑帮胜利：港区控制权失守。";
-
-            // 6) 全部任务完成 + 证据过半
-            int totalTasks = tasks.Count;
-            int completedTasks = tasks.Count(t => t.Completed);
-            int sabotagedTasks = tasks.Count(t => t.Sabotaged);
-
-            if (totalTasks > 0 && completedTasks >= totalTasks && evidenceScore >= Mathf.CeilToInt(evidenceTarget * 0.5f))
-                return "警方胜利：全部任务完成，证据链已足够收网。";
-
-            // 7) 破坏过半 + 证据不足
-            if (totalTasks > 0 && sabotagedTasks >= Mathf.CeilToInt(totalTasks * 0.5f) && evidenceScore < Mathf.CeilToInt(evidenceTarget * 0.3f))
-                return "黑帮胜利：关键设施遭到严重破坏，警方无力回天。";
 
             return string.Empty;
         }

@@ -15,6 +15,101 @@ namespace GanglandUndercover.Online
     {
         public Dictionary<ulong, OnlinePlayerState> Players => players;
         public IReadOnlyList<OnlineTaskState> Tasks => tasks;
+        public bool IsTaskVisibleToLocalPlayer(OnlineTaskState task)
+        {
+            return IsTaskVisibleToPlayer(LocalClientId(), task);
+        }
+
+        public bool HasLocalKillTarget => TryGetLocalKillTarget(out _);
+
+        private bool TryGetLocalKillTarget(out ulong targetClientId)
+        {
+            targetClientId = SkipVoteTarget;
+            ulong localClientId = LocalClientId();
+            if (!players.TryGetValue(localClientId, out OnlinePlayerState localState) || !localState.Alive)
+            {
+                return false;
+            }
+
+            return TryFindNearestVictim(localClientId, localState.Position, out targetClientId, out _);
+        }
+
+        internal bool IsTaskVisibleToPlayer(ulong clientId, OnlineTaskState task)
+        {
+            TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+            return task.Sabotaged
+                || taskSync == null
+                || !taskSync.HasAssignments
+                || taskSync.IsTaskAssignedTo(clientId, task.Id);
+        }
+
+        internal OnlineTaskState TaskForPlayer(ulong clientId, OnlineTaskState task)
+        {
+            TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+            return taskSync != null && taskSync.HasAssignments
+                ? taskSync.TaskForPlayer(clientId, task)
+                : task;
+        }
+
+        public OnlineTaskState TaskForLocalPlayer(OnlineTaskState task)
+        {
+            return TaskForPlayer(LocalClientId(), task);
+        }
+
+        public int PersonalTaskCount
+        {
+            get
+            {
+                TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+                return taskSync != null && taskSync.HasAssignments
+                    ? taskSync.AssignedCountFor(LocalClientId())
+                    : tasks.Count;
+            }
+        }
+
+        public int PersonalCompletedTaskCount
+        {
+            get
+            {
+                TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+                return taskSync != null && taskSync.HasAssignments
+                    ? taskSync.CompletedCountFor(LocalClientId())
+                    : CountCompletedTasks();
+            }
+        }
+
+        public int TeamTaskCount
+        {
+            get
+            {
+                TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+                return taskSync != null && taskSync.HasAssignments
+                    ? taskSync.TotalAssignedCount()
+                    : tasks.Count;
+            }
+        }
+
+        public int TeamCompletedTaskCount
+        {
+            get
+            {
+                TaskSync taskSync = syncManager != null ? syncManager.TaskSync : null;
+                return taskSync != null && taskSync.HasAssignments
+                    ? taskSync.CompletedCount(tasks)
+                    : CountCompletedTasks();
+            }
+        }
+        internal List<GameStateSnapshot.SnapshotTaskAssignmentEntry> TaskSyncAssignmentsSnapshot()
+        {
+            return syncManager != null && syncManager.TaskSync != null
+                ? syncManager.TaskSync.ExportAssignments()
+                : new List<GameStateSnapshot.SnapshotTaskAssignmentEntry>();
+        }
+
+        internal void LoadTaskSyncAssignments(IReadOnlyList<GameStateSnapshot.SnapshotTaskAssignmentEntry> assignments)
+        {
+            syncManager?.TaskSync?.LoadAssignments(assignments);
+        }
         public List<OnlineBodyState> Bodies => killSystem != null ? killSystem.bodies : null;
         public IReadOnlyList<string> CaseLog => caseLog;
         public OnlineRole LocalRole => localRole;
@@ -61,7 +156,7 @@ namespace GanglandUndercover.Online
         public bool IsMeetingPhase => phase == OnlineMatchPhase.Meeting || phase == OnlineMatchPhase.Voting;
         public bool TacticalMapOpen => tacticalMapOpen;
         public bool IntelBoardOpen => intelBoardOpen;
-        public string VoiceStatus => chatSystem != null ? "文本聊天: " + chatSystem.CurrentChannel : "文本聊天未初始化";
+        public string VoiceStatus => chatSystem != null ? "聊天: " + ChatSystem.ChannelDisplayName(chatSystem.CurrentChannel) : "聊天未初始化";
         public int VoiceParticipantCount => chatSystem != null ? chatSystem.MessageCount : 0;
         public bool VoiceRoutingEnabled => true; // 文本聊天始终可用
         public bool LocalTaskInputGateActive => minigameService != null && minigameService.HasActiveTask;
@@ -103,6 +198,13 @@ namespace GanglandUndercover.Online
         }
         public bool EditorForceActionPreviewForSmokeTest()
         {
+            // The smoke view represents the playable local room, so the HUD must
+            // exercise the same online/compact state as an actual preview match.
+            if (!localPreviewMode)
+            {
+                localPreviewMode = true;
+            }
+
             Vector3 showcasePosition = FindActionPreviewStartPosition();
 
             if (players.Count == 0)
@@ -297,10 +399,43 @@ namespace GanglandUndercover.Online
         }
         public void EditorTriggerTaskForSmokeTest(int taskId, bool asGang)
         {
-            ulong clientId = 0;
-            players[clientId] = new OnlinePlayerState(clientId, "烟测玩家", mapService.TaskPositionFor(taskId), true, true, OnlineRole.Unassigned, asGang ? OnlineProfession.Enforcer : OnlineProfession.Inspector, 0, false);
-            privateRoles[clientId] = asGang ? OnlineRole.Gang : OnlineRole.Police;
-            TryInteractWithTask(clientId, players[clientId]);
+            const ulong smokeClientId = ulong.MaxValue;
+            bool hadPlayer = players.TryGetValue(smokeClientId, out OnlinePlayerState previousPlayer);
+            bool hadRole = privateRoles.TryGetValue(smokeClientId, out OnlineRole previousRole);
+            bool wasMatchStarted = matchStarted;
+
+            try
+            {
+                players[smokeClientId] = new OnlinePlayerState(smokeClientId, "烟测玩家", mapService.TaskPositionFor(taskId), true, true, OnlineRole.Unassigned, asGang ? OnlineProfession.Enforcer : OnlineProfession.Inspector, 0, true);
+                privateRoles[smokeClientId] = asGang ? OnlineRole.Gang : OnlineRole.Police;
+
+                // The smoke hook validates task effects without allowing its temporary
+                // role to alter the live roster's victory calculation.
+                matchStarted = false;
+                TryInteractWithTask(smokeClientId, players[smokeClientId]);
+            }
+            finally
+            {
+                matchStarted = wasMatchStarted;
+
+                if (hadPlayer)
+                {
+                    players[smokeClientId] = previousPlayer;
+                }
+                else
+                {
+                    players.Remove(smokeClientId);
+                }
+
+                if (hadRole)
+                {
+                    privateRoles[smokeClientId] = previousRole;
+                }
+                else
+                {
+                    privateRoles.Remove(smokeClientId);
+                }
+            }
         }
         public void EditorOpenTaskPanelForSmokeTest(int taskId)
         {
@@ -337,6 +472,12 @@ namespace GanglandUndercover.Online
             if (phase != OnlineMatchPhase.Meeting && phase != OnlineMatchPhase.Voting)
             {
                 EditorForceMeetingForSmokeTest();
+            }
+
+            if (phase == OnlineMatchPhase.Meeting)
+            {
+                phase = OnlineMatchPhase.Voting;
+                phaseTimer = ruleSet.VotingSecondsFor(players.Count);
             }
 
             ulong voterClientId = SkipVoteTarget;
@@ -519,9 +660,11 @@ namespace GanglandUndercover.Online
                 return false;
             }
 
-            // 模拟小游戏完成回调
-            CompleteActiveTask();
-            return true;
+            // 模拟真实小游戏完成回调；经典任务面板的蓄力校验不适用于
+            // 已由 MiniGameBase 接管的富交互任务。
+            var activeGame = minigameService.ActiveMiniGame;
+            activeGame.OnComplete?.Invoke(activeGame);
+            return minigameService.ActiveTaskId < 0;
         }
         public void EditorStartLocalPlayablePreview()
         {
@@ -759,6 +902,11 @@ namespace GanglandUndercover.Online
         }
         private void EnsureRuntimeDependencies()
         {
+            if (syncManager == null)
+            {
+                syncManager = GetComponent<OnlineSyncManager>();
+            }
+
             EnsureBotController();
             EnsureKillSystem();
 
@@ -902,13 +1050,16 @@ namespace GanglandUndercover.Online
 
             OnlineRole role = LocalEffectiveRole();
 
-            if (role == OnlineRole.Gang || role == OnlineRole.Mole)
+            if (role == OnlineRole.Gang)
             {
                 return false;
             }
 
             OnlineTaskState nearestTask = FindNearestTask(localState.Position);
-            return nearestTask.Id >= 0 && (!nearestTask.Completed || nearestTask.Sabotaged);
+            nearestTask = TaskForPlayer(LocalClientId(), nearestTask);
+            return nearestTask.Id >= 0
+                && IsTaskVisibleToPlayer(LocalClientId(), nearestTask)
+                && (!nearestTask.Completed || nearestTask.Sabotaged);
         }
         private void UpdateEvidenceMilestone()
         {
@@ -997,9 +1148,13 @@ namespace GanglandUndercover.Online
                 repaired++;
             }
         }
-        private void ApplySabotageEffect(SabotageType sabotageType, string taskName)
+        private bool ApplySabotageEffect(SabotageType sabotageType, string taskName, ulong initiatorId = 0)
         {
-            taskService.ApplySabotageEffect(sabotageType, taskName);
+            if (!taskService.ApplySabotageEffect(sabotageType, taskName, initiatorId))
+            {
+                return false;
+            }
+
             switch (sabotageType)
             {
                 case SabotageType.Blackout:
@@ -1037,6 +1192,8 @@ namespace GanglandUndercover.Online
                     _patrolAlertActive = true;
                     break;
             }
+
+            return true;
         }
         private void RepairSabotageEffect(SabotageType sabotageType)
         {
@@ -1122,7 +1279,7 @@ namespace GanglandUndercover.Online
         private void UnlockAllRooms() => _lockedRoomIndices.Clear();
 
         /// <summary>Blackout 视野缩小倍数。</summary>
-        public float BlackoutVisionMultiplier => _blackoutVisionReduced ? 0.4f : 1f;
+        public float BlackoutVisionMultiplier => _blackoutVisionReduced && !IsDarkVisionActive(LocalClientId()) ? 0.4f : 1f;
 
         /// <summary>Blackout 交互范围倍率。</summary>
         public float BlackoutInteractionMultiplier => _blackoutInteractionHalved ? 0.5f : 1f;
@@ -1133,10 +1290,10 @@ namespace GanglandUndercover.Online
         /// <summary>巡逻警报是否激活。</summary>
         public bool IsPatrolAlertActive => _patrolAlertActive;
 
-        internal bool TryFindNearestVictim(Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
+        internal bool TryFindNearestVictim(ulong attackerClientId, Vector3 position, out ulong victimClientId, out OnlinePlayerState victim)
         {
             if (killSystem != null)
-                return killSystem.TryFindNearestVictim(position, out victimClientId, out victim);
+                return killSystem.TryFindNearestVictim(attackerClientId, position, out victimClientId, out victim);
             victimClientId = SkipVoteTarget;
             victim = default;
             return false;
@@ -1302,21 +1459,23 @@ namespace GanglandUndercover.Online
         }
         private OnlineTaskState FindRecommendedTask(Vector3 position)
         {
-            OnlineTaskState best = tasks.Count > 0 ? tasks[0] : new OnlineTaskState(-1, "无任务", Vector3.zero, 0, 1, false, false);
+            OnlineTaskState best = new OnlineTaskState(-1, "无待办任务", position, 0, 1, true, false);
             float bestScore = float.MaxValue;
+            ulong localClientId = LocalClientId();
 
             foreach (OnlineTaskState task in tasks)
             {
-                if (task.Completed && !task.Sabotaged)
+                OnlineTaskState playerTask = TaskForPlayer(localClientId, task);
+                if (!IsTaskVisibleToPlayer(localClientId, playerTask) || playerTask.Completed && !playerTask.Sabotaged)
                 {
                     continue;
                 }
 
-                float score = Vector3.Distance(position, task.Position) + (task.Sabotaged ? -8f : 0f);
+                float score = Vector3.Distance(position, playerTask.Position) + (playerTask.Sabotaged ? -8f : 0f);
 
                 if (score < bestScore)
                 {
-                    best = task;
+                    best = playerTask;
                     bestScore = score;
                 }
             }

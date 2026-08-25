@@ -11,12 +11,10 @@ namespace GanglandUndercover.Online
         // --- TryUseUnderworldPassage ---
         private bool TryUseUnderworldPassage(ulong senderClientId, OnlinePlayerState player)
         {
-            // 1. 权限检查：仅 Gang/Mole 可用
+            // 1. 权限检查：仅真黑帮和仍在潜伏的卧底可用
             OnlineRole role = GetPrivateRole(senderClientId);
-            if (role != OnlineRole.Gang && role != OnlineRole.Mole)
+            if (!OnlineMatchUtils.CanUseUnderworldPassage(role) || HasBetrayed(senderClientId))
             {
-                status = player.DisplayName + " 试图使用暗线通道但权限不足（非黑帮）。";
-                BroadcastSnapshot();
                 return false;
             }
 
@@ -52,8 +50,6 @@ namespace GanglandUndercover.Online
 
             if (nearestIdx < 0)
             {
-                status = player.DisplayName + " 附近没有暗线通道入口。";
-                BroadcastSnapshot();
                 return false;
             }
 
@@ -69,7 +65,7 @@ namespace GanglandUndercover.Online
             player.VentCooldown = ruleSet.VentCooldownSeconds;
             players[senderClientId] = player;
 
-            string msg = player.DisplayName + " 通过暗线通道从节点 " + nearestIdx + " 瞬移到节点 " + targetIdx + "。";
+            string msg = "暗线通道出现短暂动静。";
             status = msg;
             AddCaseLog(msg);
             PlayCue("vent");

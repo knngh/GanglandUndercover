@@ -23,9 +23,10 @@ namespace GanglandUndercover.Online
         [Tooltip("按人数配置阵营比例。列表按 playerCount 升序排列，获取时取 <= 当前人数的最大预设。")]
         public RoleDistribution[] RoleDistributionTable = new RoleDistribution[]
         {
-            new RoleDistribution { playerCount = 4,  gang = 1, undercover = 0, mole = 0 },
+            // 4 人仅作为本地预览兼容档，也必须保留核心卧底博弈。
+            new RoleDistribution { playerCount = 4,  gang = 1, undercover = 1, mole = 0 },
             new RoleDistribution { playerCount = 5,  gang = 1, undercover = 1, mole = 0 },
-            new RoleDistribution { playerCount = 6,  gang = 1, undercover = 1, mole = 1 },
+            new RoleDistribution { playerCount = 6,  gang = 1, undercover = 1, mole = 0 },
             new RoleDistribution { playerCount = 7,  gang = 2, undercover = 1, mole = 0 },
             new RoleDistribution { playerCount = 8,  gang = 2, undercover = 1, mole = 1 },
             new RoleDistribution { playerCount = 9,  gang = 2, undercover = 2, mole = 1 },
@@ -81,7 +82,7 @@ namespace GanglandUndercover.Online
 
         [Header("击杀与报案")]
         [Tooltip("击杀互动范围（世界单位）。")]
-        public float KillRange = 0.9f;
+        public float KillRange = 1.1f;
         [Tooltip("报案互动范围（世界单位）。")]
         public float ReportRange = 1.25f;
         [Tooltip("击杀冷却时间（秒）。M4 收紧至 25s，确保 10-15 分钟内击杀密度合理。")]
@@ -120,8 +121,8 @@ namespace GanglandUndercover.Online
         [Header("房间规则开关")]
         [Tooltip("人数不足时是否自动 AI 补位。")]
         public bool RoomAutoFillAi = true;
-        [Tooltip("出局时是否公开角色身份。")]
-        public bool RevealRoleOnEject = true;
+        [Tooltip("出局时是否公开角色身份。正式规则默认隐藏，仅保留为房主自定义规则。")]
+        public bool RevealRoleOnEject = false;
         [Tooltip("行动阶段是否启用近距离语音。M1 收尾：Vivox 已移除，方案 B（文本聊天）替代。")]
         public bool ProximityVoiceEnabled = true;
 
@@ -152,6 +153,15 @@ namespace GanglandUndercover.Online
         public float AiActionGraceSeconds = 22f;
         [Tooltip("AI 行动延迟（秒），本地预览模式。")]
         public float PreviewAiActionGraceSeconds = 55f;
+        [Tooltip("Bot 发现尸体时主动报案的概率。")]
+        [Range(0f, 1f)]
+        public float BotBodyReportProbability = 0.42f;
+        [Tooltip("Bot 在行动阶段主动发起紧急会议的概率。")]
+        [Range(0f, 1f)]
+        public float BotEmergencyMeetingProbability = 0.12f;
+        [Tooltip("Bot 移动速度倍率。")]
+        [Range(0.5f, 4f)]
+        public float BotMoveSpeedMultiplier = 1f;
 
         [Header("地图交互")]
         [Tooltip("通用互动范围（世界单位）。")]
@@ -228,10 +238,7 @@ namespace GanglandUndercover.Online
             new ProfessionAbilitySet
             {
                 Profession = OnlineProfession.UndercoverAgent,
-                Abilities = new[]
-                {
-                    new ProfessionAbility { Type = AbilityType.SecretVote, Multiplier = 1f, BonusValue = 0f, Enabled = true },
-                }
+                Abilities = Array.Empty<ProfessionAbility>()
             },
             new ProfessionAbilitySet
             {
@@ -247,7 +254,6 @@ namespace GanglandUndercover.Online
                 Profession = OnlineProfession.Mole,
                 Abilities = new[]
                 {
-                    new ProfessionAbility { Type = AbilityType.SecretVote, Multiplier = 1f, BonusValue = 0f, Enabled = true },
                     new ProfessionAbility { Type = AbilityType.SabotageCooldownReduce, Multiplier = 0.9f, BonusValue = 0f, Enabled = true },
                 }
             },

@@ -145,9 +145,8 @@ namespace GanglandUndercover.Online
                 return null;
             }
 
-            tex.filterMode = FilterMode.Point;
             loadedResourcePath = resourcePath;
-            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), pixelsPerUnit);
+            return Sprite2DAssetCache.CreateRuntimeSprite(tex, resourcePath, pixelsPerUnit);
         }
 
         public void Initialize(GameObject worldRoot, OnlineMapService mapService,
@@ -530,14 +529,17 @@ namespace GanglandUndercover.Online
                 _diamondSprite != null && _capsuleSprite != null)
                 return;
 
-            // E1: 使用美术增强版程序化 sprite 替代纯色矩形
+            // Keep authored LimeZu assets for explicit map tiles and props below. The
+            // primitive helpers are reused for hundreds of geometry overlays, so they
+            // must stay neutral shapes instead of stretching a wall-atlas cell across
+            // every beam, floor panel, and shadow.
             GanglandUndercover.Art.Sprite2DAssetCache.Ensure();
 
-            _roundedRectSprite = GanglandUndercover.Art.Sprite2DAssetCache.WallBlock;
-            _circleSprite       = GanglandUndercover.Art.Sprite2DAssetCache.FloorTile;
-            _softCircleSprite   = GanglandUndercover.Art.Sprite2DAssetCache.TaskGlow;
-            _diamondSprite      = GanglandUndercover.Art.Sprite2DAssetCache.CharDirectionArrow;
-            _capsuleSprite      = GanglandUndercover.Art.Sprite2DAssetCache.CorridorTile;
+            _roundedRectSprite = CreateRoundedRectSprite("Runtime Rounded Rect", 32, 4);
+            _circleSprite       = CreateCircleSprite("Runtime Circle", 32, false);
+            _softCircleSprite   = CreateCircleSprite("Runtime Soft Circle", 64, true);
+            _diamondSprite      = CreateDiamondSprite("Runtime Diamond", 32);
+            _capsuleSprite      = CreateRoundedRectSprite("Runtime Capsule", 32, 8);
         }
 
         private GameObject CreateSpriteObject(string objectName, Sprite sprite, Color color)
@@ -851,6 +853,65 @@ namespace GanglandUndercover.Online
             prop.transform.localScale = _mapService.ScaleMapSize(scale);
             SetSortingFromZ(prop);
             return prop;
+        }
+
+        /// <summary>
+        /// Creates a short-lived ability marker at an already-scaled runtime
+        /// position. Player state positions are stored in world coordinates, so
+        /// this deliberately bypasses ScaleMapPosition used by authored props.
+        /// </summary>
+        public GameObject CreateAbilityFeedbackVisual(string abilityKey, Vector3 worldPosition, Color color)
+        {
+            EnsureRuntimeSprites();
+
+            GameObject root = new GameObject("Ability VFX " + abilityKey);
+            root.transform.SetParent(_worldRoot.transform, false);
+            root.transform.position = worldPosition + new Vector3(0f, 0f, 0.18f);
+            root.transform.localScale = Vector3.one;
+
+            CreateSpriteChild(root.transform, "Ability VFX halo", _softCircleSprite,
+                Vector3.zero, new Vector3(0.52f, 0.52f, 0.04f), WithAlpha(color, 0.45f));
+            CreateSpriteChild(root.transform, "Ability VFX core", _diamondSprite,
+                new Vector3(0f, 0f, 0.04f), new Vector3(0.22f, 0.22f, 0.03f), WithAlpha(color, 0.95f));
+
+            switch (abilityKey)
+            {
+                case "FootprintTrack":
+                    CreateSpriteChild(root.transform, "Ability VFX footprint left", _capsuleSprite,
+                        new Vector3(-0.2f, -0.2f, 0.05f), new Vector3(0.13f, 0.24f, 0.02f), WithAlpha(color, 0.9f));
+                    CreateSpriteChild(root.transform, "Ability VFX footprint right", _capsuleSprite,
+                        new Vector3(0.2f, -0.34f, 0.05f), new Vector3(0.13f, 0.24f, 0.02f), WithAlpha(color, 0.72f));
+                    break;
+                case "CorpseExamine":
+                    CreateSpriteChild(root.transform, "Ability VFX evidence ring", _circleSprite,
+                        new Vector3(0f, 0.26f, 0.05f), new Vector3(0.17f, 0.17f, 0.02f), WithAlpha(color, 0.92f));
+                    CreateSpriteChild(root.transform, "Ability VFX evidence trace", _roundedRectSprite,
+                        new Vector3(0.2f, 0.08f, 0.05f), new Vector3(0.28f, 0.035f, 0.02f), WithAlpha(color, 0.84f));
+                    break;
+                case "RemoteSurveillance":
+                    CreateSpriteChild(root.transform, "Ability VFX monitor top", _roundedRectSprite,
+                        new Vector3(0f, 0.3f, 0.05f), new Vector3(0.48f, 0.035f, 0.02f), WithAlpha(color, 0.9f));
+                    CreateSpriteChild(root.transform, "Ability VFX monitor bottom", _roundedRectSprite,
+                        new Vector3(0f, -0.3f, 0.05f), new Vector3(0.48f, 0.035f, 0.02f), WithAlpha(color, 0.72f));
+                    break;
+                case "DarkVision":
+                    CreateSpriteChild(root.transform, "Ability VFX vision beam", _softCircleSprite,
+                        new Vector3(0f, 0.38f, 0.05f), new Vector3(0.3f, 0.12f, 0.02f), WithAlpha(color, 0.78f));
+                    CreateSpriteChild(root.transform, "Ability VFX vision eye", _circleSprite,
+                        new Vector3(0f, 0.42f, 0.07f), new Vector3(0.1f, 0.1f, 0.02f), Color.white);
+                    break;
+            }
+
+            SetSortingFromZ(root);
+            AbilityFeedbackVfx feedback = root.AddComponent<AbilityFeedbackVfx>();
+            feedback.Configure(1.25f);
+            return root;
+        }
+
+        private static Color WithAlpha(Color color, float alpha)
+        {
+            color.a = alpha;
+            return color;
         }
 
         public GameObject CreateRotatedProp(string propName, Vector3 position, Vector3 scale, Color color,
@@ -1771,6 +1832,15 @@ namespace GanglandUndercover.Online
             CreateSpriteChild(root.transform, "Stage2 Forensic chalk trace", _roundedRectSprite,
                 new Vector3(0.1f, -0.07f, 0.04f), new Vector3(0.14f, 0.035f, 0.01f),
                 new Color(1f, 1f, 1f, 0.42f));
+
+            // 犯罪现场粉笔轮廓（Resources 优先）
+            var chalkOutline = GanglandUndercover.Art.MapArtCache.BodyOutline;
+            if (chalkOutline != null)
+            {
+                CreateSpriteChild(root.transform, "CrimeScene ChalkOutline", chalkOutline,
+                    new Vector3(0f, 0f, 0.045f), new Vector3(0.40f, 0.28f, 0.01f), Color.white);
+            }
+
             CreateSpriteChild(root.transform, "Stage2 Forensic sample vial", _circleSprite,
                 new Vector3(0.15f, 0.08f, 0.04f), new Vector3(0.035f, 0.035f, 0.01f),
                 new Color(0.16f, 0.72f, 0.95f, 0.86f));
@@ -2117,12 +2187,14 @@ namespace GanglandUndercover.Online
 
         public static int SortingOrderForZ(float z)
         {
-            return Mathf.RoundToInt(-z * 1000f);
+            // The orthographic camera looks along +Z from its negative Z position.
+            // Larger world Z is therefore visually in front and must sort later.
+            return Mathf.RoundToInt(z * 1000f);
         }
 
         public static int SortingOrderForLocalZ(float localZ)
         {
-            return Mathf.RoundToInt(-localZ * 1000f);
+            return Mathf.RoundToInt(localZ * 1000f);
         }
 
         // ====================================================================
@@ -2885,6 +2957,13 @@ namespace GanglandUndercover.Online
             Sprite sprite = rusted ? Sprite2DAssetCache.KowloonVentIcon : Sprite2DAssetCache.VentIcon;
             string resourcePath = rusted ? Sprite2DAssetCache.KowloonVentIconResourcePath : Sprite2DAssetCache.VentIconResourcePath;
             CreateRuntimeMapProp("地图小件 " + name + " 实物通风口", sprite, resourcePath, position, new Vector3(0.42f, 0.42f, 0.06f), Color.white);
+
+            // Resources 通风口 sprite 覆盖层（更精细的美术）
+            var ventArt = GanglandUndercover.Art.MapArtCache.VentClosed;
+            if (ventArt != null)
+            {
+                CreateRuntimeMapProp(name + " ArtVent", ventArt, string.Empty, position + new Vector3(0f, 0f, 0.005f), new Vector3(0.44f, 0.44f, 0.06f), Color.white);
+            }
         }
 
         private void CreateSharedCityProps()

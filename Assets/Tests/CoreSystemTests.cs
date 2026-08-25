@@ -98,14 +98,14 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
-        public void RoleDistribution_4Players_Returns1GangNoUndercover()
+        public void RoleDistribution_4PlayerPreview_StillIncludesUndercover()
         {
             object dist = GetRoleDistribution(4);
 
             Assert.AreEqual(1, FieldInt(dist, "gang"));
-            Assert.AreEqual(0, FieldInt(dist, "undercover"));
+            Assert.AreEqual(1, FieldInt(dist, "undercover"));
             Assert.AreEqual(0, FieldInt(dist, "mole"));
-            Assert.AreEqual(3, PropertyInt(dist, "PoliceCount"));
+            Assert.AreEqual(2, PropertyInt(dist, "PoliceCount"));
         }
 
         [Test]
@@ -115,9 +115,70 @@ namespace GanglandUndercover.Tests
             object high = GetRoleDistribution(12);
 
             Assert.AreEqual(1, FieldInt(low, "gang"));
-            Assert.AreEqual(0, FieldInt(low, "undercover"));
+            Assert.AreEqual(1, FieldInt(low, "undercover"));
             Assert.AreEqual(3, FieldInt(high, "gang"));
             Assert.AreEqual(2, FieldInt(high, "undercover"));
+        }
+
+        [Test]
+        public void RuleSet_DefaultsKeepIdentityHiddenAndUseDesignedKillRange()
+        {
+            object ruleSet = CreateRuleSet();
+
+            Assert.AreEqual(1.1f, FieldFloat(ruleSet, "KillRange"), 0.001f);
+            Assert.IsFalse((bool)ruleSet.GetType().GetField("RevealRoleOnEject").GetValue(ruleSet),
+                "双面身份博弈要求身份只在结算时统一公开。");
+        }
+
+        [Test]
+        public void RolePermissions_MatchDoubleAgentFactionMatrix()
+        {
+            Type utilsType = RuntimeType("GanglandUndercover.Online.OnlineMatchUtils");
+            Type roleType = RuntimeType("GanglandUndercover.Online.OnlineRole");
+
+            object gang = Enum.Parse(roleType, "Gang");
+            object undercover = Enum.Parse(roleType, "Undercover");
+            object mole = Enum.Parse(roleType, "Mole");
+            object police = Enum.Parse(roleType, "Police");
+
+            Assert.IsTrue((bool)InvokeStatic(utilsType, "CanSabotage", gang));
+            Assert.IsTrue((bool)InvokeStatic(utilsType, "CanSabotage", undercover));
+            Assert.IsTrue((bool)InvokeStatic(utilsType, "CanSabotage", mole));
+            Assert.IsFalse((bool)InvokeStatic(utilsType, "CanSabotage", police));
+
+            Assert.IsTrue((bool)InvokeStatic(utilsType, "CanUseUnderworldPassage", gang));
+            Assert.IsTrue((bool)InvokeStatic(utilsType, "CanUseUnderworldPassage", undercover));
+            Assert.IsFalse((bool)InvokeStatic(utilsType, "CanUseUnderworldPassage", mole));
+            Assert.IsFalse((bool)InvokeStatic(utilsType, "CanUseUnderworldPassage", police));
+        }
+
+        [Test]
+        public void PublicPresentation_MapsDoubleAgentsToCoverProfessions()
+        {
+            Type utilsType = RuntimeType("GanglandUndercover.Online.OnlineMatchUtils");
+            Type roleType = RuntimeType("GanglandUndercover.Online.OnlineRole");
+
+            object gangCover = InvokeStatic(utilsType, "PublicProfessionFor", Enum.Parse(roleType, "Gang"));
+            object policeCover = InvokeStatic(utilsType, "PublicProfessionFor", Enum.Parse(roleType, "Police"));
+
+            Assert.AreEqual("Enforcer", gangCover.ToString());
+            Assert.AreEqual("Inspector", policeCover.ToString());
+        }
+
+        [Test]
+        public void ChatPresentation_UsesCoverUntilDeathOrResult()
+        {
+            Type utilsType = RuntimeType("GanglandUndercover.Online.OnlineMatchUtils");
+            Type roleType = RuntimeType("GanglandUndercover.Online.OnlineRole");
+            Type phaseType = RuntimeType("GanglandUndercover.Online.OnlineMatchPhase");
+            object undercover = Enum.Parse(roleType, "Undercover");
+            object gangCover = Enum.Parse(roleType, "Gang");
+            object action = Enum.Parse(phaseType, "Action");
+            object result = Enum.Parse(phaseType, "Result");
+
+            Assert.AreEqual("Gang", InvokeStatic(utilsType, "ChatPresentationRole", undercover, gangCover, true, action).ToString());
+            Assert.AreEqual("Undercover", InvokeStatic(utilsType, "ChatPresentationRole", undercover, gangCover, false, action).ToString());
+            Assert.AreEqual("Undercover", InvokeStatic(utilsType, "ChatPresentationRole", undercover, gangCover, true, result).ToString());
         }
 
         [Test]
@@ -197,7 +258,7 @@ namespace GanglandUndercover.Tests
             Assert.AreEqual(1200f, FieldFloat(ruleSet, "MatchHardLimitSeconds"), 0.001f,
                 "Alpha 节奏硬上限必须保持 20 分钟。");
 
-            AssertAlphaPacingEnvelope(ruleSet, 6, expectedGang: 1, expectedUndercover: 1, expectedMole: 1,
+            AssertAlphaPacingEnvelope(ruleSet, 6, expectedGang: 1, expectedUndercover: 1, expectedMole: 0,
                 expectedTasks: 20, expectedEvidenceTarget: 34, expectedKillCooldown: 25f,
                 expectedMeetingWindow: 75f, expectedEmergencyCooldown: 75f);
             AssertAlphaPacingEnvelope(ruleSet, 8, expectedGang: 2, expectedUndercover: 1, expectedMole: 1,
@@ -244,6 +305,232 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void StartMatch_AssignsTasksByPublicCoverIdentity()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 8, maxPlayers: 8, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 8UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+
+                ulong undercoverId = fixture.FindClientIdByPrivateRole("Undercover");
+                ulong moleId = fixture.FindClientIdByPrivateRole("Mole");
+                int[] undercoverTasks = fixture.AssignedTaskIds(undercoverId);
+                int[] moleTasks = fixture.AssignedTaskIds(moleId);
+                CollectionAssert.IsNotEmpty(undercoverTasks);
+                CollectionAssert.IsNotEmpty(moleTasks);
+                Assert.AreEqual(4, undercoverTasks.Length, "默认规则应给卧底分配 4 个黑帮伪装任务。");
+                Assert.AreEqual(4, moleTasks.Length, "默认规则应给内鬼分配 4 个警方伪装任务。");
+                for (ulong clientId = 1UL; clientId <= 8UL; clientId++)
+                {
+                    Assert.AreEqual(4, fixture.AssignedTaskIds(clientId).Length,
+                        "默认规则应给每位玩家分配恰好 4 个个人任务，玩家 " + clientId + " 数量不符。");
+                }
+
+                foreach (int taskId in undercoverTasks)
+                {
+                    Assert.IsTrue(fixture.IsSabotageTask(taskId),
+                        "卧底公开为黑帮，必须领取黑帮伪装任务池。");
+                }
+
+                bool moleHasInvestigationTask = false;
+                foreach (int taskId in moleTasks)
+                {
+                    if (!fixture.IsSabotageTask(taskId))
+                    {
+                        moleHasInvestigationTask = true;
+                        break;
+                    }
+                }
+
+                Assert.IsTrue(moleHasInvestigationTask,
+                    "内鬼公开为警察，必须领取警察调查任务池以窃取情报。");
+            }
+        }
+
+        [Test]
+        public void StartMatch_ClearsDoubleAgentProgressFromPreviousRound()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 8, maxPlayers: 8, autoFillAi: false);
+                for (ulong clientId = 1UL; clientId <= 8UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                ulong moleId = fixture.FindClientIdByPrivateRole("Mole");
+                ulong undercoverId = fixture.FindClientIdByPrivateRole("Undercover");
+                fixture.AccumulateMoleIntel(moleId, 5);
+                fixture.AccumulateUndercoverIntel(undercoverId, 3);
+                fixture.AssignMoleHit(moleId);
+                Assert.Greater(fixture.GetMoleIntel(moleId), 0);
+                Assert.Greater(fixture.GetUndercoverIntel(undercoverId), 0);
+
+                fixture.StartOnlineMatchCore();
+
+                Assert.AreEqual(0, fixture.GetMoleIntel(moleId));
+                Assert.AreEqual(0, fixture.GetUndercoverIntel(undercoverId));
+                Assert.AreEqual(0, fixture.CollectionCount("_moleObjectives"));
+                Assert.IsFalse(fixture.HasMoleHitTarget(moleId));
+            }
+        }
+
+        [Test]
+        public void TaskStart_RejectsUnassignedTaskAndAcceptsAssignedTask()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 8, maxPlayers: 8, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 8UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                ulong policeId = fixture.FindClientIdByPrivateRole("Police");
+                int[] assignedTaskIds = fixture.AssignedTaskIds(policeId);
+                CollectionAssert.IsNotEmpty(assignedTaskIds);
+
+                var assignedSet = new HashSet<int>(assignedTaskIds);
+                int unassignedTaskId = -1;
+                for (int taskId = 0; taskId < 28; taskId++)
+                {
+                    if (!assignedSet.Contains(taskId))
+                    {
+                        unassignedTaskId = taskId;
+                        break;
+                    }
+                }
+
+                Assert.GreaterOrEqual(unassignedTaskId, 0, "测试需要至少一个未分配任务。");
+                fixture.SetPlayerPosition(policeId, fixture.TaskPosition(unassignedTaskId));
+                Assert.IsFalse(fixture.InvokeBoolOutString("ValidateTaskStart", policeId, unassignedTaskId, out string rejectedReason));
+                StringAssert.Contains("未分配", rejectedReason);
+
+                int assignedTaskId = assignedTaskIds[0];
+                fixture.SetPlayerPosition(policeId, fixture.TaskPosition(assignedTaskId));
+                Assert.IsTrue(fixture.InvokeBoolOutString("ValidateTaskStart", policeId, assignedTaskId, out string acceptedReason), acceptedReason);
+            }
+        }
+
+        [Test]
+        public void TaskList_ShowsLocalAssignmentsAndGlobalRepairCrisesOnly()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 8, maxPlayers: 8, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 0UL; clientId < 8UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                int[] assignedTaskIds = fixture.AssignedTaskIds(0UL);
+                CollectionAssert.IsNotEmpty(assignedTaskIds);
+
+                var assignedSet = new HashSet<int>(assignedTaskIds);
+                int unassignedTaskId = -1;
+                for (int taskId = 0; taskId < 28; taskId++)
+                {
+                    if (!assignedSet.Contains(taskId))
+                    {
+                        unassignedTaskId = taskId;
+                        break;
+                    }
+                }
+
+                Assert.GreaterOrEqual(unassignedTaskId, 0);
+                string taskList = fixture.PropertyString("TaskListText");
+                StringAssert.Contains("[" + fixture.TaskMapCode(assignedTaskIds[0]) + "]", taskList);
+                StringAssert.DoesNotContain("[" + fixture.TaskMapCode(unassignedTaskId) + "]", taskList);
+
+                fixture.SetExistingTaskSabotaged(unassignedTaskId, true);
+                StringAssert.Contains("[" + fixture.TaskMapCode(unassignedTaskId) + "]", fixture.PropertyString("TaskListText"),
+                    "未分配设施进入破坏状态后，应作为全局修复危机显示给玩家。");
+            }
+        }
+
+        [Test]
+        public void TaskInteraction_DoesNotAdvanceUnassignedTask()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 8, maxPlayers: 8, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 8UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+                ulong policeId = fixture.FindClientIdByPrivateRole("Police");
+                var assignedSet = new HashSet<int>(fixture.AssignedTaskIds(policeId));
+                int unassignedTaskId = -1;
+                for (int taskId = 0; taskId < 28; taskId++)
+                {
+                    if (!assignedSet.Contains(taskId))
+                    {
+                        unassignedTaskId = taskId;
+                        break;
+                    }
+                }
+
+                fixture.SetPlayerPosition(policeId, fixture.TaskPosition(unassignedTaskId));
+                int progressBefore = fixture.TaskProgress(unassignedTaskId);
+                fixture.InteractWithTask(policeId);
+
+                Assert.AreEqual(progressBefore, fixture.TaskProgress(unassignedTaskId));
+                StringAssert.Contains("未分配", fixture.PropertyString("Status"));
+            }
+        }
+
+        [Test]
+        public void SharedTaskStation_EachAssignedPlayerCompletesIndependently()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Action");
+                fixture.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.AttachSyncManager();
+                fixture.AssignTask(1UL, 0);
+                fixture.AssignTask(2UL, 0);
+
+                fixture.MarkTaskActive(1UL, 0);
+                Assert.IsTrue(
+                    fixture.InvokeBoolOutString("ValidateTaskStart", 2UL, 0, out string concurrentStartError),
+                    "共享任务站应允许不同玩家同时处理各自任务：" + concurrentStartError);
+                fixture.MarkTaskActive(2UL, 0);
+                Assert.IsTrue(
+                    fixture.InvokeBoolOutString("ValidateAndCompleteTask", 1UL, 0, out string firstError),
+                    firstError);
+
+                Assert.IsTrue(
+                    fixture.InvokeBoolOutString("ValidateAndCompleteTask", 2UL, 0, out string secondError),
+                    secondError);
+            }
+        }
+
+        [Test]
         public void TimeLimit_NotReached_ReturnsFalse()
         {
             object bridge = CreateVictoryBridge();
@@ -256,7 +543,7 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
-        public void TimeLimit_EvidenceHigh_PoliceWins()
+        public void TimeLimit_EvidenceHigh_StillEndsInDraw()
         {
             object bridge = CreateVictoryBridge();
             Array tasks = MakeTasks((true, false));
@@ -264,11 +551,11 @@ namespace GanglandUndercover.Tests
             bool hasResult = TryTimeLimit(bridge, 350f, 300f, 9, 10, tasks, out string result);
 
             Assert.IsTrue(hasResult);
-            StringAssert.Contains("警方胜利", result);
+            StringAssert.Contains("平局", result);
         }
 
         [Test]
-        public void TimeLimit_EvidenceLow_GangWins()
+        public void TimeLimit_EvidenceLow_StillEndsInDraw()
         {
             object bridge = CreateVictoryBridge();
             Array tasks = MakeTasks((false, false), (false, false));
@@ -276,11 +563,11 @@ namespace GanglandUndercover.Tests
             bool hasResult = TryTimeLimit(bridge, 350f, 300f, 2, 10, tasks, out string result);
 
             Assert.IsTrue(hasResult);
-            StringAssert.Contains("黑帮胜利", result);
+            StringAssert.Contains("平局", result);
         }
 
         [Test]
-        public void TimeLimit_TasksHigh_PoliceWins()
+        public void TimeLimit_TasksHigh_StillEndsInDraw()
         {
             object bridge = CreateVictoryBridge();
             Array tasks = MakeTasks((true, false), (true, false));
@@ -288,7 +575,7 @@ namespace GanglandUndercover.Tests
             bool hasResult = TryTimeLimit(bridge, 350f, 300f, 3, 10, tasks, out string result);
 
             Assert.IsTrue(hasResult);
-            StringAssert.Contains("警方胜利", result);
+            StringAssert.Contains("平局", result);
         }
 
         [Test]
@@ -311,7 +598,24 @@ namespace GanglandUndercover.Tests
                 fixture.ResolveTimeLimitOutcome();
 
                 Assert.AreEqual("Result", fixture.PhaseName());
-                StringAssert.Contains("警方胜利", fixture.PropertyString("Status"));
+                StringAssert.Contains("平局", fixture.PropertyString("Status"));
+            }
+        }
+
+        [Test]
+        public void MatchClock_AdvancesDuringMeetingAndVoting()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetMatchStarted(true);
+                fixture.SetPhase("Meeting");
+                fixture.EnsureServices();
+                fixture.SetGlobalTimers(phaseTimer: 20f, emergencyCooldown: 0f, aiGrace: 0f, elapsed: 1199f);
+
+                fixture.AdvanceMatchClock(1f);
+                Assert.AreEqual(1200f, fixture.MatchElapsed(), 0.001f);
+                Assert.AreEqual("Result", fixture.PhaseName(),
+                    "20 分钟硬上限必须在讨论阶段生效，不能因为尚未回到 Action 而继续超时。");
             }
         }
 
@@ -568,6 +872,51 @@ namespace GanglandUndercover.Tests
 
                 Assert.IsFalse(PropertyBool(menu, "SettingsPanelVisible"));
                 Assert.IsNotNull(FindObjectNamedIncludingInactive("SettingsPanel"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(menuHost);
+                DestroyAllObjectsNamed("Settings Manager");
+                DestroyAllObjectsNamed("UICanvas_Fallback");
+            }
+        }
+
+        [Test]
+        public void MainMenu_UsesHarbourArtAndReadablePrimaryActions()
+        {
+            Type menuType = RuntimeType("GanglandUndercover.UI.MainMenuController");
+            GameObject menuHost = new GameObject("MainMenuVisualRegressionHost");
+
+            try
+            {
+                menuHost.AddComponent(menuType);
+                object menu = menuHost.GetComponent(menuType);
+                menuType.GetMethod("Initialize").Invoke(menu, new object[] { null });
+
+                GameObject backdrop = FindObjectNamedIncludingInactive("HarbourBackdrop");
+                Assert.IsNotNull(backdrop, "主菜单必须以港区场景建立第一眼的游戏身份。");
+                Assert.IsNotNull(backdrop.GetComponent<UnityEngine.UI.Image>().sprite);
+
+                GameObject mapPreview = FindObjectNamedIncludingInactive("MapPreview");
+                Assert.IsNotNull(mapPreview, "主菜单必须显示当前行动区域预览。");
+                Assert.AreEqual(
+                    "gangland-harbour-map-preview-v1",
+                    mapPreview.GetComponent<UnityEngine.UI.Image>().sprite.texture.name,
+                    "九龙港区必须优先使用与登录背景同方向的 AI 审阅地点预览。");
+
+                for (int i = 0; i < 4; i++)
+                {
+                    GameObject portrait = FindObjectNamedIncludingInactive("RolePortrait_" + i);
+                    Assert.IsNotNull(portrait, "每个可选身份都必须显示实际角色头像，而不是字母占位。第 " + i + " 项缺失。");
+                    Assert.IsNotNull(portrait.GetComponent<UnityEngine.UI.Image>().sprite);
+                }
+
+                Assert.IsNotNull(FindObjectNamedIncludingInactive("ConnectionState"));
+
+                GameObject offlineAction = FindObjectNamedIncludingInactive("StartButton");
+                GameObject onlineAction = FindObjectNamedIncludingInactive("EnterLobbyButton");
+                Assert.GreaterOrEqual(offlineAction.GetComponent<RectTransform>().sizeDelta.y, 60f);
+                Assert.GreaterOrEqual(onlineAction.GetComponent<RectTransform>().sizeDelta.y, 60f);
             }
             finally
             {
@@ -1402,6 +1751,23 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void HostMigration_OnlyServerSenderCanDeliverHostMessages()
+        {
+            Type migrationType = RuntimeType("GanglandUndercover.Online.HostMigrationManager");
+            MethodInfo policy = migrationType.GetMethod(
+                "IsTrustedHostMessageSender",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            Assert.IsNotNull(policy, "HostMigrationManager 应集中判定迁移消息的发送者权限。");
+
+            Assert.IsTrue((bool)policy.Invoke(null, new object[] { 0UL, 0UL, false }),
+                "客户端收到当前服务器发送的迁移消息时应接受。");
+            Assert.IsFalse((bool)policy.Invoke(null, new object[] { 7UL, 0UL, false }),
+                "客户端不得接受普通客户端伪造的主机迁移消息。");
+            Assert.IsFalse((bool)policy.Invoke(null, new object[] { 0UL, 0UL, true }),
+                "主机本机不得把自己广播的迁移快照再次恢复。");
+        }
+
+        [Test]
         public void HostMigration_ReplacementHostStartPolicyBlocksUnsafePromotion()
         {
             Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
@@ -1536,7 +1902,7 @@ namespace GanglandUndercover.Tests
             object result = EvaluateVictory(
                 evidenceScore: 10,
                 evidenceTarget: 44,
-                players: MakePlayers((0, "Gang"), (3, "Police"), (0, "Undercover"), (0, "Mole")),
+                players: MakePlayers((0, "Gang"), (3, "Police"), (1, "Undercover"), (0, "Mole")),
                 tasks: MakeTasks(),
                 matchStarted: true,
                 phaseName: "Action");
@@ -1545,7 +1911,7 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
-        public void Victory_GangOutnumber_GangWins()
+        public void Victory_NumericParityAloneDoesNotEndMatch()
         {
             object result = EvaluateVictory(
                 evidenceScore: 10,
@@ -1555,7 +1921,7 @@ namespace GanglandUndercover.Tests
                 matchStarted: true,
                 phaseName: "Action");
 
-            AssertResult(result, true, "黑帮胜利");
+            Assert.IsFalse(PropertyBool(result, "HasResult"));
         }
 
         [Test]
@@ -1573,7 +1939,7 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
-        public void Victory_UndercoverSoloWins()
+        public void Victory_UndercoverLastAliveMeansGangSideEliminated()
         {
             object result = EvaluateVictory(
                 evidenceScore: 5,
@@ -1583,7 +1949,35 @@ namespace GanglandUndercover.Tests
                 matchStarted: true,
                 phaseName: "Action");
 
-            AssertResult(result, true, "卧底胜利");
+            AssertResult(result, true, "警方胜利");
+        }
+
+        [Test]
+        public void Victory_EvidenceClosureWithoutLivingUndercover_GangWins()
+        {
+            object result = EvaluateVictory(
+                evidenceScore: 44,
+                evidenceTarget: 44,
+                players: MakePlayersWithEliminatedUndercover((1, "Gang"), (3, "Police"), (1, "Undercover"), (0, "Mole")),
+                tasks: MakeTasks(),
+                matchStarted: true,
+                phaseName: "Action");
+
+            AssertResult(result, true, "黑帮胜利");
+        }
+
+        [Test]
+        public void Victory_UndercoverEliminated_GangWins()
+        {
+            object result = EvaluateVictory(
+                evidenceScore: 10,
+                evidenceTarget: 44,
+                players: MakePlayersWithEliminatedUndercover((1, "Gang"), (3, "Police"), (1, "Undercover"), (0, "Mole")),
+                tasks: MakeTasks(),
+                matchStarted: true,
+                phaseName: "Action");
+
+            AssertResult(result, true, "黑帮胜利");
         }
 
         [Test]
@@ -1601,11 +1995,484 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void KillPermissions_GangCanTargetUndercoverAndMoleNeedsAssignedHit()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Mole", professionName: "Mole");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                fixture.SetPlayer(4UL, Vector3.up, alive: true, roleName: "Gang");
+
+                fixture.AccumulateMoleIntel(1UL, 5);
+                Assert.AreEqual(3UL, fixture.AssignMoleHit(1UL));
+
+                Assert.IsTrue(fixture.CanKillTarget(4UL, 3UL), "真黑帮必须能拔除伪装成黑帮的卧底。");
+                Assert.IsTrue(fixture.CanKillTarget(4UL, 1UL), "真黑帮必须承担误伤内鬼的风险，否则击杀按钮会变成身份探测器。");
+                Assert.IsTrue(fixture.CanKillTarget(1UL, 3UL), "内鬼只能执行已经解锁的卧底暗杀目标。");
+                Assert.IsFalse(fixture.CanKillTarget(1UL, 2UL), "内鬼不能像普通黑帮一样任意击杀警察。");
+            }
+        }
+
+        [Test]
+        public void MoleIntel_LocksTargetButDoesNotWinBeforeTargetIsEliminated()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Mole", professionName: "Mole");
+                fixture.SetPlayer(2UL, new Vector3(0.1f, 0f, 0f), alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Police");
+
+                fixture.AccumulateMoleIntel(1UL, 5);
+
+                Assert.AreEqual(2UL, fixture.AssignMoleHit(1UL));
+                Assert.IsFalse(fixture.CheckMoleWinCondition(1UL), "只识别卧底不能直接结束对局，必须完成清除。 ");
+
+                fixture.SetPlayerAlive(2UL, false);
+                Assert.IsFalse(fixture.CheckMoleWinCondition(1UL), "卧底被其他人淘汰时，不能误判为内鬼特殊胜利。");
+
+                fixture.SetPlayerAlive(2UL, true);
+                fixture.ApplyClientAction(1UL, "Kill", 2UL);
+                Assert.IsTrue(fixture.CheckMoleWinCondition(1UL), "只有内鬼亲手清除锁定目标后，才满足特殊胜利。");
+            }
+        }
+
+        [Test]
+        public void KillRequest_MoleUsesAssignedNearbyTarget()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Mole", professionName: "Mole");
+                fixture.SetPlayer(2UL, new Vector3(0.1f, 0f, 0f), alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                fixture.SetPlayer(3UL, Vector3.right, alive: true, roleName: "Police");
+                fixture.AccumulateMoleIntel(0UL, 5);
+                Assert.AreEqual(2UL, fixture.AssignMoleHit(0UL));
+
+                fixture.RequestAction("Kill");
+
+                Assert.IsFalse(fixture.PlayerAlive(2UL), "Mole 的 Q/击倒按钮必须提交客户端选中的锁定目标。");
+                Assert.IsTrue(fixture.CheckMoleWinCondition(0UL));
+            }
+        }
+
+        [Test]
+        public void KillAction_UsesExplicitTargetInsteadOfNearestDifferentPlayer()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Gang");
+                fixture.SetPlayer(2UL, new Vector3(0.6f, 0f, 0f), alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, new Vector3(0.1f, 0f, 0f), alive: true, roleName: "Police");
+
+                fixture.ApplyClientAction(0UL, "Kill", 2UL);
+
+                Assert.IsFalse(fixture.PlayerAlive(2UL), "服务端必须击杀客户端明确选择且仍在范围内的目标。");
+                Assert.IsTrue(fixture.PlayerAlive(3UL), "不能在服务端重新选择另一个更近目标。");
+            }
+        }
+
+        [Test]
+        public void KillAction_AppliesProfessionCooldownMultiplier()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Gang", professionName: "Enforcer");
+                fixture.SetPlayer(1UL, new Vector3(0.1f, 0f, 0f), alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+
+                fixture.ApplyClientAction(0UL, "Kill", 1UL);
+
+                Assert.AreEqual(22.5f, fixture.KillCooldown(0UL), 0.001f,
+                    "4 人档基础冷却 30 秒，打手 0.75 倍后应为 22.5 秒。");
+            }
+        }
+
+        [Test]
+        public void ProfessionAbilities_ProduceStateEvidenceAndWorldFeedback()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Police", professionName: "Inspector");
+                fixture.SetPlayer(1UL, new Vector3(1f, 0f, 0f), alive: true, roleName: "Police", professionName: "Tech");
+                fixture.ApplyClientAction(0UL, "Ability", 0UL);
+
+                Assert.AreEqual("FootprintTrack", fixture.PropertyString("LastProfessionAbilityFeedback"));
+                Assert.GreaterOrEqual(fixture.VisibleFootprintCount(0UL), 1,
+                    "Inspector 技能应留下附近玩家的可追踪足迹。");
+                Assert.GreaterOrEqual(fixture.PropertyInt("ProfessionAbilityVfxCount"), 1,
+                    "Inspector 技能应生成可见世界反馈。");
+            }
+        }
+
+        [Test]
+        public void ProfessionAbilities_CorpseExamineAddsBonusAndSurveillanceFeedsEvidence()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Police", professionName: "Forensics");
+                fixture.AddBody(4, 1UL, Vector3.zero, reported: false);
+                fixture.ApplyClientAction(0UL, "Ability", 0UL);
+
+                Assert.AreEqual("CorpseExamine", fixture.PropertyString("LastProfessionAbilityFeedback"));
+                StringAssert.Contains("+3", fixture.PropertyString("Status"),
+                    "法证在尸体旁应获得基础线索与 CorpseExamine 加成。");
+                Assert.GreaterOrEqual(fixture.PropertyInt("ProfessionAbilityVfxCount"), 1);
+            }
+
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, new Vector3(100f, 0f, 0f), alive: true, roleName: "Police", professionName: "Tech");
+                fixture.ApplyClientAction(0UL, "Ability", 0UL);
+
+                Assert.AreEqual("RemoteSurveillance", fixture.PropertyString("LastProfessionAbilityFeedback"));
+                Assert.GreaterOrEqual(fixture.PropertyInt("ProfessionAbilityVfxCount"), 1,
+                    "Tech 远程监控技能应生成可见监控反馈。");
+            }
+        }
+
+        [Test]
+        public void ProfessionAbilities_DarkVisionIsTemporaryAndOverridesBlackoutVisionPenalty()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Police", professionName: "Enforcer");
+                fixture.SetBlackoutVisionReduced(true);
+                Assert.AreEqual(0.4f, fixture.PropertyFloat("BlackoutVisionMultiplier"), 0.001f);
+
+                fixture.ApplyClientAction(0UL, "Ability", 0UL);
+
+                Assert.IsTrue(fixture.IsDarkVisionActive(0UL));
+                Assert.AreEqual(1f, fixture.PropertyFloat("BlackoutVisionMultiplier"), 0.001f);
+                Assert.AreEqual("DarkVision", fixture.PropertyString("LastProfessionAbilityFeedback"));
+                Assert.GreaterOrEqual(fixture.PropertyInt("ProfessionAbilityVfxCount"), 1);
+
+                fixture.TickProfessionAbilities(6.1f);
+                Assert.IsFalse(fixture.IsDarkVisionActive(0UL), "暗视技能应在持续时间结束后自动失效。");
+                Assert.AreEqual(0.4f, fixture.PropertyFloat("BlackoutVisionMultiplier"), 0.001f);
+            }
+        }
+
+        [Test]
+        public void SelectedSabotage_UsesRequestedTypeAndAllowsHiddenRoles()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                fixture.SetPlayer(1UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.EnsureServices();
+
+                fixture.ApplyClientAction(0UL, "Sabotage", fixture.SabotageValue("Communications"));
+
+                Assert.Greater(fixture.PropertyFloat("CommunicationJamTimer"), 0f,
+                    "指定破坏未生效。当前状态：" + fixture.PropertyString("Status")
+                    + "；技能冷却：" + fixture.AbilityCooldown(0UL));
+                Assert.AreEqual(0f, fixture.PropertyFloat("BlackoutTimer"));
+            }
+        }
+
+        [Test]
+        public void SelectedSabotage_RejectedTypeCooldownDoesNotSpendResources()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                fixture.SetPlayer(1UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.EnsureServices();
+                fixture.SetTaskServiceEvidence(score: 20, targetValue: 44);
+
+                ulong communications = fixture.SabotageValue("Communications");
+                fixture.ApplyClientAction(0UL, "Sabotage", communications);
+                int evidenceAfterFirstSabotage = fixture.PropertyInt("EvidenceScore");
+
+                fixture.TickSabotageService(31f);
+                fixture.SetAbilityCooldownRaw(0UL, 0f);
+                Assert.AreEqual(0f, fixture.PropertyFloat("CommunicationJamTimer"), 0.001f,
+                    "破坏持续时间应先结束，而同类型服务冷却仍在继续。");
+
+                fixture.ApplyClientAction(0UL, "Sabotage", communications);
+
+                Assert.AreEqual(evidenceAfterFirstSabotage, fixture.PropertyInt("EvidenceScore"),
+                    "服务拒绝冷却中的破坏时不能再次扣除证据。");
+                Assert.AreEqual(0f, fixture.AbilityCooldown(0UL), 0.001f,
+                    "服务拒绝冷却中的破坏时不能启动玩家技能冷却。");
+            }
+        }
+
+        [Test]
+        public void TaskInteraction_MoleUsesPoliceCoverTaskInsteadOfSabotaging()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Mole", professionName: "Mole", isBot: true);
+                fixture.SetPlayer(1UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.SetTaskState(0, Vector3.zero, progress: 0, requiredProgress: 3, completed: false, sabotaged: false);
+
+                fixture.InteractWithTask(0UL);
+
+                Assert.AreEqual(1, fixture.TaskProgress(0),
+                    "内鬼表面是警察，应通过警察任务窃取情报，不能把普通互动强制变成破坏。");
+            }
+        }
+
+        [Test]
+        public void GhostInteraction_PoliceCanContinueTasksButGangCannotSabotage()
+        {
+            using (ControllerFixture policeGhost = new ControllerFixture())
+            using (ControllerFixture gangGhost = new ControllerFixture())
+            {
+                policeGhost.SetLocalPreviewMode(true);
+                policeGhost.SetPhase("Action");
+                policeGhost.SetPlayer(0UL, Vector3.zero, alive: false, roleName: "Police", isBot: true);
+                policeGhost.SetTaskState(0, Vector3.zero, progress: 0, requiredProgress: 3, completed: false, sabotaged: false);
+
+                policeGhost.ApplyClientAction(0UL, "Interact", 0UL);
+
+                Assert.AreEqual(1, policeGhost.TaskProgress(0),
+                    "警方鬼魂应能继续完成任务帮助存活队友。");
+
+                gangGhost.SetLocalPreviewMode(true);
+                gangGhost.SetPhase("Action");
+                gangGhost.SetPlayer(0UL, Vector3.zero, alive: false, roleName: "Gang", isBot: true);
+                gangGhost.SetPlayer(1UL, Vector3.right, alive: true, roleName: "Police");
+                gangGhost.SetTaskState(0, Vector3.zero, progress: 0, requiredProgress: 3, completed: false, sabotaged: false);
+
+                gangGhost.ApplyClientAction(0UL, "Interact", 0UL);
+
+                Assert.IsFalse(gangGhost.TaskSabotaged(0),
+                    "死亡黑帮不能通过普通互动继续制造破坏。");
+            }
+        }
+
+        [Test]
+        public void CriticalTaskSystem_OnlineVariantsSupportCompletionAndRestore()
+        {
+            Type systemType = RuntimeType("GanglandUndercover.SocialDeduction.CriticalTaskSystem");
+            Type taskType = RuntimeType("GanglandUndercover.SocialDeduction.CriticalTaskType");
+            Type stateType = RuntimeType("GanglandUndercover.SocialDeduction.CriticalTaskState");
+            object evidenceDestruction = Enum.Parse(taskType, "EvidenceDestruction");
+            object policeReinforcement = Enum.Parse(taskType, "PoliceReinforcement");
+            object active = Enum.Parse(stateType, "Active");
+            object completed = Enum.Parse(stateType, "Completed");
+
+            GameObject evidenceHost = new GameObject("CriticalTaskEvidenceTest");
+            GameObject reinforcementHost = new GameObject("CriticalTaskReinforcementTest");
+            GameObject restoreHost = new GameObject("CriticalTaskRestoreTest");
+            try
+            {
+                object evidenceSystem = evidenceHost.AddComponent(systemType);
+                object reinforcementSystem = reinforcementHost.AddComponent(systemType);
+                object restoreSystem = restoreHost.AddComponent(systemType);
+
+                Invoke(evidenceSystem, "Trigger", evidenceDestruction);
+                Assert.AreEqual(active, Property(evidenceSystem, "State"));
+                Assert.IsTrue((bool)Invoke(evidenceSystem, "SubmitEvidenceRepair", 1));
+                Assert.AreEqual(active, Property(evidenceSystem, "State"),
+                    "证据销毁必须等两处独立修复都提交后才完成。");
+                Assert.IsTrue((bool)Invoke(evidenceSystem, "SubmitEvidenceRepair", 2));
+                Assert.AreEqual(completed, Property(evidenceSystem, "State"));
+
+                Invoke(reinforcementSystem, "Trigger", policeReinforcement);
+                Assert.IsTrue((bool)Invoke(reinforcementSystem, "SubmitPoliceReinforcementSabotage"));
+                Assert.AreEqual(completed, Property(reinforcementSystem, "State"));
+
+                Invoke(restoreSystem, "Trigger", evidenceDestruction);
+                Invoke(restoreSystem, "RestoreActive", evidenceDestruction, 17f);
+                Assert.AreEqual(active, Property(restoreSystem, "State"));
+                Assert.AreEqual(17f, Convert.ToSingle(Property(restoreSystem, "TimeRemaining")), 0.001f);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(evidenceHost);
+                UnityEngine.Object.DestroyImmediate(reinforcementHost);
+                UnityEngine.Object.DestroyImmediate(restoreHost);
+            }
+        }
+
+        [Test]
+        public void CriticalTaskSystem_RestoreActiveDoesNotReplayStartedEvent()
+        {
+            Type systemType = RuntimeType("GanglandUndercover.SocialDeduction.CriticalTaskSystem");
+            Type taskType = RuntimeType("GanglandUndercover.SocialDeduction.CriticalTaskType");
+            object evidenceDestruction = Enum.Parse(taskType, "EvidenceDestruction");
+            GameObject host = new GameObject("CriticalTaskRestoreEventTest");
+            try
+            {
+                object system = host.AddComponent(systemType);
+                int startedEvents = 0;
+                Action<object> handler = _ => startedEvents++;
+                EventInfo startedEvent = systemType.GetEvent("OnCriticalTaskStarted");
+                Type eventHandlerType = startedEvent.EventHandlerType;
+                Delegate callback = Delegate.CreateDelegate(eventHandlerType, handler.Target, handler.Method);
+                startedEvent.AddEventHandler(system, callback);
+
+                Invoke(system, "RestoreActive", evidenceDestruction, 17f);
+
+                Assert.AreEqual(0, startedEvents,
+                    "主机迁移恢复紧急任务不能重复播放开始事件或重复触发警报。");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_PreservesCriticalEvidenceRepairStations()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetLocalPreviewMode(true);
+                source.SetPhase("Action");
+                source.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                source.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                source.SetSingleTask(4, Vector3.zero, completed: false, sabotaged: false);
+                source.TriggerCriticalTask("EvidenceDestruction");
+                source.RecordCriticalRepair(1UL, 4);
+
+                object snapshot = source.CaptureSnapshot();
+                target.RestoreFromSnapshot(snapshot);
+
+                Assert.AreEqual(1, target.CriticalEvidenceRepairStationCount(),
+                    "主机迁移必须保留已完成的证据修复站点，不能让同一站点重复计入。");
+            }
+        }
+
+        [Test]
+        public void CriticalTaskHudSummary_ExplainsTypeTimerAndRepairProgress()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetSingleTask(4, Vector3.zero, completed: false, sabotaged: false);
+                fixture.TriggerCriticalTask("EvidenceDestruction");
+                fixture.RecordCriticalRepair(0UL, 4);
+
+                string summary = fixture.PropertyString("HazardSummary");
+                StringAssert.Contains("证据销毁", summary);
+                StringAssert.Contains("1/2", summary);
+                StringAssert.Contains("s", summary);
+            }
+        }
+
+        [Test]
+        public void MapPositions_DefaultToSelfAndRevealSurfaceGangOnlyDuringExposure()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(1UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.SetPlayer(2UL, Vector3.up, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+
+                Assert.IsTrue(fixture.ShouldRevealPlayerPosition(0UL, 0UL));
+                Assert.IsFalse(fixture.ShouldRevealPlayerPosition(0UL, 1UL));
+                Assert.IsFalse(fixture.ShouldRevealPlayerPosition(0UL, 2UL));
+
+                fixture.SetGangPositionRevealTimer(30f);
+                Assert.IsTrue(fixture.ShouldRevealPlayerPosition(0UL, 1UL));
+                Assert.IsFalse(fixture.ShouldRevealPlayerPosition(1UL, 3UL),
+                    "位置公开只应由警方侧看到，不能让黑帮获得额外的全图追踪能力。");
+            }
+        }
+
+        [Test]
+        public void UndercoverSoloWin_LegacyApiNeverOverridesPoliceSideRules()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                fixture.AccumulateUndercoverIntel(1UL, 4);
+                fixture.AccumulateUndercoverIntel(1UL, 4);
+                Assert.IsTrue(fixture.ExecuteBetrayal(1UL));
+                Assert.IsFalse(fixture.CheckUndercoverSoloWin(1UL),
+                    "正式规则中卧底属于警方侧，不应通过旧接口产生独赢结果。");
+            }
+        }
+
+        [Test]
+        public void RepairTask_GangCannotSubmitServerRepair()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Gang", isBot: true);
+                fixture.SetTaskState(0, Vector3.zero, progress: 0, requiredProgress: 3, completed: false, sabotaged: true);
+                fixture.MarkTaskActive(0UL, 0);
+
+                Assert.IsFalse(fixture.InvokeBoolOutString("ValidateAndRepairTask", 0UL, 0, out string error));
+                StringAssert.Contains("黑帮", error);
+            }
+        }
+
+        [Test]
+        public void TaskCompletion_DoubleAgentsGainIntelWithoutAdvancingPoliceEvidence()
+        {
+            using (ControllerFixture undercover = new ControllerFixture())
+            using (ControllerFixture mole = new ControllerFixture())
+            {
+                undercover.SetPhase("Action");
+                undercover.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                undercover.SetPlayer(3UL, Vector3.right, alive: true, roleName: "Gang");
+                undercover.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                undercover.SetTaskServiceEvidence(score: 20, targetValue: 44);
+                undercover.MarkTaskActive(1UL, 0);
+
+                Assert.IsTrue(undercover.InvokeBoolOutString("ValidateAndCompleteTask", 1UL, 0, out string undercoverError), undercoverError);
+                Assert.AreEqual(20, undercover.PropertyInt("EvidenceScore"));
+                Assert.AreEqual(1, undercover.GetUndercoverIntel(1UL));
+                Assert.IsFalse(undercover.CaseLogContains("个人情报"), "公开案卷不能泄露卧底的私密情报进度。");
+                Assert.IsFalse(undercover.CaseLogContains("伪装任务"), "公开案卷不能用任务文案暴露卧底身份。");
+
+                mole.SetPhase("Action");
+                mole.SetPlayer(2UL, Vector3.zero, alive: true, roleName: "Mole", professionName: "Mole");
+                mole.SetPlayer(4UL, Vector3.right, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                mole.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                mole.SetTaskServiceEvidence(score: 20, targetValue: 44);
+                mole.MarkTaskActive(2UL, 0);
+
+                Assert.IsTrue(mole.InvokeBoolOutString("ValidateAndCompleteTask", 2UL, 0, out string moleError), moleError);
+                Assert.AreEqual(20, mole.PropertyInt("EvidenceScore"));
+                Assert.AreEqual(1, mole.GetMoleIntel(2UL));
+                Assert.IsFalse(mole.CaseLogContains("个人情报"), "公开案卷不能泄露内鬼的私密情报进度。");
+                Assert.IsFalse(mole.CaseLogContains("伪装任务"), "公开案卷不能用任务文案暴露内鬼身份。");
+            }
+        }
+
+        [Test]
         public void Voting_MajoritySkipDoesNotEjectSingleAccusedPlayer()
         {
             using (ControllerFixture fixture = new ControllerFixture())
             {
-                fixture.SetPhase("Meeting");
+                fixture.SetPhase("Voting");
                 fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
                 fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
                 fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
@@ -1632,6 +2499,7 @@ namespace GanglandUndercover.Tests
                 fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
                 fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
                 fixture.BeginMeeting("结果分支会议");
+                fixture.SetPhase("Voting");
 
                 fixture.ApplyVote(1UL, 2UL);
                 fixture.ApplyVote(2UL, 2UL);
@@ -1642,11 +2510,48 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void BeginMeeting_ClearsAbandonedTaskLocks()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                fixture.MarkTaskActive(1UL, 0);
+                Assert.AreEqual(1, fixture.CollectionCount("activeTaskByPlayer"));
+
+                fixture.BeginMeeting("任务中断会议");
+
+                Assert.AreEqual(0, fixture.CollectionCount("activeTaskByPlayer"),
+                    "会议关闭小游戏时必须同步释放服务端任务锁。");
+            }
+        }
+
+        [Test]
+        public void BeginMeeting_ClearsControllerVotesWhenVotingServiceIsUnavailable()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.AddVoteRaw(1UL, 2UL);
+                Assert.AreEqual(1, fixture.VoteCount(), "测试夹具应先存在一张上一轮票。");
+                fixture.DisableVotingService();
+
+                fixture.BeginMeeting("服务恢复中的新会议");
+
+                Assert.AreEqual(0, fixture.VoteCount(), "新会议必须清空上一轮控制器票据，即使 VotingService 暂未就绪。");
+            }
+        }
+
+        [Test]
         public void Voting_RejectsDeadVoterAndInvalidTarget()
         {
             using (ControllerFixture fixture = new ControllerFixture())
             {
-                fixture.SetPhase("Meeting");
+                fixture.SetPhase("Voting");
                 fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
                 fixture.SetPlayer(2UL, Vector3.right, alive: false, roleName: "Police");
                 fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
@@ -1657,7 +2562,73 @@ namespace GanglandUndercover.Tests
                 Assert.AreEqual(0, fixture.VoteCount(), "死亡玩家和不存在目标的投票必须被 VotingService 拒绝。");
                 Assert.IsFalse(fixture.HasVoted(1UL));
                 Assert.IsFalse(fixture.HasVoted(2UL));
-                Assert.AreEqual("Meeting", fixture.PhaseName(), "无效投票不能推进到 Voting 阶段。");
+                Assert.AreEqual("Voting", fixture.PhaseName(), "无效投票不能改变投票阶段。");
+            }
+        }
+
+        [Test]
+        public void Voting_AllLivingFactionsCanParticipateInMeeting()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Meeting");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Undercover");
+                fixture.SetPlayer(4UL, Vector3.up, alive: true, roleName: "Mole");
+                fixture.SetPlayer(5UL, Vector3.down, alive: true, roleName: "Police");
+
+                fixture.ApplyVote(1UL, 5UL);
+                Assert.AreEqual(0, fixture.VoteCount(), "讨论阶段只能发言和查证，不能提前提交选票。");
+                Assert.AreEqual("Meeting", fixture.PhaseName());
+
+                fixture.SetPhase("Voting");
+                fixture.ApplyVote(1UL, 5UL);
+                fixture.ApplyVote(2UL, 5UL);
+                fixture.ApplyVote(3UL, 5UL);
+                fixture.ApplyVote(4UL, 5UL);
+
+                Assert.IsTrue(fixture.HasVoted(1UL));
+                Assert.IsTrue(fixture.HasVoted(2UL));
+                Assert.IsTrue(fixture.HasVoted(3UL));
+                Assert.IsTrue(fixture.HasVoted(4UL));
+                Assert.AreEqual(4, fixture.VoteCount());
+            }
+        }
+
+        [Test]
+        public void Voting_HidesLiveTargetsUntilResolution()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Voting");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Undercover");
+
+                fixture.ApplyVote(1UL, 2UL);
+
+                string summary = fixture.PropertyString("VoteTallySummary");
+                StringAssert.Contains("已提交 1/3", summary);
+                StringAssert.DoesNotContain("玩家2", summary);
+            }
+        }
+
+        [Test]
+        public void Voting_RejectsAttemptToChangeSubmittedVote()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Voting");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Undercover");
+
+                fixture.ApplyVote(1UL, 2UL);
+                fixture.ApplyVote(1UL, 3UL);
+
+                Assert.AreEqual(1, fixture.VoteCount());
+                Assert.AreEqual(2UL, fixture.VoteTarget(1UL));
             }
         }
 
@@ -1666,7 +2637,7 @@ namespace GanglandUndercover.Tests
         {
             using (ControllerFixture fixture = new ControllerFixture())
             {
-                fixture.SetPhase("Meeting");
+                fixture.SetPhase("Voting");
                 fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
                 fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
                 fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
@@ -1755,6 +2726,7 @@ namespace GanglandUndercover.Tests
                 fixture.SetTaskServiceEvidence(score: 43, targetValue: 44);
                 fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police", professionName: "Inspector");
                 fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
 
                 fixture.PublishTaskCompleted(1UL, 1);
 
@@ -1892,6 +2864,43 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void Controller_ReportIsRejectedOutsideActionPhase()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Meeting");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: false, roleName: "Gang");
+                fixture.AddBody(9, 2UL, Vector3.zero, reported: false);
+                fixture.MeetingServiceOnMatchStarted(2);
+                EventProbe probe = fixture.AttachEventProbe();
+
+                fixture.ControllerTryReportOrEmergency(1UL);
+
+                Assert.AreEqual("Meeting", fixture.PhaseName());
+                Assert.AreEqual(0, fixture.PropertyInt("MeetingCount"));
+                Assert.AreEqual(0, probe.BodyReportedCount);
+            }
+        }
+
+        [Test]
+        public void Controller_EmergencyCallIsRejectedOutsideActionPhase()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Meeting");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+                fixture.MeetingServiceOnMatchStarted(2);
+
+                fixture.ControllerCallEmergencyMeeting("玩家1");
+
+                Assert.AreEqual("Meeting", fixture.PhaseName());
+                Assert.AreEqual(0, fixture.PropertyInt("MeetingCount"));
+            }
+        }
+
+        [Test]
         public void Controller_CallEmergencyMeetingPublishesMeetingCalledEvent()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -1907,7 +2916,7 @@ namespace GanglandUndercover.Tests
                 Assert.AreEqual(1, probe.MeetingCalledCount,
                     "Controller 公开紧急会议入口必须发布 MeetingCalledEvent，和 MeetingService 入口保持一致。");
                 Assert.IsTrue(probe.LastMeetingCalledIsEmergency);
-                Assert.AreEqual(0UL, probe.LastMeetingCallerId);
+                Assert.AreEqual(1UL, probe.LastMeetingCallerId);
                 Assert.AreEqual(0, probe.BodyReportedCount);
             }
         }
@@ -1941,7 +2950,7 @@ namespace GanglandUndercover.Tests
         {
             using (ControllerFixture fixture = new ControllerFixture())
             {
-                fixture.SetPhase("Meeting");
+                fixture.SetPhase("Voting");
                 fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
                 fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
                 fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
@@ -1954,6 +2963,27 @@ namespace GanglandUndercover.Tests
                 Assert.AreEqual("Result", fixture.PhaseName(), "证据链权重应让被指证黑帮出局并触发胜负结算。");
                 Assert.IsFalse(fixture.PlayerAlive(3UL));
                 StringAssert.Contains("警方胜利", fixture.PropertyString("Status"));
+            }
+        }
+
+        [Test]
+        public void Voting_DoesNotAutoSubmitEvidenceChainFromOrdinaryVote()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Voting");
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+                fixture.SeedEvidenceNodes(1UL);
+
+                fixture.ApplyVote(1UL, 3UL);
+                fixture.ApplySkipVote(2UL);
+                fixture.ApplySkipVote(3UL);
+
+                Assert.AreEqual("Action", fixture.PhaseName());
+                Assert.IsTrue(fixture.PlayerAlive(3UL));
+                StringAssert.Contains("无人出局", fixture.PropertyString("LastVoteOutcome"));
             }
         }
 
@@ -2006,6 +3036,88 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void SnapshotRestore_NullOptionalCollectionsAreTreatedAsEmpty()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetMatchStarted(true);
+                source.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                source.SetSingleTask(1, Vector3.one, completed: false, sabotaged: false);
+                object snapshot = source.CaptureSnapshot();
+                Type snapshotType = snapshot.GetType();
+
+                string[] optionalCollections =
+                {
+                    "PrivateRoles", "UndercoverStates", "MoleStates", "TaskAssignments",
+                    "Bodies", "Votes", "CaseLog", "KillCooldowns", "AbilityCooldowns",
+                    "VentCooldowns", "BotThinkTimers", "BotVoteTimers", "BotTargets"
+                };
+                foreach (string fieldName in optionalCollections)
+                {
+                    snapshotType.GetField(fieldName).SetValue(snapshot, null);
+                }
+
+                Assert.DoesNotThrow(() => target.RestoreFromSnapshot(snapshot),
+                    "迁移快照的可选列表缺失时，恢复应退化为空列表而不是崩溃。");
+                Assert.AreEqual(1, target.PlayerCount());
+                Assert.AreEqual(1, target.TaskCount());
+                Assert.AreEqual(0, target.VoteCount());
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_PreservesMeetingAccusations()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetLocalPreviewMode(true);
+                source.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                source.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                source.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+                source.SetSingleTask(1, Vector3.up, completed: false, sabotaged: false);
+                source.SetPhase("Meeting");
+                source.ApplyAction(1UL, "Accuse", 3UL);
+
+                object snapshot = source.CaptureSnapshot();
+                target.RestoreFromSnapshot(snapshot);
+
+                Assert.AreEqual(1, target.AccusationCount(),
+                    "主机迁移快照必须保留当前会议的公开指证记录。");
+                Assert.AreEqual(3UL, target.AccusationTarget(1UL));
+            }
+        }
+
+        [Test]
+        public void MeetingAccusation_IsServerAuthoritativeAndDiscussionOnly()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                fixture.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Police");
+                fixture.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
+
+                fixture.SetPhase("Action");
+                fixture.ApplyAction(1UL, "Accuse", 3UL);
+                Assert.AreEqual(0, fixture.AccusationCount(), "行动阶段不得提交会议指证。");
+
+                fixture.SetPhase("Meeting");
+                fixture.ApplyAction(1UL, "Accuse", 3UL);
+                Assert.AreEqual(1, fixture.AccusationCount(), "会议阶段应由服务端记录一次指证。");
+                Assert.AreEqual(3UL, fixture.AccusationTarget(1UL));
+
+                fixture.ApplyAction(1UL, "Accuse", 2UL);
+                Assert.AreEqual(3UL, fixture.AccusationTarget(1UL), "同一玩家本轮只能提交一次指证。");
+
+                fixture.SetPhase("Voting");
+                fixture.ApplyAction(2UL, "Accuse", 3UL);
+                Assert.AreEqual(1, fixture.AccusationCount(), "投票阶段不得新增会议指证。");
+            }
+        }
+
+        [Test]
         public void SnapshotRestore_PreservesMeetingServiceAndAllowsVotingContinuation()
         {
             using (ControllerFixture source = new ControllerFixture())
@@ -2017,6 +3129,7 @@ namespace GanglandUndercover.Tests
                 source.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Gang");
                 source.SetSingleTask(8, Vector3.up, completed: false, sabotaged: false);
                 source.BeginMeeting("迁移中的会议");
+                source.SetPhase("Voting");
                 source.ApplyVote(1UL, 3UL);
 
                 object snapshot = source.CaptureSnapshot();
@@ -2071,6 +3184,7 @@ namespace GanglandUndercover.Tests
                     "迁移后任务完成仍应推进证据链。");
 
                 target.BeginMeeting("迁移后任务会议");
+                target.SetPhase("Voting");
                 target.ApplyVote(1UL, 3UL);
                 target.ApplyVote(2UL, 3UL);
                 target.ApplyVote(3UL, 3UL);
@@ -2079,6 +3193,114 @@ namespace GanglandUndercover.Tests
                     "3 客户端迁移恢复后，任务完成、会议和投票应能连续推进到结算。");
                 Assert.IsFalse(target.PlayerAlive(3UL));
                 StringAssert.Contains("警方胜利", target.PropertyString("Status"));
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_PreservesPerPlayerTaskAssignments()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetLocalPreviewMode(true);
+                source.ConfigureRoom(minPlayers: 8, maxPlayers: 8, autoFillAi: false);
+                source.AttachSyncManager();
+                target.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 8UL; clientId++)
+                {
+                    source.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                source.StartOnlineMatchCore();
+                ulong policeId = source.FindClientIdByPrivateRole("Police");
+                int[] expectedTaskIds = source.AssignedTaskIds(policeId);
+                CollectionAssert.IsNotEmpty(expectedTaskIds);
+
+                target.RestoreFromSnapshot(source.CaptureSnapshot());
+
+                CollectionAssert.AreEquivalent(expectedTaskIds, target.AssignedTaskIds(policeId));
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_PreservesIndependentProgressAtSharedTaskStation()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetPhase("Action");
+                source.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                source.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Police");
+                source.SetPlayer(2UL, Vector3.zero, alive: true, roleName: "Police");
+                source.SetPlayer(3UL, Vector3.right, alive: true, roleName: "Gang");
+                source.AttachSyncManager();
+                target.AttachSyncManager();
+                source.AssignTask(1UL, 0);
+                source.AssignTask(2UL, 0);
+
+                source.MarkTaskActive(1UL, 0);
+                Assert.IsTrue(
+                    source.InvokeBoolOutString("ValidateAndCompleteTask", 1UL, 0, out string completeError),
+                    completeError);
+
+                target.RestoreFromSnapshot(source.CaptureSnapshot());
+
+                Assert.IsTrue(target.PlayerTaskCompleted(1UL, 0));
+                Assert.IsFalse(target.PlayerTaskCompleted(2UL, 0),
+                    "主机迁移不能把共享任务站上其他玩家的个人任务一并完成。");
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_PreservesDoubleAgentIdentityProgress()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetPlayer(1UL, Vector3.zero, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                source.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Mole", professionName: "Mole");
+                source.SetPlayer(3UL, Vector3.left, alive: true, roleName: "Police");
+                source.SetPlayer(4UL, Vector3.up, alive: true, roleName: "Gang");
+                source.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                source.AccumulateUndercoverIntel(1UL, 2);
+                source.AccumulateUndercoverIntel(1UL, 2);
+                Assert.IsTrue(source.ExecuteBetrayal(1UL));
+                source.AccumulateMoleIntel(2UL, 5);
+                Assert.AreEqual(1UL, source.AssignMoleHit(2UL));
+                source.SetMoleObjective(2UL, kills: 1, sabotages: 2, survivedTilLate: true);
+
+                target.RestoreFromSnapshot(source.CaptureSnapshot());
+
+                Assert.AreEqual(4, target.GetUndercoverIntel(1UL));
+                Assert.IsTrue(target.HasBetrayed(1UL));
+                Assert.AreEqual(5, target.GetMoleIntel(2UL));
+                Assert.AreEqual(1UL, target.MoleHitTarget(2UL));
+                Assert.AreEqual(1, target.MoleObjectiveInt(2UL, "Kills"));
+                Assert.AreEqual(2, target.MoleObjectiveInt(2UL, "Sabotages"));
+                Assert.IsTrue(target.MoleObjectiveBool(2UL, "SurvivedTilLate"));
+            }
+        }
+
+        [Test]
+        public void SnapshotRestore_PreservesLocalIdentityWhenMigrationSnapshotOmitsIt()
+        {
+            using (ControllerFixture source = new ControllerFixture())
+            using (ControllerFixture target = new ControllerFixture())
+            {
+                source.SetMatchStarted(true);
+                source.SetSingleTask(0, Vector3.zero, completed: false, sabotaged: false);
+                source.SetPlayer(2UL, Vector3.right, alive: true, roleName: "Gang");
+
+                target.SetLocalRole("Undercover");
+                target.SetPlayer(0UL, Vector3.zero, alive: true, roleName: "Undercover", professionName: "UndercoverAgent");
+                target.AccumulateUndercoverIntel(0UL, 3);
+
+                target.RestoreFromSnapshot(source.CaptureSnapshot());
+
+                Assert.AreEqual(3, target.GetUndercoverIntel(0UL),
+                    "迁移快照未包含本机私密条目时，客户端仍必须保留本机卧底情报。");
+                Assert.AreEqual("Undercover", target.LocalRoleName(),
+                    "恢复公开快照不能覆盖客户端已经收到的本机隐藏身份。");
             }
         }
 
@@ -2185,6 +3407,21 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ClientState_DeadPlayerCanSendGhostMovementDuringAction()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetPhase("Action");
+                fixture.SetPlayer(7UL, new Vector3(2f, 3f, 0f), alive: false);
+
+                fixture.ApplyClientState(7UL, new Vector3(50f, 50f, 0f), new Vector2(12f, 0f), true);
+
+                Assert.AreEqual(new Vector2(1f, 0f), fixture.PlayerInput(7UL),
+                    "鬼魂移动输入应进入服务器模拟，位置仍由服务器权威推进。");
+            }
+        }
+
+        [Test]
         public void ClientState_DoesNotSpawnUnknownPlayersAfterActionStarts()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -2281,6 +3518,50 @@ namespace GanglandUndercover.Tests
 
                 fixture.ReceiveRoleAssign(NetworkManager.ServerClientId, fixture.RoleValue("Police"));
                 Assert.AreEqual("Police", fixture.LocalRoleName());
+            }
+        }
+
+        [Test]
+        public void IdentityProgress_UpdatesOnlyMatchingHiddenRoleFromServer()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalRole("Undercover");
+                fixture.ReceiveIdentityProgress(
+                    7UL, "Undercover", intel: 9, missionsDone: 9, betrayed: true,
+                    exposed: false, kills: 0, sabotages: 0, survivedTilLate: false);
+                Assert.AreEqual(0, fixture.GetUndercoverIntel(NetworkManager.ServerClientId));
+                Assert.IsFalse(fixture.HasBetrayed(NetworkManager.ServerClientId));
+
+                fixture.ReceiveIdentityProgress(
+                    NetworkManager.ServerClientId, "Mole", intel: 5, missionsDone: 0, betrayed: false,
+                    exposed: true, kills: 1, sabotages: 2, survivedTilLate: true);
+                Assert.AreEqual(0, fixture.GetUndercoverIntel(NetworkManager.ServerClientId));
+
+                fixture.ReceiveIdentityProgress(
+                    NetworkManager.ServerClientId, "Undercover", intel: 4, missionsDone: 2, betrayed: true,
+                    exposed: false, kills: 0, sabotages: 0, survivedTilLate: false);
+                Assert.AreEqual(4, fixture.GetUndercoverIntel(NetworkManager.ServerClientId));
+                Assert.IsTrue(fixture.HasBetrayed(NetworkManager.ServerClientId));
+            }
+        }
+
+        [Test]
+        public void IdentityProgress_UpdatesMolePrivateObjectivesFromServer()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalRole("Mole");
+
+                fixture.ReceiveIdentityProgress(
+                    NetworkManager.ServerClientId, "Mole", intel: 5, missionsDone: 0, betrayed: false,
+                    exposed: true, kills: 1, sabotages: 2, survivedTilLate: true);
+
+                Assert.AreEqual(5, fixture.GetMoleIntel(NetworkManager.ServerClientId));
+                Assert.IsTrue(fixture.IsMoleExposed(NetworkManager.ServerClientId));
+                Assert.AreEqual(1, fixture.MoleObjectiveInt(NetworkManager.ServerClientId, "Kills"));
+                Assert.AreEqual(2, fixture.MoleObjectiveInt(NetworkManager.ServerClientId, "Sabotages"));
+                Assert.IsTrue(fixture.MoleObjectiveBool(NetworkManager.ServerClientId, "SurvivedTilLate"));
             }
         }
 
@@ -2640,6 +3921,39 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void Sprite2DAssetCache_CropsLimeZu16AtlasesToOneCell()
+        {
+            Type cacheType = RuntimeType("GanglandUndercover.Art.Sprite2DAssetCache");
+            InvokeStatic(cacheType, "Ensure");
+
+            string[] spriteFields = { "FloorTileAlt", "WallBlock", "PropDesk", "PropCabinet", "PropEvidenceBox" };
+            foreach (string fieldName in spriteFields)
+            {
+                Sprite sprite = (Sprite)cacheType.GetField(fieldName,
+                    BindingFlags.Public | BindingFlags.Static).GetValue(null);
+                Assert.IsNotNull(sprite, fieldName + " should be loaded from the LimeZu atlas");
+                Assert.AreEqual(16f, sprite.rect.width, 0.001f, fieldName + " must use one 16px atlas cell");
+                Assert.AreEqual(16f, sprite.rect.height, 0.001f, fieldName + " must use one 16px atlas cell");
+                Assert.AreEqual(16f, sprite.pixelsPerUnit, 0.001f, fieldName + " PPU must match the cell size");
+            }
+        }
+
+        [Test]
+        public void WorldBuilder_SortsPositiveZInFrontOfNegativeZ()
+        {
+            Type builderType = RuntimeType("GanglandUndercover.Online.OnlineWorldBuilder");
+            MethodInfo sorting = builderType.GetMethod("SortingOrderForZ",
+                BindingFlags.Public | BindingFlags.Static);
+            MethodInfo localSorting = builderType.GetMethod("SortingOrderForLocalZ",
+                BindingFlags.Public | BindingFlags.Static);
+
+            Assert.AreEqual(-500, Convert.ToInt32(sorting.Invoke(null, new object[] { -0.5f })));
+            Assert.AreEqual(500, Convert.ToInt32(sorting.Invoke(null, new object[] { 0.5f })));
+            Assert.AreEqual(-250, Convert.ToInt32(localSorting.Invoke(null, new object[] { -0.25f })));
+            Assert.AreEqual(250, Convert.ToInt32(localSorting.Invoke(null, new object[] { 0.25f })));
+        }
+
+        [Test]
         public void VFXSheetPlayer_LoadsEveryRuntimeSheetWithExpectedFirstFrameSize()
         {
             Type playerType = RuntimeType("GanglandUndercover.Art.VFXSheetPlayer");
@@ -2951,6 +4265,28 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void OnlineMatchHud_ActionPreviewUsesCompactMissionAndCommandLayout()
+        {
+            Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
+            GameObject host = new GameObject("OnlineHudCompactActionRegression_OnlineMatchController");
+
+            try
+            {
+                object controller = host.AddComponent(controllerType);
+
+                Assert.IsTrue((bool)Invoke(controller, "EditorForceActionPreviewForSmokeTest"));
+                Assert.IsTrue(PropertyBool(controller, "CanvasHudLayoutComplete"));
+                Assert.IsTrue(PropertyBool(controller, "CompactActionHudActive"));
+                Assert.AreEqual(6, PropertyInt(controller, "CompactActionCommandSlotCount"));
+                Assert.GreaterOrEqual(PropertyInt(controller, "ChatPanelCanvasElementCount"), 3);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(host);
+            }
+        }
+
+        [Test]
         public void OnlineMatchController_RequestSendChatMessageFeedsCanvasChat()
         {
             Type controllerType = RuntimeType("GanglandUndercover.Online.OnlineMatchController");
@@ -3028,6 +4364,8 @@ namespace GanglandUndercover.Tests
                 Assert.GreaterOrEqual(PropertyInt(controller, "MeetingSeatCanvasElementCount"), PropertyInt(controller, "PlayerCount") + 4);
                 Assert.GreaterOrEqual(PropertyInt(controller, "MeetingOverlayVisualElementCount"), 12);
                 Assert.GreaterOrEqual(PropertyInt(controller, "MeetingOverlay2DAssetElementCount"), 10);
+                Assert.GreaterOrEqual(PropertyInt(controller, "MeetingAccusationButtonCount"), PropertyInt(controller, "AlivePlayerCount") - 1,
+                    "讨论阶段必须提供面向每位其他存活玩家的显式指证入口。");
             }
             finally
             {
@@ -3477,6 +4815,27 @@ namespace GanglandUndercover.Tests
             return dict;
         }
 
+        private static object MakePlayersWithEliminatedUndercover(params (int Count, string RoleName)[] groups)
+        {
+            object players = MakePlayers(groups);
+            Type dictType = players.GetType();
+            PropertyInfo item = dictType.GetProperty("Item");
+
+            foreach (KeyValuePair<ulong, int> role in RoleLookup)
+            {
+                if (role.Value != Convert.ToInt32(Enum.Parse(RuntimeType("GanglandUndercover.Online.OnlineRole"), "Undercover")))
+                {
+                    continue;
+                }
+
+                object state = item.GetValue(players, new object[] { role.Key });
+                state.GetType().GetField("Alive").SetValue(state, false);
+                item.SetValue(players, state, new object[] { role.Key });
+            }
+
+            return players;
+        }
+
         private static string ProfessionFor(string roleName)
         {
             switch (roleName)
@@ -3823,6 +5182,8 @@ namespace GanglandUndercover.Tests
             private readonly Type roleType = RuntimeType("GanglandUndercover.Online.OnlineRole");
             private readonly Type professionType = RuntimeType("GanglandUndercover.Online.OnlineProfession");
             private readonly Type phaseType = RuntimeType("GanglandUndercover.Online.OnlineMatchPhase");
+            private readonly Type actionType = RuntimeType("GanglandUndercover.Online.OnlineActionType");
+            private readonly Type sabotageType = RuntimeType("GanglandUndercover.SabotageType");
             private readonly Type mapType = RuntimeType("GanglandUndercover.Online.OnlineMapService+OnlineMapType");
             private readonly Type bodyStateType = RuntimeType("GanglandUndercover.Online.OnlineBodyState");
             private readonly Type snapshotType = RuntimeType("GanglandUndercover.Online.GameStateSnapshot");
@@ -3881,6 +5242,21 @@ namespace GanglandUndercover.Tests
                 SetField("localPreviewMode", enabled);
             }
 
+            public void EnsureServices()
+            {
+                EnsureSnapshotDependencies();
+            }
+
+            public void DisableVotingService()
+            {
+                Behaviour service = GetField("votingService") as Behaviour;
+                if (service != null)
+                {
+                    service.enabled = false;
+                }
+                SetField("votingService", null);
+            }
+
             public void SetLocalRole(string roleName)
             {
                 SetField("localRole", Enum.Parse(roleType, roleName));
@@ -3896,7 +5272,13 @@ namespace GanglandUndercover.Tests
                 return GetField("localRole").ToString();
             }
 
-            public void SetPlayer(ulong clientId, Vector3 position, bool alive, string roleName = "Police", string professionName = null)
+            public void SetPlayer(
+                ulong clientId,
+                Vector3 position,
+                bool alive,
+                string roleName = "Police",
+                string professionName = null,
+                bool isBot = false)
             {
                 object role = Enum.Parse(roleType, roleName);
                 object profession = Enum.Parse(professionType, professionName ?? ProfessionFor(roleName));
@@ -3910,7 +5292,7 @@ namespace GanglandUndercover.Tests
                     role,
                     profession,
                     0,
-                    false);
+                    isBot);
 
                 object players = GetField("players");
                 players.GetType().GetMethod("Add").Invoke(players, new[] { (object)clientId, state });
@@ -3950,6 +5332,20 @@ namespace GanglandUndercover.Tests
             public bool PlayerAlive(ulong clientId)
             {
                 return (bool)playerStateType.GetField("Alive").GetValue(GetPlayerState(clientId));
+            }
+
+            public void SetPlayerAlive(ulong clientId, bool alive)
+            {
+                object state = GetPlayerState(clientId);
+                playerStateType.GetField("Alive").SetValue(state, alive);
+                SetPlayerState(clientId, state);
+            }
+
+            public void SetPlayerPosition(ulong clientId, Vector3 position)
+            {
+                object state = GetPlayerState(clientId);
+                playerStateType.GetField("Position").SetValue(state, position);
+                SetPlayerState(clientId, state);
             }
 
             public bool CanClientWatchCamera(ulong clientId, Vector2 cameraCenter)
@@ -3993,6 +5389,182 @@ namespace GanglandUndercover.Tests
                 ApplyVote(voterClientId, ulong.MaxValue);
             }
 
+            public void ApplyAction(ulong senderClientId, string actionName, ulong targetClientId)
+            {
+                object action = Enum.Parse(actionType, actionName);
+                controllerType.GetMethod("ApplyClientAction", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new[] { (object)senderClientId, action, (object)targetClientId });
+            }
+
+            public int AccusationCount()
+            {
+                object accusationTargets = controllerType.GetProperty("AccusationTargets").GetValue(controller);
+                return Convert.ToInt32(accusationTargets.GetType().GetProperty("Count").GetValue(accusationTargets));
+            }
+
+            public ulong AccusationTarget(ulong accuserClientId)
+            {
+                object accusationTargets = controllerType.GetProperty("AccusationTargets").GetValue(controller);
+                return (ulong)accusationTargets.GetType().GetProperty("Item").GetValue(
+                    accusationTargets, new object[] { accuserClientId });
+            }
+
+            public ulong VoteTarget(ulong voterClientId)
+            {
+                object voteMap = GetField("votes");
+                return (ulong)voteMap.GetType().GetProperty("Item").GetValue(voteMap, new object[] { voterClientId });
+            }
+
+            public void AccumulateMoleIntel(ulong moleId, int amount)
+            {
+                controllerType.GetMethod("AccumulateMoleIntel").Invoke(controller, new object[] { moleId, amount });
+            }
+
+            public ulong AssignMoleHit(ulong moleId)
+            {
+                object value = controllerType.GetMethod("AssignMoleHit").Invoke(controller, new object[] { moleId });
+                Assert.IsNotNull(value, "内鬼情报达标后必须获得卧底目标。");
+                return Convert.ToUInt64(value);
+            }
+
+            public bool CheckMoleWinCondition(ulong moleId)
+            {
+                return (bool)controllerType.GetMethod("CheckMoleWinCondition")
+                    .Invoke(controller, new object[] { moleId });
+            }
+
+            public bool CanKillTarget(ulong attackerId, ulong targetId)
+            {
+                return (bool)controllerType.GetMethod("CanKillTarget", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Invoke(controller, new object[] { attackerId, targetId });
+            }
+
+            public float KillCooldown(ulong clientId)
+            {
+                EnsureSnapshotDependencies();
+                object killSystem = GetField("killSystem");
+                object cooldowns = killSystem.GetType().GetField("killCooldowns", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).GetValue(killSystem);
+                bool contains = (bool)cooldowns.GetType().GetMethod("ContainsKey").Invoke(cooldowns, new object[] { clientId });
+                return contains
+                    ? Convert.ToSingle(cooldowns.GetType().GetProperty("Item").GetValue(cooldowns, new object[] { clientId }))
+                    : 0f;
+            }
+
+            public void InteractWithTask(ulong clientId)
+            {
+                object state = GetPlayerState(clientId);
+                controllerType.GetMethod("TryInteractWithTask", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                    .Invoke(controller, new[] { (object)clientId, state });
+            }
+
+            public int GetUndercoverIntel(ulong clientId)
+            {
+                return Convert.ToInt32(controllerType.GetMethod("GetUndercoverIntel").Invoke(controller, new object[] { clientId }));
+            }
+
+            public int GetMoleIntel(ulong clientId)
+            {
+                return Convert.ToInt32(controllerType.GetMethod("GetMoleIntel").Invoke(controller, new object[] { clientId }));
+            }
+
+            public void AccumulateUndercoverIntel(ulong clientId, int amount)
+            {
+                controllerType.GetMethod("AccumulateUndercoverIntel")
+                    .Invoke(controller, new object[] { clientId, amount });
+            }
+
+            public bool ExecuteBetrayal(ulong clientId)
+            {
+                return (bool)controllerType.GetMethod("ExecuteBetrayal")
+                    .Invoke(controller, new object[] { clientId });
+            }
+
+            public bool HasBetrayed(ulong clientId)
+            {
+                return (bool)controllerType.GetMethod("HasBetrayed")
+                    .Invoke(controller, new object[] { clientId });
+            }
+
+            public ulong MoleHitTarget(ulong clientId)
+            {
+                object target = controllerType.GetMethod("GetMoleHitTarget")
+                    .Invoke(controller, new object[] { clientId });
+                return Convert.ToUInt64(target);
+            }
+
+            public void SetMoleObjective(ulong clientId, int kills, int sabotages, bool survivedTilLate)
+            {
+                Type objectiveType = RuntimeType("GanglandUndercover.Online.MoleObjective");
+                object objective = Activator.CreateInstance(objectiveType);
+                objectiveType.GetField("Kills").SetValue(objective, kills);
+                objectiveType.GetField("Sabotages").SetValue(objective, sabotages);
+                objectiveType.GetField("SurvivedTilLate").SetValue(objective, survivedTilLate);
+                object objectives = GetField("_moleObjectives");
+                objectives.GetType().GetProperty("Item").SetValue(objectives, objective, new object[] { clientId });
+            }
+
+            public int MoleObjectiveInt(ulong clientId, string fieldName)
+            {
+                object objective = MoleObjective(clientId);
+                return Convert.ToInt32(objective.GetType().GetField(fieldName).GetValue(objective));
+            }
+
+            public bool MoleObjectiveBool(ulong clientId, string fieldName)
+            {
+                object objective = MoleObjective(clientId);
+                return Convert.ToBoolean(objective.GetType().GetField(fieldName).GetValue(objective));
+            }
+
+            private object MoleObjective(ulong clientId)
+            {
+                object objectives = GetField("_moleObjectives");
+                return objectives.GetType().GetProperty("Item").GetValue(objectives, new object[] { clientId });
+            }
+
+            public bool HasMoleHitTarget(ulong clientId)
+            {
+                object target = controllerType.GetMethod("GetMoleHitTarget")
+                    .Invoke(controller, new object[] { clientId });
+                return target != null;
+            }
+
+            public int CollectionCount(string fieldName)
+            {
+                object collection = GetField(fieldName);
+                return Convert.ToInt32(collection.GetType().GetProperty("Count").GetValue(collection));
+            }
+
+            public void ApplyClientAction(ulong senderClientId, string actionName, ulong targetClientId)
+            {
+                controllerType.GetMethod("ApplyClientAction", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new[]
+                    {
+                        (object)senderClientId,
+                        Enum.Parse(actionType, actionName),
+                        targetClientId,
+                    });
+            }
+
+            public void RequestAction(string actionName)
+            {
+                controllerType.GetMethod("RequestAction", new[] { actionType })
+                    .Invoke(controller, new[] { Enum.Parse(actionType, actionName) });
+            }
+
+            public ulong SabotageValue(string sabotageName)
+            {
+                return Convert.ToUInt64(Enum.Parse(sabotageType, sabotageName));
+            }
+
+            public float AbilityCooldown(ulong clientId)
+            {
+                object cooldowns = GetField("abilityCooldowns");
+                bool contains = (bool)cooldowns.GetType().GetMethod("ContainsKey").Invoke(cooldowns, new object[] { clientId });
+                return contains
+                    ? Convert.ToSingle(cooldowns.GetType().GetProperty("Item").GetValue(cooldowns, new object[] { clientId }))
+                    : 0f;
+            }
+
             public void SetEvidenceTarget(int value)
             {
                 controllerType.GetMethod("SetEvidenceTarget").Invoke(controller, new object[] { value });
@@ -4009,6 +5581,61 @@ namespace GanglandUndercover.Tests
             {
                 controllerType.GetMethod("StartOnlineMatchCore", BindingFlags.Instance | BindingFlags.NonPublic)
                     .Invoke(controller, new object[] { false });
+            }
+
+            public ulong FindClientIdByPrivateRole(string roleName)
+            {
+                object roles = GetField("privateRoles");
+                foreach (object entry in (System.Collections.IEnumerable)roles)
+                {
+                    Type entryType = entry.GetType();
+                    object role = entryType.GetProperty("Value").GetValue(entry);
+                    if (role.ToString() == roleName)
+                    {
+                        return Convert.ToUInt64(entryType.GetProperty("Key").GetValue(entry));
+                    }
+                }
+
+                Assert.Fail("未找到身份：" + roleName);
+                return 0UL;
+            }
+
+            public int[] AssignedTaskIds(ulong clientId)
+            {
+                object sync = GetField("syncManager");
+                object taskSync = sync.GetType().GetProperty("TaskSync").GetValue(sync);
+                object assignments = taskSync.GetType().GetProperty("PlayerAssignments").GetValue(taskSync);
+                bool contains = (bool)assignments.GetType().GetMethod("ContainsKey").Invoke(assignments, new object[] { clientId });
+                if (!contains)
+                {
+                    return Array.Empty<int>();
+                }
+
+                object assigned = assignments.GetType().GetProperty("Item").GetValue(assignments, new object[] { clientId });
+                var taskIds = new List<int>();
+                foreach (object taskId in (System.Collections.IEnumerable)assigned)
+                {
+                    taskIds.Add(Convert.ToInt32(taskId));
+                }
+
+                return taskIds.ToArray();
+            }
+
+            public void AssignTask(ulong clientId, int taskId)
+            {
+                object sync = GetField("syncManager");
+                object taskSync = sync.GetType().GetProperty("TaskSync").GetValue(sync);
+                object assignments = taskSync.GetType().GetProperty("PlayerAssignments").GetValue(taskSync);
+                object assigned = new HashSet<int> { taskId };
+                assignments.GetType().GetMethod("Add").Invoke(assignments, new[] { (object)clientId, assigned });
+            }
+
+            public bool IsSabotageTask(int taskId)
+            {
+                object sabotage = RuntimeType("GanglandUndercover.Online.OnlineMatchUtils")
+                    .GetMethod("SabotageForTask", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Invoke(null, new object[] { taskId });
+                return sabotage.ToString() != "None";
             }
 
             public bool TryFindRoleWithKillCooldown(string roleName, out float cooldown)
@@ -4050,12 +5677,50 @@ namespace GanglandUndercover.Tests
                 try
                 {
                     writer.WriteValueSafe(roleValue);
+                    writer.WriteValueSafe((int)Enum.Parse(professionType, "Inspector"));
                     InvokeReceive("ReceiveRoleAssign", senderClientId, writer);
                 }
                 finally
                 {
                     writer.Dispose();
                 }
+            }
+
+            public void ReceiveIdentityProgress(
+                ulong senderClientId,
+                string roleName,
+                int intel,
+                int missionsDone,
+                bool betrayed,
+                bool exposed,
+                int kills,
+                int sabotages,
+                bool survivedTilLate)
+            {
+                FastBufferWriter writer = new FastBufferWriter(64, Allocator.Temp);
+
+                try
+                {
+                    writer.WriteValueSafe(RoleValue(roleName));
+                    writer.WriteValueSafe(intel);
+                    writer.WriteValueSafe(missionsDone);
+                    writer.WriteValueSafe(betrayed);
+                    writer.WriteValueSafe(exposed);
+                    writer.WriteValueSafe(kills);
+                    writer.WriteValueSafe(sabotages);
+                    writer.WriteValueSafe(survivedTilLate);
+                    InvokeReceive("ReceiveIdentityProgress", senderClientId, writer);
+                }
+                finally
+                {
+                    writer.Dispose();
+                }
+            }
+
+            public bool IsMoleExposed(ulong clientId)
+            {
+                return (bool)controllerType.GetMethod("IsMoleExposed")
+                    .Invoke(controller, new object[] { clientId });
             }
 
             public void SetActiveMapType(string mapTypeName)
@@ -4138,6 +5803,30 @@ namespace GanglandUndercover.Tests
             public float PropertyFloat(string propertyName)
             {
                 return Convert.ToSingle(controllerType.GetProperty(propertyName).GetValue(controller));
+            }
+
+            public int VisibleFootprintCount(ulong viewerId)
+            {
+                object footprints = controllerType.GetMethod("VisibleFootprints")
+                    .Invoke(controller, new object[] { viewerId });
+                return Convert.ToInt32(footprints.GetType().GetProperty("Count").GetValue(footprints));
+            }
+
+            public bool IsDarkVisionActive(ulong clientId)
+            {
+                return (bool)controllerType.GetMethod("IsDarkVisionActive")
+                    .Invoke(controller, new object[] { clientId });
+            }
+
+            public void TickProfessionAbilities(float deltaTime)
+            {
+                controllerType.GetMethod("TickProfessionAbilities")
+                    .Invoke(controller, new object[] { deltaTime });
+            }
+
+            public void SetBlackoutVisionReduced(bool value)
+            {
+                SetField("_blackoutVisionReduced", value);
             }
 
             public float FieldFloat(string fieldName)
@@ -4234,10 +5923,51 @@ namespace GanglandUndercover.Tests
                 return Convert.ToInt32(taskStateType.GetField("Progress").GetValue(task));
             }
 
+            public Vector3 TaskPosition(int taskId)
+            {
+                object task = FindTask(taskId);
+                return (Vector3)taskStateType.GetField("Position").GetValue(task);
+            }
+
+            public string TaskName(int taskId)
+            {
+                object task = FindTask(taskId);
+                return (string)taskStateType.GetField("Name").GetValue(task);
+            }
+
+            public string TaskMapCode(int taskId)
+            {
+                return Convert.ToString(controllerType.GetMethod("TaskMapCodeDisplayName")
+                    .Invoke(controller, new object[] { taskId }));
+            }
+
+            public void SetExistingTaskSabotaged(int taskId, bool sabotaged)
+            {
+                object task = FindTask(taskId);
+                taskStateType.GetField("Sabotaged").SetValue(task, sabotaged);
+                controllerType.GetMethod("SetTask", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new[] { task });
+            }
+
             public bool TaskCompleted(int taskId)
             {
                 object task = FindTask(taskId);
                 return Convert.ToBoolean(taskStateType.GetField("Completed").GetValue(task));
+            }
+
+            public bool PlayerTaskCompleted(ulong clientId, int taskId)
+            {
+                object task = FindTask(taskId);
+                object playerTask = controllerType
+                    .GetMethod("TaskForPlayer", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new[] { (object)clientId, task });
+                return Convert.ToBoolean(taskStateType.GetField("Completed").GetValue(playerTask));
+            }
+
+            public bool TaskSabotaged(int taskId)
+            {
+                object task = FindTask(taskId);
+                return Convert.ToBoolean(taskStateType.GetField("Sabotaged").GetValue(task));
             }
 
             public int BodyCount()
@@ -4426,6 +6156,13 @@ namespace GanglandUndercover.Tests
                     .Invoke(taskService, new object[] { blackout, lockdown, commJam, evidenceLeak, evidenceLeakAccumulator, patrolAlert });
             }
 
+            public void TickSabotageService(float deltaTime)
+            {
+                EnsureSnapshotDependencies();
+                object service = GetField("sabotageService");
+                service.GetType().GetMethod("Tick").Invoke(service, new object[] { deltaTime });
+            }
+
             public void SetGlobalTimers(float phaseTimer, float emergencyCooldown, float aiGrace, float elapsed)
             {
                 SetField("phaseTimer", phaseTimer);
@@ -4437,6 +6174,55 @@ namespace GanglandUndercover.Tests
             public void ResolveTimeLimitOutcome()
             {
                 InvokeNonPublic("ResolveTimeLimitOutcome");
+            }
+
+            public void AdvanceMatchClock(float deltaTime)
+            {
+                controllerType.GetMethod("AdvanceMatchClock", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new object[] { deltaTime });
+            }
+
+            public float MatchElapsed()
+            {
+                return Convert.ToSingle(GetField("matchElapsedSeconds"));
+            }
+
+            public void TriggerCriticalTask(string taskTypeName)
+            {
+                EnsureSnapshotDependencies();
+                Type criticalTaskType = RuntimeType("GanglandUndercover.SocialDeduction.CriticalTaskType");
+                controllerType.GetMethod("TriggerCriticalTask", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new[] { Enum.Parse(criticalTaskType, taskTypeName) });
+            }
+
+            public void RecordCriticalRepair(ulong clientId, int taskId)
+            {
+                controllerType.GetMethod("RecordCriticalTaskRepair", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, new object[] { clientId, taskId });
+            }
+
+            public void SetGangPositionRevealTimer(float value)
+            {
+                SetField("_gangPositionRevealTimer", value);
+            }
+
+            public bool ShouldRevealPlayerPosition(ulong viewerClientId, ulong targetClientId)
+            {
+                return (bool)controllerType.GetMethod("ShouldRevealPlayerPosition")
+                    .Invoke(controller, new object[] { viewerClientId, targetClientId });
+            }
+
+            public int CriticalEvidenceRepairStationCount()
+            {
+                return Convert.ToInt32(controllerType
+                    .GetProperty("CriticalEvidenceRepairStationCount", BindingFlags.Instance | BindingFlags.Public)
+                    .GetValue(controller));
+            }
+
+            public bool CheckUndercoverSoloWin(ulong clientId)
+            {
+                return (bool)controllerType.GetMethod("CheckUndercoverSoloWin")
+                    .Invoke(controller, new object[] { clientId });
             }
 
             public void SetKillCooldownRaw(ulong clientId, float value)
@@ -4475,10 +6261,15 @@ namespace GanglandUndercover.Tests
 
             public void SeedEvidenceChainForAccusation(ulong discovererId, ulong targetId)
             {
+                SeedEvidenceNodes(discovererId);
+                controllerType.GetMethod("AccusePlayer").Invoke(controller, new object[] { discovererId, targetId });
+            }
+
+            public void SeedEvidenceNodes(ulong discovererId)
+            {
                 EnsureSnapshotDependencies();
                 controllerType.GetMethod("RegisterTaskEvidence").Invoke(controller, new object[] { 0, Vector2.zero, discovererId });
                 controllerType.GetMethod("RegisterTaskEvidence").Invoke(controller, new object[] { 1, Vector2.zero, discovererId });
-                controllerType.GetMethod("AccusePlayer").Invoke(controller, new object[] { discovererId, targetId });
             }
 
             private object GetField(string fieldName)
@@ -4570,6 +6361,8 @@ namespace GanglandUndercover.Tests
                 writer.WriteValueSafe(0f);
                 writer.WriteValueSafe(false);
                 writer.WriteValueSafe(criticalTaskType);
+                writer.WriteValueSafe(0f);
+                writer.WriteValueSafe(0);
                 writer.WriteValueSafe(0f);
                 writer.WriteValueSafe(playerCount);
                 writer.WriteValueSafe(taskCount);

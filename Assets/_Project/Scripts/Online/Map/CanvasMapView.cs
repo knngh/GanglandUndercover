@@ -249,6 +249,7 @@ namespace GanglandUndercover.Online.Map
             {
                 var player = kv.Value;
                 if (!player.Alive) continue;
+                if (!_controller.ShouldRevealPlayerPosition(localId, player.ClientId)) continue;
 
                 Vector2 pixelPos = WorldToCanvas(player.Position);
                 Color color = GetPlayerMarkerColor(player, localId);

@@ -55,6 +55,8 @@ namespace GanglandUndercover.PlayTests
         private GameObject _host;
         private MonoBehaviour _controller;
         private Type _controllerType;
+        private int _cameraDataUpdateCount;
+        private int _cameraNonEmptyDataCount;
 
         private static string Role => System.Environment.GetEnvironmentVariable(RoleEnv);
         private static string CodeFilePath =>
@@ -65,11 +67,14 @@ namespace GanglandUndercover.PlayTests
         private static string MigrationCandidateOldReadyPath => CodeFilePath + ".candidate-old";
         private static string MigrationObserverOldReadyPath => CodeFilePath + ".observer-old";
         private static string MigrationObserverNewReadyPath => CodeFilePath + ".observer-new";
+        private static string MigrationOldHostReconnectedPath => CodeFilePath + ".oldhost-reconnected";
         private static string MigrationRemoteTaskRequestPath => CodeFilePath + ".remote-task";
         private static string MigrationRemoteTaskSubmittedPath => CodeFilePath + ".remote-task-submitted";
         private static string MigrationRemoteVoteRequestPath => CodeFilePath + ".remote-vote";
         private static string MigrationOldHostVoteSubmittedPath => CodeFilePath + ".oldhost-vote-submitted";
         private static string MigrationObserverVoteSubmittedPath => CodeFilePath + ".observer-vote-submitted";
+        private static string CameraLegalReadyPath => CodeFilePath + ".camera-legal-ready";
+        private static string CameraDataReceivedPath => CodeFilePath + ".camera-data-received";
 
         [SetUp]
         public void SetUp()
@@ -112,6 +117,8 @@ namespace GanglandUndercover.PlayTests
             {
                 File.Delete(MaliciousMarkerPath);
             }
+            DeleteIfExists(CameraLegalReadyPath);
+            DeleteIfExists(CameraDataReceivedPath);
 
             Debug.Log("[RelayTest][host] 请求创建 Relay 房间…");
             Invoke("RequestRelayHost");
@@ -186,6 +193,24 @@ namespace GanglandUndercover.PlayTests
             Assert.AreEqual(baselineCharacterCustomJson, GetServerCharacterCustomizerJson(NetworkManager.ServerClientId),
                 "Relay 越权 CharacterCustom 消息不应改变 server-owned 外观选择。");
 
+            // 恶意注入断言完成后，进入真实 Action 阶段，准备一个合法的近距离观看者。
+            Invoke("RequestFillBotsAndStart");
+            yield return WaitUntil(() => GetProp("Phase").ToString() == "Action",
+                ServiceReadyTimeout, () => "Host 未在摄像头合法观看门禁内进入 Action 阶段。");
+            ulong remoteClientId = PlaceRemotePlayerInsideFirstCameraZone(out ulong cameraNetworkObjectId);
+            WriteAtomicFile(CameraLegalReadyPath,
+                "phase=Action remoteId=" + remoteClientId
+                + " cameraNetworkObjectId=" + cameraNetworkObjectId
+                + " cameraReady=true");
+
+            string cameraDataMarker = null;
+            yield return WaitUntil(() => TryReadAtomicFile(CameraDataReceivedPath, out cameraDataMarker),
+                ServiceReadyTimeout, () => "Host 未收到 Client 的非空摄像头数据回调 marker。");
+            Assert.IsTrue(cameraDataMarker.Contains("nonEmpty=true"),
+                "Host 只应接受 Client 实际收到非空 VisiblePlayerData 的证据。");
+            Assert.AreEqual(1, GetServerCameraWatcherCount(),
+                "合法近距离 Client 应加入且仅加入一个摄像头 watcher。");
+
             // 远端已连上并完成注入，再多挺几帧让连接稳定（证明不是瞬时抖动）。
             yield return RunFrames(30);
             Assert.GreaterOrEqual(GetInt("ConnectedClientCount"), 2, "远端连接应保持稳定。");
@@ -239,6 +264,23 @@ namespace GanglandUndercover.PlayTests
             WriteMaliciousMarker(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
                 + " characterCustom=sent cameraWatchRequest=sent maliciousPayloads=sent");
             Debug.Log("[RelayTest][client] 已发送恶意 CharacterCustom/camera ServerRpc/named messages 并写出标记 " + MaliciousMarkerPath);
+
+            string cameraReadyMarker = null;
+            yield return WaitUntil(() => TryReadAtomicFile(CameraLegalReadyPath, out cameraReadyMarker),
+                PeerConnectTimeout, () => "Client 未等到 Host 发布合法摄像头观看准备 marker。");
+            ulong cameraNetworkObjectId = MarkerUlong(cameraReadyMarker, "cameraNetworkObjectId");
+            object legalCamera = FindClientSecurityCamera(cameraNetworkObjectId);
+            Assert.IsNotNull(legalCamera, "合法观看前 Client 摄像头 clone 应仍存在。");
+            _cameraDataUpdateCount = 0;
+            _cameraNonEmptyDataCount = 0;
+            SubscribeToCameraData(legalCamera);
+            SendCameraWatchRequestFromClient(legalCamera);
+            yield return WaitUntil(() => _cameraNonEmptyDataCount > 0,
+                ServiceReadyTimeout, () => "Client 合法观看后未收到非空 VisiblePlayerData 回调。");
+            WriteAtomicFile(CameraDataReceivedPath,
+                "updates=" + _cameraDataUpdateCount
+                + " nonEmpty=" + (_cameraNonEmptyDataCount > 0 ? "true" : "false")
+                + " ready=" + cameraReadyMarker);
 
             // 连上后多挺一会儿，让 Host 端确实观察到本客户端（计数稳定 >= 2）后再退出。
             yield return RunFrames(120);
@@ -362,6 +404,7 @@ namespace GanglandUndercover.PlayTests
             DeleteIfExists(MigrationCandidateOldReadyPath);
             DeleteIfExists(MigrationObserverOldReadyPath);
             DeleteIfExists(MigrationObserverNewReadyPath);
+            DeleteIfExists(MigrationOldHostReconnectedPath);
             DeleteIfExists(MigrationRemoteTaskRequestPath);
             DeleteIfExists(MigrationRemoteTaskSubmittedPath);
             DeleteIfExists(MigrationRemoteVoteRequestPath);
@@ -398,6 +441,10 @@ namespace GanglandUndercover.PlayTests
 
             yield return RunFrames(60);
             Assert.IsTrue(GetBool("IsClientConnected"), "三端重连到 migration 新 Relay 后旧 Host 连接应保持稳定。");
+            NetworkManager reconnectedManager = GetNetworkManager();
+            Assert.IsNotNull(reconnectedManager, "三端旧 Host 重连后应存在 NetworkManager。");
+            WriteAtomicFile(MigrationOldHostReconnectedPath,
+                "clientId=" + reconnectedManager.LocalClientId);
             yield return WaitForRemoteTaskRequestAndSubmit();
             yield return WaitForRemoteVoteRequestAndSubmit(
                 "old-host",
@@ -455,15 +502,22 @@ namespace GanglandUndercover.PlayTests
                 PeerConnectTimeout, () => "三端 replacement Relay Host 未等到旧 Host 和观察客户端重连。当前连接数="
                     + GetInt("ConnectedClientCount") + " 状态: " + GetString("RelayStatus"));
 
+            string oldHostMarker = null;
+            yield return WaitUntil(() => TryReadAtomicFile(MigrationOldHostReconnectedPath, out oldHostMarker),
+                PeerConnectTimeout, () => "三端 replacement Host 未等到旧 Host 写出重连 clientId。");
+
             string observerNewReady = null;
             yield return WaitUntil(() => TryReadAtomicFile(MigrationObserverNewReadyPath, out observerNewReady),
                 PeerConnectTimeout, () => "三端 replacement Host 未等到观察客户端完成新 Relay 稳定性断言。");
 
-            yield return VerifyThreeClientPostRestoreRemoteTaskMeetingVotingFlow();
+            yield return VerifyThreeClientPostRestoreRemoteTaskMeetingVotingFlow(
+                MarkerUlong(oldHostMarker, "clientId"));
 
             yield return RunFrames(60);
-            Assert.GreaterOrEqual(GetInt("ConnectedClientCount"), 2,
-                "三端 observer 完成新 Relay 稳定性断言后，replacement Host 至少应仍保持自身和一个远端连接。");
+            // old Host/observer 在写出各自 PASS 后会正常退出；此时 replacement
+            // Host 可能只剩自身连接。前面的 >=3 和远端任务/投票门禁已证明迁移链路。
+            Assert.GreaterOrEqual(GetInt("ConnectedClientCount"), 1,
+                "三端迁移连续性完成后 replacement Host 至少应保持自身连接。");
             WriteResult("migration-candidate-threeclient", "PASS",
                 "oldCode=" + oldJoinCode + " migrationCode=" + migrationJoinCode
                 + " replacementHost=true connectedClients(incl self)=" + GetInt("ConnectedClientCount")
@@ -724,15 +778,21 @@ namespace GanglandUndercover.PlayTests
             return false;
         }
 
-        private IEnumerator VerifyThreeClientPostRestoreRemoteTaskMeetingVotingFlow()
+        private IEnumerator VerifyThreeClientPostRestoreRemoteTaskMeetingVotingFlow(ulong oldHostClientId)
         {
             List<ulong> ids = GetConnectedClientIds();
             Assert.GreaterOrEqual(ids.Count, 3, "post-restore 连续性采样需要 replacement Host + 两名远端客户端。");
             ids.Sort();
 
-            ulong policeA = ids[0];
-            ulong policeB = ids[1];
-            ulong gang = ids[2];
+            NetworkManager manager = GetNetworkManager();
+            Assert.IsNotNull(manager, "replacement Host 应存在 NetworkManager。");
+            Assert.Contains(oldHostClientId, ids,
+                "旧 Host 写出的 clientId 必须存在于 replacement Relay 的连接列表。");
+            ulong policeA = manager.LocalClientId;
+            ulong policeB = oldHostClientId;
+            ulong gang = ids.Find(id => id != policeA && id != policeB);
+            Assert.AreNotEqual(policeA, policeB, "replacement Host 与旧 Host 必须是不同 clientId。");
+            Assert.AreNotEqual(ulong.MaxValue, gang, "应能从三端连接中选出 observer 作为黑帮玩家。");
 
             SeedThreeClientMigrationSnapshot(policeA, policeB, gang);
             object snapshot = _controllerType.GetMethod("CaptureSnapshot").Invoke(_controller, null);
@@ -1016,7 +1076,12 @@ namespace GanglandUndercover.PlayTests
         {
             IDictionary players = GetField("players") as IDictionary;
             Assert.IsNotNull(players, "controller.players 应可作为 IDictionary 访问。");
-            Assert.IsTrue(players.Contains(clientId), "找不到玩家 " + clientId);
+            // 远端 observer 在写出 PASS 后会退出进程，replacement Host 可能先收到
+            // disconnect 并移除该玩家；对结算断言而言，缺席玩家与 Alive=false 等价。
+            if (!players.Contains(clientId))
+            {
+                return false;
+            }
             object player = players[clientId];
             return Convert.ToBoolean(player.GetType().GetField("Alive").GetValue(player));
         }
@@ -1183,10 +1248,95 @@ namespace GanglandUndercover.PlayTests
             object camera = FindClientSecurityCamera();
             Assert.IsNotNull(camera, "Client 应能找到已 spawn 的监控摄像头 clone。");
 
+            SendCameraWatchRequestFromClient(camera);
+        }
+
+        private void SendCameraWatchRequestFromClient(object camera)
+        {
+            Assert.IsNotNull(camera, "Client 摄像头对象不能为空。");
+
             MethodInfo mi = camera.GetType().GetMethod("StartWatchingServerRpc",
                 BindingFlags.Public | BindingFlags.Instance);
             Assert.IsNotNull(mi, "找不到 OnlineSecurityCamera.StartWatchingServerRpc。");
             mi.Invoke(camera, new object[] { default(RpcParams) });
+        }
+
+        private void SubscribeToCameraData(object camera)
+        {
+            FieldInfo callbackField = camera.GetType().GetField("OnCameraDataReceived",
+                BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(callbackField, "OnlineSecurityCamera 应暴露 OnCameraDataReceived 回调。");
+
+            Type callbackType = callbackField.FieldType;
+            Type payloadArrayType = callbackType.GetGenericArguments()[0];
+            Type payloadType = payloadArrayType.GetElementType();
+            MethodInfo bridge = GetType().GetMethod(nameof(OnCameraDataBridge),
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(bridge, "找不到摄像头回调测试桥接方法。");
+            Delegate handler = Delegate.CreateDelegate(
+                callbackType,
+                this,
+                bridge.MakeGenericMethod(payloadType));
+            callbackField.SetValue(camera, handler);
+        }
+
+        private void OnCameraDataBridge<T>(T[] data)
+        {
+            _cameraDataUpdateCount++;
+            if (data != null && data.Length > 0)
+            {
+                _cameraNonEmptyDataCount++;
+            }
+        }
+
+        private ulong PlaceRemotePlayerInsideFirstCameraZone(out ulong cameraNetworkObjectId)
+        {
+            List<ulong> clientIds = GetConnectedClientIds();
+            ulong remoteClientId = ulong.MaxValue;
+            foreach (ulong clientId in clientIds)
+            {
+                if (clientId != NetworkManager.ServerClientId)
+                {
+                    remoteClientId = clientId;
+                    break;
+                }
+            }
+
+            Assert.AreNotEqual(ulong.MaxValue, remoteClientId,
+                "摄像头合法观看门禁需要一个真实远端 Client。");
+
+            IEnumerable cameras = GetField("surveillanceCameras") as IEnumerable;
+            Assert.IsNotNull(cameras, "Host surveillanceCameras 应可枚举。");
+            object firstCamera = null;
+            foreach (object camera in cameras)
+            {
+                if (camera != null)
+                {
+                    firstCamera = camera;
+                    break;
+                }
+            }
+            Assert.IsNotNull(firstCamera, "Host 应至少有一个摄像头用于合法观看门禁。");
+            NetworkBehaviour cameraNetworkBehaviour = firstCamera as NetworkBehaviour;
+            Assert.IsNotNull(cameraNetworkBehaviour, "Host 摄像头应为已生成的 NetworkBehaviour。");
+            Assert.IsTrue(cameraNetworkBehaviour.IsSpawned, "Host 摄像头应已通过 NGO 生成。");
+            cameraNetworkObjectId = cameraNetworkBehaviour.NetworkObjectId;
+
+            PropertyInfo centerProperty = firstCamera.GetType().GetProperty("ZoneCenter",
+                BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(centerProperty, "OnlineSecurityCamera.ZoneCenter 应可读。");
+            Vector2 center = (Vector2)centerProperty.GetValue(firstCamera);
+
+            IDictionary players = GetField("players") as IDictionary;
+            Assert.IsNotNull(players, "Host players 应可枚举。");
+            Assert.IsTrue(players.Contains(remoteClientId), "Host 应已建立远端 Client 玩家状态。");
+            object state = players[remoteClientId];
+            FieldInfo positionField = state.GetType().GetField("Position",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(positionField, "OnlinePlayerState.Position 应可写入测试位置。");
+            positionField.SetValue(state, new Vector3(center.x, center.y, 0f));
+            players[remoteClientId] = state;
+            return remoteClientId;
         }
 
         private void SendCharacterCustomFromClient()
@@ -1212,6 +1362,16 @@ namespace GanglandUndercover.PlayTests
 
         private object FindClientSecurityCamera()
         {
+            return FindClientSecurityCamera(null);
+        }
+
+        private object FindClientSecurityCamera(ulong networkObjectId)
+        {
+            return FindClientSecurityCamera((ulong?)networkObjectId);
+        }
+
+        private object FindClientSecurityCamera(ulong? networkObjectId)
+        {
             UnityEngine.Object[] cameras = UnityEngine.Object.FindObjectsByType(
                 RuntimeType(CameraTypeName),
                 FindObjectsSortMode.None);
@@ -1221,7 +1381,9 @@ namespace GanglandUndercover.PlayTests
                 if (camera is NetworkBehaviour networkBehaviour
                     && networkBehaviour.IsSpawned
                     && networkBehaviour.IsClient
-                    && !networkBehaviour.IsServer)
+                    && !networkBehaviour.IsServer
+                    && (!networkObjectId.HasValue
+                        || networkBehaviour.NetworkObjectId == networkObjectId.Value))
                 {
                     return camera;
                 }

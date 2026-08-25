@@ -61,7 +61,7 @@ namespace GanglandUndercover.Online
     }
 
     public enum OnlineMatchPhase { Lobby, Opening, Action, Meeting, Voting, Result }
-    public enum OnlineActionType { Interact, Report, Kill, Vote, SkipVote, Ability, Vent }
+    public enum OnlineActionType { Interact, Report, Kill, Vote, SkipVote, Ability, Vent, Sabotage, Accuse }
 
     public struct MoleObjective
     {

@@ -83,6 +83,24 @@ namespace GanglandUndercover.Editor
 
         public static void CaptureOnlineDemoScreenshotBaseline()
         {
+            CreateActionHudScreenshotBaseline();
+            CaptureOnlineDemoScreenshot();
+        }
+
+        public static void CaptureActionHudReviewSet()
+        {
+            Camera camera = CreateActionHudScreenshotBaseline();
+            string screenshotDirectory = Path.GetFullPath("Screenshots");
+            Directory.CreateDirectory(screenshotDirectory);
+
+            CaptureCameraToPng(camera, Path.Combine(screenshotDirectory, "action-hud-1280x720.png"), 1280, 720);
+            CaptureCameraToPng(camera, Path.Combine(screenshotDirectory, "action-hud-1920x1080.png"), 1920, 1080);
+            CaptureCameraToPng(camera, Path.Combine(screenshotDirectory, "action-hud-2560x1440.png"), 2560, 1440);
+            Debug.Log("Gangland action HUD review set saved to: " + screenshotDirectory);
+        }
+
+        private static Camera CreateActionHudScreenshotBaseline()
+        {
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             GameObject cameraObject = new GameObject("Online Demo Screenshot Camera");
@@ -98,7 +116,7 @@ namespace GanglandUndercover.Editor
             controller.EditorConfigureActionCameraForSmokeTest();
             controller.EditorForceActionPreviewForSmokeTest();
             controller.EditorRefreshWorldVisualsForSmokeTest();
-            CaptureOnlineDemoScreenshot();
+            return camera;
         }
 
         private static void CaptureCameraToPng(Camera camera, string absoluteScreenshotPath, int width, int height)

@@ -1,0 +1,18 @@
+{
+  "source": "Reviewed derivatives of the project's licensed LimeZu and Kenney CC0 runtime slices",
+  "bakeTool": "Assets/_Project/Editor/ReviewedUiIconBakeTool.cs",
+  "policy": "No generated or watermarked source art. Icons are cropped, nearest-neighbor scaled, and framed from existing licensed device sprites.",
+  "icons": [
+    { "file": "sabotage_blackout_clean.png", "source": "LimeZu generator" },
+    { "file": "sabotage_lockdown_clean.png", "source": "LimeZu jail locker" },
+    { "file": "sabotage_commjam_clean.png", "source": "LimeZu station monitor" },
+    { "file": "sabotage_evidence_clean.png", "source": "LimeZu safe" },
+    { "file": "sabotage_patrol_clean.png", "source": "LimeZu CCTV rig" },
+    { "file": "task_wire_clean.png", "source": "Kenney CC0 police-station circuit board" },
+    { "file": "task_keypad_clean.png", "source": "LimeZu SOS terminal" },
+    { "file": "task_scan_clean.png", "source": "LimeZu security camera" },
+    { "file": "task_download_clean.png", "source": "LimeZu server rack" },
+    { "file": "task_memory_clean.png", "source": "LimeZu control monitor" },
+    { "file": "task_swipe_clean.png", "source": "LimeZu ticket machine" }
+  ]
+}

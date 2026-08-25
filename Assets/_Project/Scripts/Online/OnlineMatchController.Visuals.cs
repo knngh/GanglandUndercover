@@ -13,6 +13,7 @@ namespace GanglandUndercover.Online
     {
 
         // --- CountActiveNamedWorldObjects ---
+        public int ProfessionAbilityVfxCount => CountNamedWorldObjects("Ability VFX");
         public int StageTwoActiveMeetingPoseCount => CountActiveNamedWorldObjects("Stage2 Meeting");
         public int StageTwoActiveDownedStateCount => CountActiveNamedWorldObjects("Stage2 Downed");
         public int StageTwoActiveVoiceRadiusCount => CountActiveNamedWorldObjects("Stage2 VoiceRadius");
@@ -32,6 +33,9 @@ namespace GanglandUndercover.Online
         public int MeetingSeatCanvasElementCount => onlineHud == null ? 0 : onlineHud.MeetingSeatCanvasElementCount;
         public int MeetingOverlayVisualElementCount => onlineHud == null ? 0 : onlineHud.MeetingOverlayVisualElementCount;
         public int MeetingOverlay2DAssetElementCount => onlineHud == null ? 0 : onlineHud.MeetingOverlay2DAssetElementCount;
+        public int MeetingAccusationButtonCount => onlineHud == null ? 0 : onlineHud.MeetingAccusationButtonCount;
+        public int CompactActionCommandSlotCount => onlineHud == null ? 0 : onlineHud.CompactActionCommandSlotCount;
+        public bool CompactActionHudActive => onlineHud != null && onlineHud.CompactActionHudActive;
         public int ChatPanelCanvasElementCount => onlineHud == null ? 0 : onlineHud.ChatPanelCanvasElementCount;
         public int HudButtonSfxFeedbackCount => onlineHud == null ? 0 : onlineHud.ButtonSfxFeedbackCount;
         public int ChatSafetyCanvasActionCount => onlineHud == null ? 0 : onlineHud.ChatSafetyCanvasActionCount;
@@ -55,6 +59,7 @@ namespace GanglandUndercover.Online
 
         // M8.4: 对局统计数据暴露（供 MatchStatsCollector 读取）
         public int MeetingCount => _meetingCount;
+        public int AccusationCount => AccusationTargets.Count;
         public int KillCount => killSystem != null ? killSystem.killCount : 0;
         public OnlineBotController BotController => _botController;
 
@@ -198,15 +203,20 @@ namespace GanglandUndercover.Online
             foreach (OnlineTaskState task in tasks)
             {
                 seen.Add(task.Id);
+                OnlineTaskState visualTask = TaskForLocalPlayer(task);
+                if (!IsTaskVisibleToLocalPlayer(task) && !task.Sabotaged)
+                {
+                    visualTask.Completed = true;
+                }
 
                 if (!taskVisuals.TryGetValue(task.Id, out GameObject visual) || visual == null)
                 {
-                    visual = CreateTaskVisual(task);
+                    visual = CreateTaskVisual(visualTask);
                     taskVisuals[task.Id] = visual;
                 }
 
                 visual.transform.position = task.Position + new Vector3(0f, 0f, 0.1f);
-                SetTaskVisualState(visual, task);
+                SetTaskVisualState(visual, visualTask);
                 OnlineWorldBuilder.SetSortingFromZ(visual);
             }
 
@@ -218,29 +228,54 @@ namespace GanglandUndercover.Online
         {
             HashSet<ulong> seen = new HashSet<ulong>();
             ulong localClientId = LocalClientId();
+            bool localViewerAlive = players.TryGetValue(localClientId, out OnlinePlayerState localViewer)
+                && localViewer.Alive;
             _cameraRig.SetSubject(localClientId);
 
             foreach (OnlinePlayerState state in players.Values)
             {
+                bool showAsGhost = !state.Alive && (!localViewerAlive || state.ClientId == localClientId || phase == OnlineMatchPhase.Result);
+                if (!state.Alive && !showAsGhost)
+                {
+                    if (playerVisuals.TryGetValue(state.ClientId, out GameObject hiddenVisual) && hiddenVisual != null)
+                    {
+                        hiddenVisual.SetActive(false);
+                    }
+
+                    continue;
+                }
+
+                OnlinePlayerState renderState = state;
+                if (showAsGhost)
+                {
+                    // 鬼魂沿用公开身份配色，但以半透明完整角色显示给死亡玩家。
+                    renderState.Alive = true;
+                }
+
+                OnlinePlayerState presentationState = state;
+                presentationState.Profession = PresentationProfessionFor(state.ClientId, state);
                 seen.Add(state.ClientId);
 
                 if (!playerVisuals.TryGetValue(state.ClientId, out GameObject visual) || visual == null)
                 {
-                    visual = CreatePlayerVisual(state);
+                    visual = CreatePlayerVisual(presentationState);
                     playerVisuals[state.ClientId] = visual;
                     playerVisualBaseScales[state.ClientId] = visual != null ? visual.transform.localScale : Vector3.one;
                 }
 
+                visual.SetActive(true);
+
                 bool isLocalPlayer = state.ClientId == localClientId;
-                visual.transform.position = state.Position + new Vector3(0f, 0f, state.Alive ? 0.32f : 0.12f);
+                visual.transform.position = state.Position + new Vector3(0f, 0f, renderState.Alive ? 0.32f : 0.12f);
                 Vector3 baseScale = playerVisualBaseScales.TryGetValue(state.ClientId, out Vector3 cachedScale) ? cachedScale : visual.transform.localScale;
-                visual.transform.localScale = state.Alive
+                visual.transform.localScale = renderState.Alive
                     ? baseScale
                     : new Vector3(baseScale.x * 0.92f, baseScale.y * 0.48f, baseScale.z);
-                AnimatePlayerVisual(visual, state);
-                SyncCharacterAnimationState(visual, state);
-                OnlineWorldBuilder.SetPlayerVisualColors(visual, state, isLocalPlayer);
-                UpdatePlayerStageTwoStateLayer(visual, state, isLocalPlayer);
+                AnimatePlayerVisual(visual, renderState);
+                SyncCharacterAnimationState(visual, renderState);
+                OnlineWorldBuilder.SetPlayerVisualColors(visual, presentationState, isLocalPlayer);
+                UpdatePlayerStageTwoStateLayer(visual, renderState, isLocalPlayer);
+                SetGhostVisualAlpha(visual, showAsGhost ? 0.42f : 1f);
                 OnlineWorldBuilder.SetSortingFromZ(visual);
 
                 TextMesh[] labels = visual.GetComponentsInChildren<TextMesh>(true);
@@ -256,6 +291,22 @@ namespace GanglandUndercover.Online
             }
 
             RemoveStalePlayerVisuals(seen);
+        }
+
+        private static void SetGhostVisualAlpha(GameObject visual, float alpha)
+        {
+            SpriteRenderer[] renderers = visual.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] == null)
+                {
+                    continue;
+                }
+
+                Color color = renderers[i].color;
+                color.a = alpha;
+                renderers[i].color = color;
+            }
         }
 
         private static void SyncCharacterAnimationState(GameObject visual, OnlinePlayerState state)
@@ -515,6 +566,7 @@ namespace GanglandUndercover.Online
         // --- CreatePlayerVisual ---
         private GameObject CreatePlayerVisual(OnlinePlayerState state)
         {
+            state.Profession = PresentationProfessionFor(state.ClientId, state);
             GameObject visual = worldBuilder.CreatePlayerVisual(state, state.ClientId == LocalClientId());
             if (visual != null)
             {
@@ -553,7 +605,7 @@ namespace GanglandUndercover.Online
         internal Sprite GetBodySpriteForClient(ulong clientId)
         {
             OnlineProfession prof = players.TryGetValue(clientId, out var victim)
-                ? victim.Profession : OnlineProfession.Inspector;
+                ? PresentationProfessionFor(clientId, victim) : OnlineProfession.Inspector;
             return GetBodySpriteForProfession(prof);
         }
 

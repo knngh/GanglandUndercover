@@ -27,6 +27,29 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void AiReviewedBackgrounds_UseBilinearFilteringWithoutChangingPixelArtPolicy()
+        {
+            Assert.AreEqual(
+                FilterMode.Bilinear,
+                SpriteResourceImportSettings.FilterModeFor(
+                    SpriteResourceImportSettings.AiReviewedBackgroundRoot + "/gangland-harbour-login-v1.png"));
+            Assert.AreEqual(
+                FilterMode.Point,
+                SpriteResourceImportSettings.FilterModeFor(
+                    SpriteResourceImportSettings.SpriteResourcesRoot + "/Characters/Inspector/avatar.png"));
+        }
+
+        [Test]
+        public void AiReviewedMapPreviews_UseBilinearFiltering()
+        {
+            Assert.AreEqual(
+                FilterMode.Bilinear,
+                SpriteResourceImportSettings.FilterModeFor(
+                    SpriteResourceImportSettings.SpriteResourcesRoot
+                    + "/AIReviewed/MapPreviews/gangland-harbour-map-preview-v1.png"));
+        }
+
+        [Test]
         public void UiButtonResourceSprites_AreLoadableAsSpriteAssets()
         {
             AssertLoadableSprite("Assets/_Project/Resources/Sprites/UI/Buttons/buttonSquare_beige.png");

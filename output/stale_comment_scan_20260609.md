@@ -34,11 +34,11 @@
 
 ---
 
-## 4. [PLACEHOLDER] 标记
+## 4. 历史 [PLACEHOLDER] 标记
 
 | 文件 | 标记 | 说明 |
 |------|------|------|
-| MatchStatsCollector.cs:300-301 | `// [PLACEHOLDER]` | 会议/击杀统计未接入实际值 |
+| MatchStatsCollector.cs:300-301 | 已清理旧 `// [PLACEHOLDER]` 注释 | 会议/击杀统计已由 `OnlineMatchController.MeetingCount/KillCount` 在结算时写入；保留本表作为历史扫描记录 |
 
 ---
 

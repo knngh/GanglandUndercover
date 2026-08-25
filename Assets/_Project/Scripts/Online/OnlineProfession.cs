@@ -14,7 +14,7 @@ namespace GanglandUndercover.Online
         Inspector       = 0,  // 警探：报告冷却缩短，可查看足迹
         Forensics       = 1,  // 法医：检验尸体获得额外线索
         Tech            = 2,  // 技术员：远程监控，证据链加速
-        UndercoverAgent = 3,  // 卧底：公开为黑帮，可秘密投票
+        UndercoverAgent = 3,  // 卧底：公开为黑帮，可潜伏破坏并在达标后背叛
         Enforcer        = 4,  // 打手：击杀冷却缩短
         Fixer           = 5,  // 清道夫：可拖动尸体，破坏冷却缩短
         Driver          = 6,  // 车手：通风管加速，移动速度微增
@@ -74,7 +74,7 @@ namespace GanglandUndercover.Online
         // ── 特殊 ──
         DarkVision,            // 黑灯时视野不衰减（Boolean）
         BodyDrag,              // 可拖动尸体（Boolean）
-        SecretVote,            // 秘密投票（会议投票不被公开）
+        SecretVote,            // 保留的旧存档枚举值；当前规则对所有玩家统一采用匿名投票
         FootprintTrack,        // 查看附近玩家足迹（Boolean）
     }
 

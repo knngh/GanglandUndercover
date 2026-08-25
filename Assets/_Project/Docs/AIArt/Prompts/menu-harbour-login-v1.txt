@@ -1,0 +1,12 @@
+Use case: stylized-concept
+Asset type: production game menu background for a 16:9 Unity interface
+Primary request: a rain-soaked covert police operation district in a dense East Asian industrial harbour at night
+Scene/backdrop: cargo docks, stacked warehouses, narrow elevated roads, distant container cranes, wet asphalt, discreet surveillance equipment, and restrained signs without readable lettering
+Subject: the actual playable district, with police and organized-crime presence implied through an unmarked sedan, a distant checkpoint, cargo activity, and evidence-search lighting; no prominent character portrait
+Style/medium: premium 2D game environment painting with disciplined graphic shapes, grounded industrial realism, slightly pixel-art-adjacent edges, and enough detail to remain convincing at 2560x1440
+Composition/framing: wide 16:9 establishing view; skyline and harbour depth visible across the upper half; lower half darker and less busy for translucent Unity panels; preserve calm negative space behind the upper-left title and right-side login panel; strong depth layers without a single oversized focal object
+Lighting/mood: humid night, teal harbour fog, tungsten dock lights, sparse muted red warning lights, wet reflections, tense covert-operation mood; readable midtones rather than crushed blacks
+Color palette: charcoal, oxidized teal, dirty cyan, tungsten amber, restrained signal red; avoid dominant purple and electric-blue cyberpunk gradients
+Materials/textures: wet concrete, painted steel, corrugated metal, stained masonry, fog-softened glass, worn road markings
+Constraints: environment must look usable and inhabited; no logos or trademarks; no watermark; no UI panels; no interface icons; no readable words; no title text; no close-up faces; no fantasy or science-fiction technology
+Avoid: generic cyberpunk skyline, neon overload, purple-dominated palette, empty atmospheric alley, blurred stock-photo look, illegible pseudo-Chinese text, giant police badge, centered hero character, excessive darkness

@@ -353,6 +353,15 @@ namespace GanglandUndercover.Art
             ButtonBg   = DrawPanel(8, new Color(0.10f, 0.13f, 0.18f, 1f), new Color(0.35f, 0.38f, 0.42f, 1f));
             AvatarFrame= DrawAvatarFrame(64);
             VoteCardBg = DrawPanel(4, new Color(0.08f, 0.09f, 0.12f, 0.9f), new Color(0.30f, 0.33f, 0.37f, 1f));
+
+            // ─── 小游戏 ───
+            MinigameArtCache.Ensure();
+
+            // ─── UI ───
+            UIArtCache.Ensure();
+
+            // ─── 地图场景 ───
+            MapArtCache.Ensure();
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -410,22 +419,128 @@ namespace GanglandUndercover.Art
         }
 
         /// <summary>
+        /// Tile 槽位 → 首选文件名映射（不含扩展名）。
+        /// 键 = fallbackName，值 = 优先匹配的文件名关键词。
+        /// </summary>
+        private static readonly System.Collections.Generic.Dictionary<string, string> TileSlotPreference = new()
+        {
+            { "FloorMetal",    "metal-grid" },
+            { "FloorConcrete", "clean-room" },
+            { "FloorTile",     "lab-floor" },
+            { "FloorWood",     "neon-light" },
+            { "FloorCarpet",   "command-deck" },
+            { "WallBrick",     "residential-alley" },
+            { "WallConcrete",  "darktech" },
+            { "WallStripe",    "hull-panel" },
+        };
+
+        // 已使用纹理缓存，避免同一目录不同槽位加载到同一张图
+        private static readonly System.Collections.Generic.HashSet<string> _usedTilePaths = new();
+
+        /// <summary>
         /// Try to load a CC0 tileset sprite from Resources.
-        /// Returns the first available PNG in the theme/category path.
+        /// 优先按 TileSlotPreference 映射匹配文件名，其次关键词模糊匹配，最后哈希选图。
+        /// 过滤 _variant 重复文件（如 cargo-bay_cargo-bay.png）。
         /// </summary>
         private static Sprite LoadCCTile(string resourceSubPath, string fallbackName)
         {
             string fullPath = $"Sprites/Tilesets/{resourceSubPath}";
 
-            // Load all textures in this directory
             var textures = Resources.LoadAll<Texture2D>(fullPath);
             if (textures == null || textures.Length == 0) return null;
 
-            // Pick the first one (representative tile)
-            var tex = textures[0];
-            tex.filterMode = FilterMode.Point;
-            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
-                new Vector2(0.5f, 0.5f), Mathf.Max(tex.width, tex.height));
+            // 过滤重复变体文件（name_name.png 模式）
+            var filtered = new System.Collections.Generic.List<Texture2D>(textures.Length);
+            foreach (var t in textures)
+            {
+                string n = t.name;
+                int underscore = n.IndexOf('_');
+                if (underscore > 0)
+                {
+                    string prefix = n.Substring(0, underscore);
+                    string suffix = n.Substring(underscore + 1);
+                    if (suffix.StartsWith(prefix, System.StringComparison.Ordinal))
+                        continue; // 跳过 cargo-bay_cargo-bay 类重复
+                }
+                filtered.Add(t);
+            }
+            if (filtered.Count == 0) filtered.AddRange(textures);
+
+            Texture2D chosen = null;
+
+            // 1) 映射表精确匹配
+            if (TileSlotPreference.TryGetValue(fallbackName, out string prefKeyword))
+            {
+                foreach (var t in filtered)
+                {
+                    if (t.name.IndexOf(prefKeyword, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        chosen = t;
+                        break;
+                    }
+                }
+            }
+
+            // 2) fallbackName 关键词模糊匹配（去掉 "Floor"/"Wall" 前缀）
+            if (chosen == null)
+            {
+                string keyword = fallbackName
+                    .Replace("Floor", "").Replace("Wall", "").ToLowerInvariant();
+                if (keyword.Length >= 3)
+                {
+                    foreach (var t in filtered)
+                    {
+                        if (t.name.ToLowerInvariant().Contains(keyword))
+                        {
+                            chosen = t;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3) 哈希选图（确保不同槽位尽量选不同文件）
+            if (chosen == null)
+            {
+                int hash = Mathf.Abs((resourceSubPath + fallbackName).GetHashCode());
+                chosen = filtered[hash % filtered.Count];
+            }
+
+            // 4) 如果选中的已被其他槽位使用，尝试换一个
+            string chosenPath = $"{fullPath}/{chosen.name}";
+            if (_usedTilePaths.Contains(chosenPath) && filtered.Count > 1)
+            {
+                foreach (var t in filtered)
+                {
+                    string p = $"{fullPath}/{t.name}";
+                    if (!_usedTilePaths.Contains(p))
+                    {
+                        chosen = t;
+                        chosenPath = p;
+                        break;
+                    }
+                }
+            }
+            _usedTilePaths.Add(chosenPath);
+
+            chosen.filterMode = FilterMode.Point;
+            return Sprite.Create(chosen, new Rect(0, 0, chosen.width, chosen.height),
+                new Vector2(0.5f, 0.5f), Mathf.Max(chosen.width, chosen.height));
+        }
+
+        /// <summary>
+        /// Creates a runtime sprite with one authored tile from known LimeZu atlases.
+        /// The map builder owns object dimensions through Transform.localScale; using a whole
+        /// atlas here makes one prop span the scene and lets its transparent gaps hide the map.
+        /// </summary>
+        public static Sprite CreateRuntimeSprite(Texture2D texture, string resourcePath, float pixelsPerUnit = 0f)
+        {
+            Rect rect = RuntimeSpriteRect(texture, resourcePath);
+            texture.filterMode = FilterMode.Point;
+            float ppu = IsLimeZuAtlas(resourcePath)
+                ? Mathf.Max(rect.width, rect.height)
+                : pixelsPerUnit > 0f ? pixelsPerUnit : Mathf.Max(rect.width, rect.height);
+            return Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), ppu);
         }
 
         private static Sprite LoadRuntimeTile(string resourcePath, out string loadedResourcePath, float pixelsPerUnit = 0f)
@@ -437,10 +552,40 @@ namespace GanglandUndercover.Art
                 return null;
             }
 
-            tex.filterMode = FilterMode.Point;
             loadedResourcePath = resourcePath;
-            float ppu = pixelsPerUnit > 0f ? pixelsPerUnit : Mathf.Max(tex.width, tex.height);
-            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), ppu);
+            return CreateRuntimeSprite(tex, resourcePath, pixelsPerUnit);
+        }
+
+        private static bool IsLimeZuAtlas(string resourcePath)
+        {
+            return resourcePath == LimeZuInteriorFloorTilePath
+                || resourcePath == LimeZuInteriorWallTilePath
+                || resourcePath == LimeZuOfficePropsTilePath
+                || resourcePath == LimeZuOfficeWallPropsTilePath
+                || resourcePath == LimeZuOfficeFloorPropsTilePath;
+        }
+
+        private static Rect RuntimeSpriteRect(Texture2D texture, string resourcePath)
+        {
+            if (resourcePath == LimeZuInteriorWallTilePath)
+                return TopLeftCell(texture, 16);
+            if (resourcePath == LimeZuInteriorFloorTilePath)
+                return TopLeftCell(texture, 16);
+            if (resourcePath == LimeZuOfficePropsTilePath)
+                return TopLeftCell(texture, 16);
+            if (resourcePath == LimeZuOfficeWallPropsTilePath)
+                return TopLeftCell(texture, 16);
+            if (resourcePath == LimeZuOfficeFloorPropsTilePath)
+                return TopLeftCell(texture, 16);
+
+            return new Rect(0f, 0f, texture.width, texture.height);
+        }
+
+        private static Rect TopLeftCell(Texture2D texture, int cellSize)
+        {
+            float width = Mathf.Min(cellSize, texture.width);
+            float height = Mathf.Min(cellSize, texture.height);
+            return new Rect(0f, texture.height - height, width, height);
         }
 
         private static void GenerateAllCharacterSets()

@@ -18,9 +18,12 @@ namespace GanglandUndercover.Editor
 
         public static void SyncRuntimeResources()
         {
-            if (AssetDatabase.IsAssetImportWorkerProcess() || EditorApplication.isCompiling || EditorApplication.isUpdating)
+            if (EditorApplication.isPlayingOrWillChangePlaymode
+                || AssetDatabase.IsAssetImportWorkerProcess()
+                || EditorApplication.isCompiling
+                || EditorApplication.isUpdating)
             {
-                Debug.LogWarning("Quaternius runtime resource mirror skipped: Unity is importing or compiling assets.");
+                Debug.LogWarning("Quaternius runtime resource mirror skipped: Unity is playing, importing, or compiling assets.");
                 return;
             }
 

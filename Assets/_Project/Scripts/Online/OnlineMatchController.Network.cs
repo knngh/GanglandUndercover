@@ -25,8 +25,10 @@ namespace GanglandUndercover.Online
         private const float ServerChatSendCooldownSeconds = 5f;
         private const int MaxSnapshotPlayers = 64;
         private const int MaxSnapshotTasks = 256;
+        private const int MaxSnapshotTaskAssignments = MaxSnapshotPlayers * TaskSync.MaxTasksPerPlayer;
         private const int MaxSnapshotBodies = 128;
         private const int MaxSnapshotVotes = 64;
+        private const int MaxSnapshotAccusations = 64;
         private const int MaxSnapshotCaseLogEntries = 512;
 
         // --- EnsureNetworkStack ---
@@ -864,6 +866,7 @@ namespace GanglandUndercover.Online
             serverChatLastSendTimes.Clear();
             _botController?.Clear();
             localRole = OnlineRole.Unassigned;
+            localProfession = OnlineProfession.Inspector;
             phase = OnlineMatchPhase.Lobby;
             localPreviewMode = false;
             disconnectedNetworkSession = false;
@@ -919,6 +922,8 @@ namespace GanglandUndercover.Online
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ClientProfileMessage, ReceiveClientProfile);
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ServerSnapshotMessage, ReceiveServerSnapshot);
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(RoleAssignMessage, ReceiveRoleAssign);
+            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(IdentityProgressMessage, ReceiveIdentityProgress);
+            networkManager.CustomMessagingManager.RegisterNamedMessageHandler(MoleTargetMessage, ReceiveMoleTarget);
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ChatSendMessage, ReceiveChatSend);
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(ChatBroadcastMessage, ReceiveChatBroadcast);
             networkManager.CustomMessagingManager.RegisterNamedMessageHandler(MapSelectMessage, ReceiveMapSelect); // D5
@@ -948,6 +953,8 @@ namespace GanglandUndercover.Online
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ClientProfileMessage);
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ServerSnapshotMessage);
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(RoleAssignMessage);
+            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(IdentityProgressMessage);
+            networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(MoleTargetMessage);
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ChatSendMessage);
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(ChatBroadcastMessage);
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(MapSelectMessage); // D5
@@ -1057,13 +1064,15 @@ namespace GanglandUndercover.Online
         // --- ReleaseTasksHeldByClient ---
         private void ReleaseTasksHeldByClient(ulong clientId)
         {
-            if (activeTaskUsers == null || activeTaskUsers.Count == 0)
+            activeTaskByPlayer?.Remove(clientId);
+
+            if (activeRepairUsers == null || activeRepairUsers.Count == 0)
             {
                 return;
             }
 
             List<int> taskIdsToRelease = new List<int>();
-            foreach (KeyValuePair<int, ulong> pair in activeTaskUsers)
+            foreach (KeyValuePair<int, ulong> pair in activeRepairUsers)
             {
                 if (pair.Value == clientId)
                 {
@@ -1073,7 +1082,7 @@ namespace GanglandUndercover.Online
 
             for (int i = 0; i < taskIdsToRelease.Count; i++)
             {
-                activeTaskUsers.Remove(taskIdsToRelease[i]);
+                activeRepairUsers.Remove(taskIdsToRelease[i]);
             }
         }
 
@@ -1268,8 +1277,35 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (phase == OnlineMatchPhase.Lobby || phase == OnlineMatchPhase.Opening || phase == OnlineMatchPhase.Result || !player.Alive)
+            if (actionType == OnlineActionType.Accuse)
             {
+                if (TryAccusePlayer(senderClientId, targetClientId))
+                {
+                    status = player.DisplayName + " 已提交会议指证。";
+                    AddCaseLog(status);
+                    BroadcastSnapshot();
+                }
+
+                return;
+            }
+
+            if (phase == OnlineMatchPhase.Lobby || phase == OnlineMatchPhase.Opening || phase == OnlineMatchPhase.Result)
+            {
+                return;
+            }
+
+            if (phase != OnlineMatchPhase.Action)
+            {
+                return;
+            }
+
+            if (!player.Alive)
+            {
+                if (actionType == OnlineActionType.Interact && CanGhostCompleteTasks(senderClientId, player))
+                {
+                    TryInteractWithTask(senderClientId, player);
+                }
+
                 return;
             }
 
@@ -1279,14 +1315,9 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (phase != OnlineMatchPhase.Action)
-            {
-                return;
-            }
-
             if (actionType == OnlineActionType.Kill)
             {
-                TryKill(senderClientId, player);
+                TryKill(senderClientId, player, targetClientId);
                 return;
             }
 
@@ -1305,6 +1336,15 @@ namespace GanglandUndercover.Online
             if (actionType == OnlineActionType.Vent)
             {
                 TryUseUnderworldPassage(senderClientId, player);
+                return;
+            }
+
+            if (actionType == OnlineActionType.Sabotage)
+            {
+                if (targetClientId <= int.MaxValue && Enum.IsDefined(typeof(SabotageType), (int)targetClientId))
+                {
+                    TryTriggerSelectedSabotage(senderClientId, player, (SabotageType)targetClientId);
+                }
             }
         }
 
@@ -1332,7 +1372,7 @@ namespace GanglandUndercover.Online
                 state.Ready = ready;
             }
 
-            state.Input = state.Alive && phase == OnlineMatchPhase.Action ? ClampClientInput(input) : Vector2.zero;
+            state.Input = phase == OnlineMatchPhase.Action ? ClampClientInput(input) : Vector2.zero;
             players[senderClientId] = state;
         }
 
@@ -1499,6 +1539,8 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(_criticalTaskActive);
             writer.WriteValueSafe((byte)_criticalTaskType);
             writer.WriteValueSafe(_criticalTaskTimeRemaining);
+            writer.WriteValueSafe(_criticalEvidenceRepairStations.Count);
+            writer.WriteValueSafe(_gangPositionRevealTimer);
             writer.WriteValueSafe(players.Count);
 
             foreach (OnlinePlayerState state in players.Values)
@@ -1506,12 +1548,29 @@ namespace GanglandUndercover.Online
                 float killCooldown = killSystem.killCooldowns.TryGetValue(state.ClientId, out float cooldown) ? cooldown : 0f;
                 float abilityCooldown = abilityCooldowns.TryGetValue(state.ClientId, out float abilityCooldownValue) ? abilityCooldownValue : 0f;
                 float ventCooldown = ventCooldowns.TryGetValue(state.ClientId, out float ventCooldownValue) ? ventCooldownValue : 0f;
-                SnapshotIO.WritePlayerBroadcast(writer, state, killCooldown, abilityCooldown, ventCooldown);
+                OnlinePlayerState broadcastState = state;
+                if (phase != OnlineMatchPhase.Result)
+                {
+                    broadcastState.Profession = OnlineMatchUtils.PublicProfessionFor(state.PublicRole);
+                }
+                SnapshotIO.WritePlayerBroadcast(writer, broadcastState, killCooldown, abilityCooldown, ventCooldown);
             }
 
             SnapshotIO.WriteTasks(writer, tasks);
+            SnapshotIO.WriteTaskAssignments(writer, TaskSyncAssignmentsSnapshot());
             SnapshotIO.WriteBodies(writer, killSystem.bodies);
-            SnapshotIO.WriteVotes(writer, votes);
+            Dictionary<ulong, ulong> concealedVotes = new Dictionary<ulong, ulong>(votes.Count);
+            foreach (KeyValuePair<ulong, ulong> vote in votes)
+            {
+                concealedVotes[vote.Key] = SkipVoteTarget;
+            }
+            SnapshotIO.WriteVotes(writer, concealedVotes);
+            writer.WriteValueSafe(AccusationTargets.Count);
+            foreach (KeyValuePair<ulong, ulong> accusation in AccusationTargets)
+            {
+                writer.WriteValueSafe(accusation.Key);
+                writer.WriteValueSafe(accusation.Value);
+            }
             SnapshotIO.WriteCaseLog(writer, caseLog);
 
             networkManager.CustomMessagingManager.SendNamedMessageToAll(ServerSnapshotMessage, writer, NetworkDelivery.ReliableFragmentedSequenced);
@@ -1561,8 +1620,15 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out bool snapshotCriticalTaskActive);
             reader.ReadValueSafe(out byte snapshotCriticalTaskType);
             reader.ReadValueSafe(out float snapshotCriticalTaskTimeRemaining);
+            reader.ReadValueSafe(out int snapshotCriticalRepairStationCount);
+            reader.ReadValueSafe(out float snapshotGangPositionRevealTimeRemaining);
             reader.ReadValueSafe(out int count);
-            if (!IsDefinedCriticalTaskType(snapshotCriticalTaskType) || !IsSnapshotCountInRange(count, MaxSnapshotPlayers))
+            if (!IsDefinedCriticalTaskType(snapshotCriticalTaskType)
+                || snapshotCriticalRepairStationCount < 0
+                || snapshotCriticalRepairStationCount > 2
+                || !IsFinite(snapshotCriticalTaskTimeRemaining)
+                || !IsFinite(snapshotGangPositionRevealTimeRemaining)
+                || !IsSnapshotCountInRange(count, MaxSnapshotPlayers))
             {
                 return;
             }
@@ -1581,6 +1647,10 @@ namespace GanglandUndercover.Online
                     out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown);
                 OnlineRole publicRole = ToDefinedOnlineRole(roleValue);
                 OnlineProfession profession = ToDefinedOnlineProfession(professionValue);
+                if (clientId == LocalClientId() && localRole != OnlineRole.Unassigned)
+                {
+                    profession = localProfession;
+                }
 
                 OnlinePlayerState state = players.TryGetValue(clientId, out OnlinePlayerState existing)
                     ? existing
@@ -1615,6 +1685,15 @@ namespace GanglandUndercover.Online
 
             List<OnlineTaskState> snapshotTasks = SnapshotIO.ReadTasks(reader, taskCount);
 
+            reader.ReadValueSafe(out int taskAssignmentCount);
+            if (!IsSnapshotCountInRange(taskAssignmentCount, MaxSnapshotTaskAssignments))
+            {
+                return;
+            }
+
+            List<GameStateSnapshot.SnapshotTaskAssignmentEntry> snapshotTaskAssignments =
+                SnapshotIO.ReadTaskAssignments(reader, taskAssignmentCount);
+
             reader.ReadValueSafe(out int bodyCount);
             if (!IsSnapshotCountInRange(bodyCount, MaxSnapshotBodies))
             {
@@ -1630,6 +1709,20 @@ namespace GanglandUndercover.Online
             }
 
             Dictionary<ulong, ulong> snapshotVotes = SnapshotIO.ReadVotes(reader, voteCount);
+
+            reader.ReadValueSafe(out int accusationCount);
+            if (!IsSnapshotCountInRange(accusationCount, MaxSnapshotAccusations))
+            {
+                return;
+            }
+
+            Dictionary<ulong, ulong> snapshotAccusations = new Dictionary<ulong, ulong>(accusationCount);
+            for (int i = 0; i < accusationCount; i++)
+            {
+                reader.ReadValueSafe(out ulong accuserClientId);
+                reader.ReadValueSafe(out ulong targetClientId);
+                snapshotAccusations[accuserClientId] = targetClientId;
+            }
 
             reader.ReadValueSafe(out int caseLogCount);
             if (!IsSnapshotCountInRange(caseLogCount, MaxSnapshotCaseLogEntries))
@@ -1672,6 +1765,8 @@ namespace GanglandUndercover.Online
             _criticalTaskActive = snapshotCriticalTaskActive;
             _criticalTaskType = ToDefinedCriticalTaskType(snapshotCriticalTaskType);
             _criticalTaskTimeRemaining = snapshotCriticalTaskTimeRemaining;
+            ReadCriticalTaskStationCount(snapshotCriticalRepairStationCount);
+            _gangPositionRevealTimer = Mathf.Max(0f, snapshotGangPositionRevealTimeRemaining);
 
             foreach (KeyValuePair<ulong, OnlinePlayerState> pair in snapshotPlayers)
             {
@@ -1687,6 +1782,7 @@ namespace GanglandUndercover.Online
 
             tasks.Clear();
             tasks.AddRange(snapshotTasks);
+            LoadTaskSyncAssignments(snapshotTaskAssignments);
 
             killSystem.bodies.Clear();
             killSystem.bodies.AddRange(snapshotBodies);
@@ -1704,6 +1800,8 @@ namespace GanglandUndercover.Online
                     votes[pair.Key] = pair.Value;
                 }
             }
+
+            LoadAccusations(snapshotAccusations);
 
             caseLog.Clear();
             caseLog.AddRange(snapshotCaseLog);
@@ -1765,9 +1863,13 @@ namespace GanglandUndercover.Online
         // --- SendRole ---
         private void SendRole(ulong clientId, OnlineRole role)
         {
+            OnlineProfession profession = players.TryGetValue(clientId, out OnlinePlayerState assignedState)
+                ? assignedState.Profession
+                : OnlineMatchUtils.ProfessionFor(role, 0);
             if (clientId == LocalClientId())
             {
                 localRole = role;
+                localProfession = profession;
                 status = "收到身份：" + OnlineMatchUtils.RoleName(localRole);
             }
 
@@ -1778,6 +1880,7 @@ namespace GanglandUndercover.Online
 
             using FastBufferWriter writer = new FastBufferWriter(16, Unity.Collections.Allocator.Temp);
             writer.WriteValueSafe((int)role);
+            writer.WriteValueSafe((int)profession);
             networkManager.CustomMessagingManager.SendNamedMessage(RoleAssignMessage, clientId, writer);
         }
 
@@ -1795,8 +1898,127 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            reader.ReadValueSafe(out int professionValue);
+            if (!IsDefinedOnlineProfession(professionValue))
+            {
+                return;
+            }
+
             localRole = (OnlineRole)roleValue;
+            localProfession = (OnlineProfession)professionValue;
+            privateRoles[LocalClientId()] = localRole;
             status = "收到身份：" + OnlineMatchUtils.RoleName(localRole);
+        }
+
+        private void SendIdentityProgress(ulong clientId)
+        {
+            OnlineRole role = GetPrivateRole(clientId);
+            if (role != OnlineRole.Undercover && role != OnlineRole.Mole)
+            {
+                return;
+            }
+
+            if (localPreviewMode || OnlineBotController.IsBotClient(clientId)
+                || networkManager == null || !networkManager.IsServer
+                || networkManager.CustomMessagingManager == null)
+            {
+                return;
+            }
+
+            _moleObjectives.TryGetValue(clientId, out MoleObjective objective);
+            using FastBufferWriter writer = new FastBufferWriter(64, Unity.Collections.Allocator.Temp);
+            writer.WriteValueSafe((int)role);
+            writer.WriteValueSafe(role == OnlineRole.Undercover ? GetUndercoverIntel(clientId) : GetMoleIntel(clientId));
+            writer.WriteValueSafe(_undercoverMissionsDone.TryGetValue(clientId, out int missionsDone) ? missionsDone : 0);
+            writer.WriteValueSafe(HasBetrayed(clientId));
+            writer.WriteValueSafe(IsMoleExposed(clientId));
+            writer.WriteValueSafe(objective.Kills);
+            writer.WriteValueSafe(objective.Sabotages);
+            writer.WriteValueSafe(objective.SurvivedTilLate);
+            networkManager.CustomMessagingManager.SendNamedMessage(IdentityProgressMessage, clientId, writer);
+        }
+
+        private void ReceiveIdentityProgress(ulong senderClientId, FastBufferReader reader)
+        {
+            if (!IsServerSender(senderClientId))
+            {
+                return;
+            }
+
+            reader.ReadValueSafe(out int roleValue);
+            if (!IsDefinedOnlineRole(roleValue))
+            {
+                return;
+            }
+
+            OnlineRole role = (OnlineRole)roleValue;
+            if ((role != OnlineRole.Undercover && role != OnlineRole.Mole) || localRole != role)
+            {
+                return;
+            }
+
+            reader.ReadValueSafe(out int intel);
+            reader.ReadValueSafe(out int missionsDone);
+            reader.ReadValueSafe(out bool betrayed);
+            reader.ReadValueSafe(out bool exposed);
+            reader.ReadValueSafe(out int kills);
+            reader.ReadValueSafe(out int sabotages);
+            reader.ReadValueSafe(out bool survivedTilLate);
+
+            ulong localClientId = LocalClientId();
+            if (role == OnlineRole.Undercover)
+            {
+                _undercoverIntel[localClientId] = Mathf.Max(0, intel);
+                _undercoverMissionsDone[localClientId] = Mathf.Max(0, missionsDone);
+                if (betrayed) _undercoverBetrayed.Add(localClientId);
+                else _undercoverBetrayed.Remove(localClientId);
+                return;
+            }
+
+            _moleIntel[localClientId] = Mathf.Max(0, intel);
+            if (exposed) _moleExposed.Add(localClientId);
+            else _moleExposed.Remove(localClientId);
+            _moleObjectives[localClientId] = new MoleObjective
+            {
+                Kills = Mathf.Max(0, kills),
+                Sabotages = Mathf.Max(0, sabotages),
+                SurvivedTilLate = survivedTilLate,
+            };
+        }
+
+        private void SendMoleTarget(ulong moleClientId, ulong targetClientId)
+        {
+            if (moleClientId == LocalClientId())
+            {
+                _moleHitList[moleClientId] = targetClientId;
+            }
+
+            if (localPreviewMode || OnlineBotController.IsBotClient(moleClientId)
+                || networkManager == null || networkManager.CustomMessagingManager == null)
+            {
+                return;
+            }
+
+            using FastBufferWriter writer = new FastBufferWriter(16, Unity.Collections.Allocator.Temp);
+            writer.WriteValueSafe(targetClientId);
+            networkManager.CustomMessagingManager.SendNamedMessage(MoleTargetMessage, moleClientId, writer);
+        }
+
+        private void ReceiveMoleTarget(ulong senderClientId, FastBufferReader reader)
+        {
+            if (!IsServerSender(senderClientId) || localRole != OnlineRole.Mole)
+            {
+                return;
+            }
+
+            reader.ReadValueSafe(out ulong targetClientId);
+            if (!players.TryGetValue(targetClientId, out OnlinePlayerState target) || !target.Alive)
+            {
+                return;
+            }
+
+            _moleHitList[LocalClientId()] = targetClientId;
+            status = "情报比对完成：暗杀目标已锁定。";
         }
 
         // --- EnsureChatSystem ---
@@ -1911,8 +2133,10 @@ namespace GanglandUndercover.Online
             OnlineRole role = GetPrivateRole(senderClientId);
             ChatChannel channel = ChatSystem.DetermineChannel(phase, senderState.Alive);
             Vector3 senderPos = senderState.Position;
-            Faction faction = ChatSystem.RoleToFaction(role);
             bool isDead = !senderState.Alive;
+            OnlineRole presentedRole = OnlineMatchUtils.ChatPresentationRole(
+                role, senderState.PublicRole, senderState.Alive, phase);
+            Faction faction = ChatSystem.RoleToFaction(presentedRole);
             string senderName = senderState.DisplayName;
 
             // 本地显示（服务器也显示）

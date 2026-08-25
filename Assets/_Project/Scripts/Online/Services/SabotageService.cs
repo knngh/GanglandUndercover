@@ -166,21 +166,34 @@ namespace GanglandUndercover.Online.Services
         /// <param name="type">破坏类型。</param>
         /// <param name="initiatorId">发起者 ClientId。</param>
         /// <param name="taskName">关联的任务名称（用于日志）。</param>
-        public void TriggerSabotage(SabotageType type, ulong initiatorId, string taskName)
+        public bool CanTriggerSabotage(SabotageType type)
         {
-            if (type == SabotageType.None) return;
-            if (controller == null) return;
-
-            // 冷却检查
-            if (cooldownTimers.TryGetValue(type, out float cool) && cool > 0f)
+            if (type == SabotageType.None || controller == null)
             {
-                return;
+                return false;
             }
 
-            // 已在生效中则不重复触发
+            if (cooldownTimers.TryGetValue(type, out float cool) && cool > 0f)
+            {
+                return false;
+            }
+
             if (activeTimers.TryGetValue(type, out float active) && active > 0f)
             {
-                return;
+                return false;
+            }
+
+            return activeTimers.ContainsKey(type) && cooldownTimers.ContainsKey(type);
+        }
+
+        /// <summary>
+        /// 尝试触发破坏效果。只有返回 true 时，调用方才能提交关联状态变更。
+        /// </summary>
+        public bool TryTriggerSabotage(SabotageType type, ulong initiatorId, string taskName)
+        {
+            if (!CanTriggerSabotage(type))
+            {
+                return false;
             }
 
             // 获取持续时间（从 RuleSet）
@@ -197,6 +210,14 @@ namespace GanglandUndercover.Online.Services
                 Type = type,
                 InitiatorId = initiatorId,
             });
+
+            return true;
+        }
+
+        /// <summary>兼容旧调用；需要确认结果的新代码应使用 TryTriggerSabotage。</summary>
+        public void TriggerSabotage(SabotageType type, ulong initiatorId, string taskName)
+        {
+            TryTriggerSabotage(type, initiatorId, taskName);
         }
 
         /// <summary>

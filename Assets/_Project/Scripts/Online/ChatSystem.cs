@@ -420,12 +420,12 @@ namespace GanglandUndercover.Online
             GUILayout.BeginHorizontal();
 
             GUI.enabled = messages.Count > 0;
-            if (GUILayout.Button("举报最近", GUILayout.Width(76f)))
+            if (GUILayout.Button("举报", GUILayout.Width(60f)))
             {
                 ReportLatestMessage("玩家举报");
             }
 
-            if (GUILayout.Button("屏蔽最近", GUILayout.Width(76f)))
+            if (GUILayout.Button("屏蔽", GUILayout.Width(60f)))
             {
                 BlockLatestSender();
             }

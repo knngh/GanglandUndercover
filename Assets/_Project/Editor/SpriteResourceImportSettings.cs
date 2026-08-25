@@ -12,6 +12,8 @@ namespace GanglandUndercover.Editor
     public static class SpriteResourceImportSettings
     {
         public const string SpriteResourcesRoot = "Assets/_Project/Resources/Sprites";
+        public const string AiReviewedBackgroundRoot = SpriteResourcesRoot + "/AIReviewed/Backgrounds";
+        public const string AiReviewedMapPreviewRoot = SpriteResourcesRoot + "/AIReviewed/MapPreviews";
 
         [MenuItem("Gangland/Art/Validate Resource Sprite Imports")]
         public static void ValidateResourceSpriteImports()
@@ -56,7 +58,7 @@ namespace GanglandUndercover.Editor
             foreach (string path in GetSpritePngAssetPaths())
             {
                 TextureImporter importer = AssetImporter.GetAtPath(path) as TextureImporter;
-                if (importer == null || !IsConfigured(importer))
+                if (importer == null || !IsConfigured(importer, path))
                 {
                     invalid.Add(path);
                 }
@@ -116,9 +118,10 @@ namespace GanglandUndercover.Editor
                 changed = true;
             }
 
-            if (importer.filterMode != FilterMode.Point)
+            FilterMode expectedFilterMode = FilterModeFor(assetPath);
+            if (importer.filterMode != expectedFilterMode)
             {
-                importer.filterMode = FilterMode.Point;
+                importer.filterMode = expectedFilterMode;
                 changed = true;
             }
 
@@ -151,13 +154,33 @@ namespace GanglandUndercover.Editor
 
         public static bool IsConfigured(TextureImporter importer)
         {
+            return IsConfigured(importer, null);
+        }
+
+        public static bool IsConfigured(TextureImporter importer, string assetPath)
+        {
             return importer.textureType == TextureImporterType.Sprite
                 && importer.spriteImportMode == SpriteImportMode.Single
                 && !importer.mipmapEnabled
-                && importer.filterMode == FilterMode.Point
+                && importer.filterMode == FilterModeFor(assetPath)
                 && importer.textureCompression == TextureImporterCompression.Uncompressed
                 && importer.alphaIsTransparency
                 && importer.npotScale == TextureImporterNPOTScale.None;
+        }
+
+        public static FilterMode FilterModeFor(string assetPath)
+        {
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                string normalizedPath = assetPath.Replace(Path.DirectorySeparatorChar, '/');
+                if (normalizedPath.StartsWith(AiReviewedBackgroundRoot + "/", System.StringComparison.Ordinal)
+                    || normalizedPath.StartsWith(AiReviewedMapPreviewRoot + "/", System.StringComparison.Ordinal))
+                {
+                    return FilterMode.Bilinear;
+                }
+            }
+
+            return FilterMode.Point;
         }
     }
 }

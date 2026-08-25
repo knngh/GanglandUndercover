@@ -20,6 +20,12 @@ namespace GanglandUndercover.Online
         private string playerId = string.Empty;
         private string status = "Unity Services 待初始化。";
 
+        // Multiple runtime controllers can be created by a PlayMode suite or by
+        // additive scenes. Unity Services and Authentication are process-wide, so
+        // share their in-flight tasks instead of racing duplicate sign-in calls.
+        private static Task servicesInitializationTask;
+        private static Task authenticationTask;
+
         public bool CloudProjectBound => !string.IsNullOrWhiteSpace(CloudProjectId);
         public string CloudProjectId => string.IsNullOrWhiteSpace(cloudProjectId) ? Application.cloudProjectId ?? string.Empty : cloudProjectId;
         public bool ServicesReady => servicesReady;
@@ -81,12 +87,25 @@ namespace GanglandUndercover.Online
             try
             {
                 status = "正在初始化 Unity Services。";
-                await UnityServices.InitializeAsync(initializationOptions);
+                if (UnityServices.State == ServicesInitializationState.Initialized)
+                {
+                    servicesInitializationTask = Task.CompletedTask;
+                }
+                else
+                {
+                    servicesInitializationTask ??= UnityServices.InitializeAsync(initializationOptions);
+                }
+                await servicesInitializationTask;
                 servicesReady = UnityServices.State == ServicesInitializationState.Initialized;
                 RefreshConnectivityReadiness();
             }
             catch (Exception exception)
             {
+                if (servicesInitializationTask != null
+                    && (servicesInitializationTask.IsFaulted || servicesInitializationTask.IsCanceled))
+                {
+                    servicesInitializationTask = null;
+                }
                 servicesReady = UnityServices.State == ServicesInitializationState.Initialized;
                 RefreshConnectivityReadiness();
                 status = "Unity Services 初始化失败：" + exception.Message;
@@ -99,7 +118,8 @@ namespace GanglandUndercover.Online
                 if (!AuthenticationService.Instance.IsSignedIn)
                 {
                     status = "Unity Services 已初始化，正在匿名登录。";
-                    await AuthenticationService.Instance.SignInAnonymouslyAsync();
+                    authenticationTask ??= AuthenticationService.Instance.SignInAnonymouslyAsync();
+                    await authenticationTask;
                 }
 
                 authenticationReady = AuthenticationService.Instance.IsSignedIn;
@@ -107,6 +127,11 @@ namespace GanglandUndercover.Online
             }
             catch (Exception exception)
             {
+                if (authenticationTask != null
+                    && (authenticationTask.IsFaulted || authenticationTask.IsCanceled))
+                {
+                    authenticationTask = null;
+                }
                 authenticationReady = false;
                 playerId = string.Empty;
                 status = "Authentication 登录失败：" + exception.Message;

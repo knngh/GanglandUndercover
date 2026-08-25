@@ -1,15 +1,14 @@
 using System;
 using System.Collections.Generic;
 using GanglandUndercover;
-using GanglandUndercover.SocialDeduction;
+using GanglandUndercover.Art;
 using UnityEngine;
 using UnityEngine.UI;
-using Unity.Netcode;
 
 namespace GanglandUndercover.Online
 {
     /// <summary>
-    /// Sabotage 破坏 UI 面板（Impostor/Gang 专属）：
+    /// Sabotage 破坏 UI 面板（Gang/潜伏卧底/Mole 专属）：
     /// - Blackout（熄灯 10s）
     /// - Lockdown（封锁区域门 15s）
     /// - Communications（禁用会议 10s）
@@ -17,10 +16,7 @@ namespace GanglandUndercover.Online
     /// - 破坏进行时 Crewmate 可以看到修复任务
     ///
     /// 面板通过 OnlineMatchController 的 sabotage 计时器状态刷新，
-    /// 点击按钮调用 controller.SendClientAction(OnlineActionType.Ability)
-    /// 并附带 sabotage 类型参数（需要扩展 OnlineActionType 或使用 Ability 子类型）。
-    ///
-    /// 当前实现通过现有 Ability 管道触发，Gang 的 Ability 对应 Sabotage。
+    /// 点击按钮通过权威动作消息提交明确的 sabotage 类型，由服务端校验身份、阶段和冷却。
     /// </summary>
     public sealed class SabotagePanel : MonoBehaviour
     {
@@ -101,6 +97,8 @@ namespace GanglandUndercover.Online
             activeTimers[SabotageType.Blackout] = 0f;
             activeTimers[SabotageType.Lockdown] = 0f;
             activeTimers[SabotageType.Communications] = 0f;
+            activeTimers[SabotageType.EvidenceLeak] = 0f;
+            activeTimers[SabotageType.PatrolAlert] = 0f;
             activeTimers[SabotageType.CriticalO2] = 0f;
             activeTimers[SabotageType.CriticalReactor] = 0f;
 
@@ -110,9 +108,6 @@ namespace GanglandUndercover.Online
         private void Update()
         {
             if (controller == null) return;
-
-            // 仅在 Action 阶段、本地玩家存活、且为 Gang 时显示面板
-            bool shouldShow = ShouldShowPanel();
 
             // Tab 键切换面板显示（与任务面板互斥）
             if (Input.GetKeyDown(KeyCode.Tab))
@@ -137,9 +132,11 @@ namespace GanglandUndercover.Online
             // 检查本地玩家是否存活
             if (!IsLocalPlayerAlive()) return false;
 
-            // 检查本地角色是否为 Gang
+            // 真黑帮、潜伏卧底和内鬼可破坏；已公开背叛的卧底失去破坏权限。
             OnlineRole localRole = GetLocalRole();
-            return localRole == OnlineRole.Gang;
+            return OnlineMatchUtils.CanSabotage(localRole)
+                && (localRole != OnlineRole.Undercover
+                    || !controller.HasBetrayed(controller.LocalClientIdValue));
         }
 
         private void TogglePanel()
@@ -147,7 +144,7 @@ namespace GanglandUndercover.Online
             if (panelRoot == null) return;
             bool newState = !panelRoot.activeSelf;
 
-            // 仅 Gang 可以打开
+            // 仅拥有破坏权限的存活玩家可以打开
             if (newState && !ShouldShowPanel()) return;
 
             panelRoot.SetActive(newState);
@@ -161,6 +158,7 @@ namespace GanglandUndercover.Online
         private void BuildSabotageButtons()
         {
             if (buttonContainer == null) return;
+            UIArtCache.Ensure();
 
             // 清空旧按钮
             foreach (Button btn in spawnedButtons)
@@ -169,7 +167,7 @@ namespace GanglandUndercover.Online
             }
             spawnedButtons.Clear();
 
-            // 默认破坏类型（含所有5种标准型 + 2种紧急型）
+            // 默认破坏类型：只开放权威规则中定义的 5 种标准破坏。
             var defaultConfigs = new[]
             {
                 new SabotageButtonConfig { type = SabotageType.Blackout, displayName = "熄灯", description = "全图视野降低 28s" },
@@ -177,15 +175,13 @@ namespace GanglandUndercover.Online
                 new SabotageButtonConfig { type = SabotageType.Communications, displayName = "断讯", description = "禁用会议按钮 30s" },
                 new SabotageButtonConfig { type = SabotageType.EvidenceLeak, displayName = "证据泄露", description = "证据链持续衰减 36s" },
                 new SabotageButtonConfig { type = SabotageType.PatrolAlert, displayName = "巡逻警报", description = "黑帮暴露风险 30s" },
-                new SabotageButtonConfig { type = SabotageType.CriticalO2, displayName = "O2中毒", description = "紧急：氧气泄漏 30s" },
-                new SabotageButtonConfig { type = SabotageType.CriticalReactor, displayName = "反应堆", description = "紧急：熔毁 30s" },
             };
 
             foreach (var config in defaultConfigs)
             {
                 GameObject btnObj = sabotageButtonPrefab != null
                     ? Instantiate(sabotageButtonPrefab, buttonContainer)
-                    : CreateFallbackButton(config.displayName);
+                    : CreateFallbackButton(config);
 
                 SabotageButton sb = btnObj.GetComponent<SabotageButton>();
                 if (sb == null) sb = btnObj.AddComponent<SabotageButton>();
@@ -195,23 +191,43 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private GameObject CreateFallbackButton(string displayLabel)
+        private GameObject CreateFallbackButton(SabotageButtonConfig config)
         {
-            GameObject btnObj = new GameObject("SabotageBtn_" + displayLabel);
+            GameObject btnObj = new GameObject("SabotageBtn_" + config.displayName);
             btnObj.transform.SetParent(buttonContainer, false);
 
             RectTransform rt = btnObj.AddComponent<RectTransform>();
             rt.sizeDelta = new Vector2(160f, 48f);
 
             Image img = btnObj.AddComponent<Image>();
-            img.color = new Color(0.18f, 0.18f, 0.22f, 0.92f);
+            Sprite buttonSprite = UIArtCache.ButtonNormal;
+            img.sprite = buttonSprite;
+            img.type = buttonSprite != null ? Image.Type.Sliced : Image.Type.Simple;
+            img.color = buttonSprite != null ? Color.white : new Color(0.18f, 0.18f, 0.22f, 0.92f);
 
             Button btn = btnObj.AddComponent<Button>();
             ColorBlock cb = btn.colors;
-            cb.normalColor = new Color(0.22f, 0.22f, 0.28f);
-            cb.highlightedColor = new Color(0.32f, 0.32f, 0.38f);
-            cb.pressedColor = new Color(0.12f, 0.12f, 0.18f);
+            cb.normalColor = buttonSprite != null ? new Color(0.88f, 0.88f, 0.88f) : new Color(0.22f, 0.22f, 0.28f);
+            cb.highlightedColor = buttonSprite != null ? Color.white : new Color(0.32f, 0.32f, 0.38f);
+            cb.pressedColor = buttonSprite != null ? new Color(0.65f, 0.72f, 0.78f) : new Color(0.12f, 0.12f, 0.18f);
             btn.colors = cb;
+
+            Sprite icon = UIArtCache.SabotageIcon(config.type.ToString());
+            if (icon != null)
+            {
+                GameObject iconObject = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+                iconObject.transform.SetParent(btnObj.transform, false);
+                RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+                iconRect.anchorMin = new Vector2(0f, 0.5f);
+                iconRect.anchorMax = new Vector2(0f, 0.5f);
+                iconRect.pivot = new Vector2(0f, 0.5f);
+                iconRect.anchoredPosition = new Vector2(7f, 0f);
+                iconRect.sizeDelta = new Vector2(34f, 34f);
+                Image iconImage = iconObject.GetComponent<Image>();
+                iconImage.sprite = icon;
+                iconImage.preserveAspect = true;
+                iconImage.raycastTarget = false;
+            }
 
             // 标签
             GameObject labelObj = new GameObject("Label");
@@ -219,11 +235,11 @@ namespace GanglandUndercover.Online
             RectTransform lrt = labelObj.AddComponent<RectTransform>();
             lrt.anchorMin = Vector2.zero;
             lrt.anchorMax = Vector2.one;
-            lrt.offsetMin = new Vector2(4f, 4f);
+            lrt.offsetMin = new Vector2(icon != null ? 46f : 4f, 4f);
             lrt.offsetMax = new Vector2(-4f, -4f);
 
             Text lbl = labelObj.AddComponent<Text>();
-            lbl.text = displayLabel;
+            lbl.text = config.displayName;
             lbl.alignment = TextAnchor.MiddleCenter;
             lbl.color = Color.white;
             lbl.fontSize = 16;
@@ -237,9 +253,6 @@ namespace GanglandUndercover.Online
         {
             if (!CanTriggerSabotage(type)) return;
 
-            // 通过 OnlineMatchController 触发破坏
-            // 现有管道：Gang 的 Ability 按钮对应 Sabotage
-            // 直接调用 controller 的 sabotage 方法
             TriggerSabotage(type);
 
             // 启动冷却
@@ -250,46 +263,7 @@ namespace GanglandUndercover.Online
         {
             if (controller == null) return;
 
-            // 本地预览/离线模式：直接施加效果
-            if (controller.LocalClientIdValue == 0UL)
-            {
-                ApplySabotageLocally(type);
-            }
-            else
-            {
-                // 联机模式：通过 Ability 消息发送
-                controller.RequestAction(OnlineActionType.Ability);
-            }
-        }
-
-        private void ApplySabotageLocally(SabotageType type)
-        {
-            // 紧急破坏：触发 CriticalTaskSystem
-            if (type == SabotageType.CriticalO2)
-            {
-                SocialPrototypeController spc = FindAnyObjectByType<SocialPrototypeController>();
-                if (spc != null)
-                {
-                    spc.TriggerCriticalTask(CriticalTaskType.O2);
-                }
-                return;
-            }
-
-            if (type == SabotageType.CriticalReactor)
-            {
-                SocialPrototypeController spc = FindAnyObjectByType<SocialPrototypeController>();
-                if (spc != null)
-                {
-                    spc.TriggerCriticalTask(CriticalTaskType.Reactor);
-                }
-                return;
-            }
-
-            // 普通破坏：直接通过 taskService 设置计时器
-            controller.ApplySabotageTimer(type);
-
-            // 播放破坏音效
-            controller.RequestAction(OnlineActionType.Ability);
+            controller.RequestSabotage(type);
         }
 
         // -------- 冷却与计时 --------
@@ -384,23 +358,13 @@ namespace GanglandUndercover.Online
         private bool IsLocalPlayerAlive()
         {
             if (controller == null) return false;
-            ulong localId = GetLocalClientId();
-            // 通过 controller 的 players 字典检查（需要友元访问）
-            return true; // 由服务端校验，客户端预判
+            return controller.LocalAlive;
         }
 
         private OnlineRole GetLocalRole()
         {
             if (controller == null) return OnlineRole.Unassigned;
             return controller.LocalRole;
-        }
-
-        private ulong GetLocalClientId()
-        {
-            if (controller == null) return 0;
-            return controller.IsLocalPreview || NetworkManager.Singleton == null
-                ? 0UL
-                : NetworkManager.Singleton.LocalClientId;
         }
 
         // -------- 公开接口（供 Crewmate 修复 UI 调用）--------

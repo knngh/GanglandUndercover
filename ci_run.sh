@@ -55,6 +55,40 @@ run_unity() {
     ${extra_args} || return $?
 }
 
+# run_tests <platform> <log_name>
+# 使用 Unity Test Framework 官方 -runTests 同步执行模式。
+# 退出码: 0=全部通过, 2=有失败, 4=超时/取消。
+# 修复记录 (2026-08-21): 原实现经 CIRunner.RunXxxTests + EditorApplication.update
+# 等待回调，但 -quit 在异步测试启动后立即退出，导致测试从未执行、退出码恒 0
+# （历史 59 份 ci-logs 均无结果行佐证）。本函数改用 -runTests 保证测试真实执行。
+run_tests() {
+  local platform="$1"
+  local log_name="$2"
+  local xml_path="${CI_LOG_DIR}/${TIMESTAMP}_${log_name}.xml"
+
+  echo "  Running ${platform} tests (this can take several minutes)..."
+  "${UNITY}" \
+    -batchmode \
+    -nographics \
+    -projectPath "${PROJECT_DIR}" \
+    -runTests \
+    -testPlatform "${platform}" \
+    -testResults "${xml_path}" \
+    -logFile "${CI_LOG_DIR}/${TIMESTAMP}_${log_name}.log"
+  local rc=$?
+  if [ $rc -ne 0 ]; then
+    return $rc
+  fi
+  # 汇总结果行（从 NUnit XML 提取）
+  if [ -f "${xml_path}" ]; then
+    local summary
+    summary=$(grep -o 'result="[A-Za-z]*" total="[0-9]*" passed="[0-9]*" failed="[0-9]*" inconclusive="[0-9]*" skipped="[0-9]*"' "${xml_path}" | head -1)
+    echo "  Results: ${summary}"
+    echo "  XML:     ${xml_path}"
+  fi
+  return 0
+}
+
 # ── Stage 1: Compile ──
 log_stage "Compile" "compile"
 if run_unity "CIRunner.Compile" "compile"; then
@@ -67,10 +101,10 @@ fi
 # ── Stage 2: EditMode Tests ──
 if [ "$SKIP_TESTS" = false ] && [ $FINAL_EXIT -eq 0 ]; then
   log_stage "EditMode Tests" "editmode"
-  if run_unity "CIRunner.RunEditModeTests" "editmode"; then
+  if run_tests "EditMode" "editmode"; then
     echo "  ✅ EditMode tests passed"
   else
-    echo "  ❌ EditMode tests FAILED"
+    echo "  ❌ EditMode tests FAILED (exit code above)"
     FINAL_EXIT=1
   fi
 else
@@ -80,10 +114,10 @@ fi
 # ── Stage 3: PlayMode Tests ──
 if [ "$SKIP_TESTS" = false ] && [ $FINAL_EXIT -eq 0 ]; then
   log_stage "PlayMode Tests" "playmode"
-  if run_unity "CIRunner.RunPlayModeTests" "playmode"; then
+  if run_tests "PlayMode" "playmode"; then
     echo "  ✅ PlayMode tests passed"
   else
-    echo "  ❌ PlayMode tests FAILED"
+    echo "  ❌ PlayMode tests FAILED (exit code above)"
     FINAL_EXIT=1
   fi
 else

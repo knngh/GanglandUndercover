@@ -52,6 +52,61 @@ namespace GanglandUndercover.Online
             return tasks;
         }
 
+        public static void WriteTaskAssignments(FastBufferWriter writer, IReadOnlyList<GameStateSnapshot.SnapshotTaskAssignmentEntry> assignments)
+        {
+            writer.WriteValueSafe(assignments.Count);
+            for (int i = 0; i < assignments.Count; i++)
+            {
+                writer.WriteValueSafe(assignments[i].ClientId);
+                writer.WriteValueSafe(assignments[i].TaskId);
+                writer.WriteValueSafe(assignments[i].Progress);
+                writer.WriteValueSafe(assignments[i].RequiredProgress);
+                writer.WriteValueSafe(assignments[i].Completed);
+            }
+        }
+
+        public static List<GameStateSnapshot.SnapshotTaskAssignmentEntry> ReadTaskAssignments(FastBufferReader reader, int count)
+        {
+            var assignments = new List<GameStateSnapshot.SnapshotTaskAssignmentEntry>(count);
+            for (int i = 0; i < count; i++)
+            {
+                reader.ReadValueSafe(out ulong clientId);
+                reader.ReadValueSafe(out int taskId);
+                reader.ReadValueSafe(out int progress);
+                reader.ReadValueSafe(out int requiredProgress);
+                reader.ReadValueSafe(out bool completed);
+                assignments.Add(new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                {
+                    ClientId = clientId,
+                    TaskId = taskId,
+                    Progress = progress,
+                    RequiredProgress = requiredProgress,
+                    Completed = completed,
+                });
+            }
+
+            return assignments;
+        }
+
+        public static List<GameStateSnapshot.SnapshotTaskAssignmentEntry> ReadLegacyTaskAssignments(
+            FastBufferReader reader, int count)
+        {
+            var assignments = new List<GameStateSnapshot.SnapshotTaskAssignmentEntry>(count);
+            for (int i = 0; i < count; i++)
+            {
+                reader.ReadValueSafe(out ulong clientId);
+                reader.ReadValueSafe(out int taskId);
+                assignments.Add(new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                {
+                    ClientId = clientId,
+                    TaskId = taskId,
+                    RequiredProgress = OnlineMatchUtils.TaskRequiredProgress(taskId),
+                });
+            }
+
+            return assignments;
+        }
+
         /// <summary>写入任务（Migration 格式，含 Name 字段）。</summary>
         public static void WriteTasksMigration(FastBufferWriter writer, IReadOnlyList<GameStateSnapshot.SnapshotTaskEntry> tasks)
         {

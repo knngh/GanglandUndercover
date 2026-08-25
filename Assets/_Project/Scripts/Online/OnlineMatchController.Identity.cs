@@ -47,6 +47,7 @@ namespace GanglandUndercover.Online
             if (!_undercoverMissionsDone.ContainsKey(undercoverId))
                 _undercoverMissionsDone[undercoverId] = 0;
             _undercoverMissionsDone[undercoverId]++;
+            SendIdentityProgress(undercoverId);
         }
 
         /// <summary>卧底是否可以背叛。</summary>
@@ -73,20 +74,41 @@ namespace GanglandUndercover.Online
 
             status = $"⚠ 卧底 {undercoverId} 已背叛黑帮！";
             AddCaseLog(status);
+            SendIdentityProgress(undercoverId);
             return true;
         }
 
-        /// <summary>检查卧底独立获胜（Gang 胜时卧底存活且已背叛 → 独赢）。</summary>
+        /// <summary>
+        /// 兼容旧 UI/工具的卧底独赢查询。正式双渗透规则中卧底属于警方侧，
+        /// 没有独立胜利条件，因此该旧接口始终返回 false。
+        /// </summary>
         public bool CheckUndercoverSoloWin(ulong undercoverId)
         {
-            if (!IsUndercover(undercoverId)) return false;
-            if (!HasBetrayed(undercoverId)) return false;
-            return players.TryGetValue(undercoverId, out var s) && s.Alive;
+            return false;
         }
 
         public int GetUndercoverIntel(ulong undercoverId)
         {
             return _undercoverIntel.TryGetValue(undercoverId, out int v) ? v : 0;
+        }
+
+        internal List<GameStateSnapshot.SnapshotUndercoverStateEntry> UndercoverStatesSnapshot()
+        {
+            var states = new List<GameStateSnapshot.SnapshotUndercoverStateEntry>();
+            foreach (KeyValuePair<ulong, OnlineRole> role in privateRoles)
+            {
+                if (role.Value != OnlineRole.Undercover)
+                    continue;
+
+                states.Add(new GameStateSnapshot.SnapshotUndercoverStateEntry
+                {
+                    ClientId = role.Key,
+                    Intel = GetUndercoverIntel(role.Key),
+                    MissionsDone = _undercoverMissionsDone.TryGetValue(role.Key, out int missions) ? missions : 0,
+                    Betrayed = HasBetrayed(role.Key),
+                });
+            }
+            return states;
         }
 
         // ============================================================
@@ -121,6 +143,7 @@ namespace GanglandUndercover.Online
                     state.Suspicion = Mathf.Max(state.Suspicion, 60);
                     players[targetId] = state;
                 }
+                SendIdentityProgress(targetId);
             }
         }
 
@@ -128,15 +151,23 @@ namespace GanglandUndercover.Online
         public ulong? AssignMoleHit(ulong moleId)
         {
             if (!IsMole(moleId)) return null;
+            if (_moleHitList.TryGetValue(moleId, out ulong existingTarget)
+                && players.TryGetValue(existingTarget, out OnlinePlayerState existingState)
+                && existingState.Alive)
+            {
+                return existingTarget;
+            }
+
             int intel = GetMoleIntel(moleId);
             if (intel < MoleIntelWinThreshold) return null;
 
-            // 选择一个活着的警察作为目标
+            // 情报达标后识别仍在伪装的卧底，形成唯一暗杀目标。
             foreach (var kv in players)
             {
-                if (GetPrivateRole(kv.Key) == OnlineRole.Police && kv.Value.Alive && kv.Key != moleId)
+                if (GetPrivateRole(kv.Key) == OnlineRole.Undercover && kv.Value.Alive)
                 {
                     _moleHitList[moleId] = kv.Key;
+                    SendMoleTarget(moleId, kv.Key);
                     return kv.Key;
                 }
             }
@@ -148,20 +179,112 @@ namespace GanglandUndercover.Online
             return _moleHitList.TryGetValue(moleId, out ulong t) ? t : null;
         }
 
-        /// <summary>检查 Mole 独立获胜条件。</summary>
+        /// <summary>检查内鬼是否已完成“锁定并清除卧底”的阵营目标。</summary>
         public bool CheckMoleSoloWin(ulong moleId)
         {
             if (!IsMole(moleId)) return false;
             int intel = GetMoleIntel(moleId);
             if (intel < MoleIntelWinThreshold) return false;
             if (!players.TryGetValue(moleId, out var ms) || !ms.Alive) return false;
+            if (!_moleObjectives.TryGetValue(moleId, out MoleObjective objective) || objective.Kills <= 0)
+                return false;
 
-            // Mole 获胜: Intel ≥ 5 + 关键警察已被淘汰
+            // Mole 获胜: Intel ≥ 5 + 亲手清除已锁定的卧底目标。
             ulong? target = GetMoleHitTarget(moleId);
             if (target.HasValue && players.TryGetValue(target.Value, out var ts) && !ts.Alive)
                 return true;
 
             return false;
+        }
+
+        internal List<GameStateSnapshot.SnapshotMoleStateEntry> MoleStatesSnapshot()
+        {
+            var states = new List<GameStateSnapshot.SnapshotMoleStateEntry>();
+            foreach (KeyValuePair<ulong, OnlineRole> role in privateRoles)
+            {
+                if (role.Value != OnlineRole.Mole)
+                    continue;
+
+                bool hasHitTarget = _moleHitList.TryGetValue(role.Key, out ulong hitTargetClientId);
+                _moleObjectives.TryGetValue(role.Key, out MoleObjective objective);
+                states.Add(new GameStateSnapshot.SnapshotMoleStateEntry
+                {
+                    ClientId = role.Key,
+                    Intel = GetMoleIntel(role.Key),
+                    HasHitTarget = hasHitTarget,
+                    HitTargetClientId = hitTargetClientId,
+                    Exposed = IsMoleExposed(role.Key),
+                    Kills = objective.Kills,
+                    Sabotages = objective.Sabotages,
+                    SurvivedTilLate = objective.SurvivedTilLate,
+                });
+            }
+            return states;
+        }
+
+        internal void LoadIdentityStates(
+            List<GameStateSnapshot.SnapshotUndercoverStateEntry> undercoverStates,
+            List<GameStateSnapshot.SnapshotMoleStateEntry> moleStates)
+        {
+            ClearIdentityState();
+
+            MergeIdentityStates(undercoverStates, moleStates);
+        }
+
+        internal void RestoreLocalIdentityIfMissing(
+            ulong clientId,
+            OnlineRole role,
+            List<GameStateSnapshot.SnapshotUndercoverStateEntry> undercoverStates,
+            List<GameStateSnapshot.SnapshotMoleStateEntry> moleStates)
+        {
+            if (role != OnlineRole.Undercover && role != OnlineRole.Mole)
+                return;
+
+            if (!privateRoles.ContainsKey(clientId))
+                privateRoles[clientId] = role;
+
+            MergeIdentityStates(undercoverStates, moleStates);
+        }
+
+        private void MergeIdentityStates(
+            List<GameStateSnapshot.SnapshotUndercoverStateEntry> undercoverStates,
+            List<GameStateSnapshot.SnapshotMoleStateEntry> moleStates)
+        {
+
+            if (undercoverStates != null)
+            {
+                foreach (GameStateSnapshot.SnapshotUndercoverStateEntry state in undercoverStates)
+                {
+                    if (!IsUndercover(state.ClientId))
+                        continue;
+
+                    _undercoverIntel[state.ClientId] = Mathf.Max(0, state.Intel);
+                    _undercoverMissionsDone[state.ClientId] = Mathf.Max(0, state.MissionsDone);
+                    if (state.Betrayed)
+                        _undercoverBetrayed.Add(state.ClientId);
+                }
+            }
+
+            if (moleStates == null)
+                return;
+
+            foreach (GameStateSnapshot.SnapshotMoleStateEntry state in moleStates)
+            {
+                if (!IsMole(state.ClientId))
+                    continue;
+
+                _moleIntel[state.ClientId] = Mathf.Max(0, state.Intel);
+                if (state.HasHitTarget && players.ContainsKey(state.HitTargetClientId))
+                    _moleHitList[state.ClientId] = state.HitTargetClientId;
+                if (state.Exposed)
+                    _moleExposed.Add(state.ClientId);
+                _moleObjectives[state.ClientId] = new MoleObjective
+                {
+                    Kills = Mathf.Max(0, state.Kills),
+                    Sabotages = Mathf.Max(0, state.Sabotages),
+                    SurvivedTilLate = state.SurvivedTilLate,
+                };
+            }
         }
 
         // ============================================================
@@ -175,6 +298,7 @@ namespace GanglandUndercover.Online
             _undercoverBetrayed.Clear();
             _moleHitList.Clear();
             _moleExposed.Clear();
+            _moleObjectives.Clear();
         }
     }
 }

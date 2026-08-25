@@ -71,6 +71,20 @@ namespace GanglandUndercover.SocialDeduction.MiniGames
             bgRT.offsetMin = Vector2.zero;
             bgRT.offsetMax = Vector2.zero;
 
+            // 优先使用 Resources 面板背景 sprite
+            var panelBgSprite = GanglandUndercover.Art.MinigameArtCache.KeypadPanelBg
+                             ?? GanglandUndercover.Art.MinigameArtCache.PanelBackground;
+            if (panelBgSprite != null)
+            {
+                var bgImg = bg.GetComponent<Image>();
+                if (bgImg != null)
+                {
+                    bgImg.sprite = panelBgSprite;
+                    bgImg.type = Image.Type.Sliced;
+                    bgImg.color = Color.white;
+                }
+            }
+
             // 标题
             CreateLabel(canvasObj, "密码输入", 24, new Vector2(0.5f, 0.92f), new Vector2(0.5f, 0.92f));
 

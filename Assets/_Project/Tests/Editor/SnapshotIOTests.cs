@@ -56,6 +56,41 @@ namespace GanglandUndercover.Tests
             }
         }
 
+        [Test]
+        public void WriteTaskAssignments_ThenReadTaskAssignments_RoundTrips()
+        {
+            var assignments = new List<GameStateSnapshot.SnapshotTaskAssignmentEntry>
+            {
+                new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                    { ClientId = 10UL, TaskId = 2, Progress = 1, RequiredProgress = 3, Completed = false },
+                new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                    { ClientId = 10UL, TaskId = 14, Progress = 3, RequiredProgress = 3, Completed = true },
+                new GameStateSnapshot.SnapshotTaskAssignmentEntry
+                    { ClientId = 20UL, TaskId = 7, Progress = 2, RequiredProgress = 4, Completed = false },
+            };
+
+            using (var writer = CreateWriter())
+            {
+                SnapshotIO.WriteTaskAssignments(writer, assignments);
+
+                using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    reader.ReadValueSafe(out int count);
+                    var restored = SnapshotIO.ReadTaskAssignments(reader, count);
+
+                    Assert.AreEqual(assignments.Count, restored.Count);
+                    for (int i = 0; i < assignments.Count; i++)
+                    {
+                        Assert.AreEqual(assignments[i].ClientId, restored[i].ClientId);
+                        Assert.AreEqual(assignments[i].TaskId, restored[i].TaskId);
+                        Assert.AreEqual(assignments[i].Progress, restored[i].Progress);
+                        Assert.AreEqual(assignments[i].RequiredProgress, restored[i].RequiredProgress);
+                        Assert.AreEqual(assignments[i].Completed, restored[i].Completed);
+                    }
+                }
+            }
+        }
+
         // ─── Body ──────────────────────────────────────────────
 
         [Test]

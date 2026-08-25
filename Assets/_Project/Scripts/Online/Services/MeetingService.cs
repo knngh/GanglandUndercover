@@ -192,6 +192,19 @@ namespace GanglandUndercover.Online.Services
         /// </summary>
         public bool CallEmergencyMeeting(string callerDisplayName, ulong callerId = 0)
         {
+            if (controller == null || controller.Phase != OnlineMatchPhase.Action)
+            {
+                return false;
+            }
+
+            if (!controller.Players.TryGetValue(callerId, out OnlinePlayerState caller)
+                || !caller.Alive
+                || !IsInEmergencyRange(caller.Position)
+                || controller.CommunicationJamTimer > 0f)
+            {
+                return false;
+            }
+
             if (!ConsumeEmergencyMeeting(callerDisplayName, callerId))
             {
                 return false;

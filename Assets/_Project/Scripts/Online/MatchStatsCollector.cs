@@ -296,9 +296,10 @@ namespace GanglandUndercover.Online
         // ── Bot ──
         public int BotCompletedTasks;
 
-        // ── 预留（待控制器支持） ──
-        public int MeetingCount;    // [PLACEHOLDER]
-        public int KillCount;       // [PLACEHOLDER]
+        // ── 会议 & 击杀 ──
+        // Populated from OnlineMatchController at SetResult time.
+        public int MeetingCount;
+        public int KillCount;
 
         /// <summary>任务完成率</summary>
         public float TaskCompletionRate =>

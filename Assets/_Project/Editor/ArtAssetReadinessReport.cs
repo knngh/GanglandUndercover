@@ -18,6 +18,7 @@ namespace GanglandUndercover.Editor
         public const string DefaultReportPath = "output/art_readiness_current.md";
         public const string ResourceRoot = "Assets/_Project/Resources";
         public const string SpriteRoot = SpriteResourceImportSettings.SpriteResourcesRoot;
+        public const string WatermarkedReviewRoot = "Assets/_Project/Art/Review/WatermarkedRuntime";
         public const int RequiredCharacterFrameWidth = 64;
         public const int RequiredCharacterFrameHeight = 64;
         public const int RequiredCharacterAvatarWidth = 32;
@@ -45,24 +46,28 @@ namespace GanglandUndercover.Editor
             new ExpectedCharacterSprite("avatar", RequiredCharacterAvatarWidth, RequiredCharacterAvatarHeight),
         };
 
-        private static readonly ExpectedVfx[] ExpectedVfxFrames =
-        {
-            new ExpectedVfx("blackout", 12, 96, 96),
-            new ExpectedVfx("comms_jam", 8, 64, 64),
-            new ExpectedVfx("door_lock", 6, 48, 48),
-            new ExpectedVfx("emergency_light", 8, 48, 48),
-            new ExpectedVfx("evidence_leak", 12, 48, 48),
-            new ExpectedVfx("hit", 4, 32, 32),
-            new ExpectedVfx("kill", 10, 128, 128),
-            new ExpectedVfx("patrol_alert", 4, 64, 64),
-        };
-
         private static readonly string[] RequiredUiResourcePaths =
         {
             "Sprites/UI/Buttons/buttonSquare_beige",
             "Sprites/UI/Buttons/buttonSquare_blue",
             "Sprites/UI/Buttons/buttonSquare_grey",
+            "Sprites/UI/Buttons/button_noir_clean",
             "Sprites/UI/Buttons/button_round_gloss",
+            "Sprites/UI/Icons/sabotage_blackout_clean",
+            "Sprites/UI/Icons/sabotage_lockdown_clean",
+            "Sprites/UI/Icons/sabotage_commjam_clean",
+            "Sprites/UI/Icons/sabotage_evidence_clean",
+            "Sprites/UI/Icons/sabotage_patrol_clean",
+            "Sprites/UI/Icons/task_wire_clean",
+            "Sprites/UI/Icons/task_keypad_clean",
+            "Sprites/UI/Icons/task_scan_clean",
+            "Sprites/UI/Icons/task_download_clean",
+            "Sprites/UI/Icons/task_memory_clean",
+            "Sprites/UI/Icons/task_swipe_clean",
+            "Sprites/UI/Meeting/meeting_panel_clean",
+            "Sprites/UI/Meeting/vote_card_clean",
+            "Sprites/UI/Panels/panel_noir_clean",
+            "Sprites/UI/ProgressBar/progress_clean",
         };
 
         private static readonly string[] RequiredRuntimeMapPropResourcePaths =
@@ -102,6 +107,7 @@ namespace GanglandUndercover.Editor
             CheckCharacterCoverage(summary);
             CheckVfxCoverage(summary);
             CheckUiCoverage(summary);
+            CheckQuarantinedWatermarkedDrafts(summary);
             CheckRuntimeMapPropCoverage(summary);
             CheckRuntimePathConstants(summary);
 
@@ -145,6 +151,7 @@ namespace GanglandUndercover.Editor
             builder.AppendLine("| VFX frames | " + summary.VfxFrameCount + " |");
             builder.AppendLine("| VFX frame dimension mismatch | " + summary.VfxFrameDimensionMismatchCount + " |");
             builder.AppendLine("| Runtime UI sprites | " + summary.UiSpriteCount + " |");
+            builder.AppendLine("| Quarantined watermarked draft PNG | " + summary.QuarantinedWatermarkedSpriteCount + " |");
             builder.AppendLine("| Runtime map prop sprites | " + summary.RuntimeMapPropSpriteCount + " |");
             builder.AppendLine("| Runtime map prop sprite dimension mismatch | " + summary.RuntimeMapPropSpriteDimensionMismatchCount + " |");
             builder.AppendLine("| Sprite2DAssetCache public path constants | " + summary.RuntimePathConstantCount + " |");
@@ -167,11 +174,12 @@ namespace GanglandUndercover.Editor
             builder.AppendLine();
             builder.AppendLine("## Next Art Slices");
             builder.AppendLine();
-            builder.AppendLine("1. VFX polish pass 2: capture blackout, comms jam, door lock, evidence leak, patrol alert, kill, and hit effects in motion; tune scale, FPS, opacity, and sorting.");
-            builder.AppendLine("2. UI polish: expand the 4 runtime button sprites into a complete panel, card, icon, and disabled-state skin.");
-            builder.AppendLine("3. Character polish pass 3: review gameplay screenshots and replace procedural silhouettes with final hand-authored variants.");
-            builder.AppendLine("4. Map polish pass 2: extend authored prop replacement to police-station rooms and remaining high-traffic corridors.");
-            builder.AppendLine("5. Verification: rerun this report and Unity EditMode before each large art import batch.");
+            builder.AppendLine("1. UI polish pass 3: replace the remaining quarantined ability icon drafts with reviewed no-watermark camera, report, vent, kill, evidence, and emergency icons.");
+            builder.AppendLine("2. Minigame polish: author clean wire, keypad, and scan interaction art before enabling MinigameArtCache assets again.");
+            builder.AppendLine("3. VFX polish pass 2: capture blackout, comms jam, door lock, patrol alert in motion against live gameplay.");
+            builder.AppendLine("4. Character polish pass 3: review gameplay screenshots and replace procedural silhouettes with final hand-authored variants.");
+            builder.AppendLine("5. Map polish pass 2: extend authored prop replacement to police-station rooms and remaining high-traffic corridors.");
+            builder.AppendLine("6. Verification: rerun this report and Unity EditMode before each large art import batch.");
             return builder.ToString();
         }
 
@@ -328,12 +336,12 @@ namespace GanglandUndercover.Editor
 
         private static void CheckVfxCoverage(Summary summary)
         {
-            summary.VfxEffectCount = ExpectedVfxFrames.Length;
+            summary.VfxEffectCount = VfxEffectProfile.All.Count;
 
-            for (int i = 0; i < ExpectedVfxFrames.Length; i++)
+            for (int i = 0; i < VfxEffectProfile.All.Count; i++)
             {
-                ExpectedVfx expected = ExpectedVfxFrames[i];
-                string directory = SpriteRoot + "/VFX/" + expected.Name;
+                VfxEffectProfile profile = VfxEffectProfile.All[i];
+                string directory = SpriteRoot + "/VFX/" + profile.Name;
                 if (!Directory.Exists(directory))
                 {
                     summary.AddIssue("Missing VFX directory: " + directory);
@@ -344,22 +352,22 @@ namespace GanglandUndercover.Editor
                 Array.Sort(frames, StringComparer.Ordinal);
                 summary.VfxFrameCount += frames.Length;
 
-                if (frames.Length != expected.FrameCount)
+                if (frames.Length != profile.FrameCount)
                 {
-                    summary.AddIssue("VFX frame count mismatch for " + expected.Name
-                        + ": expected " + expected.FrameCount + ", found " + frames.Length);
+                    summary.AddIssue("VFX frame count mismatch for " + profile.Name
+                        + ": expected " + profile.FrameCount + ", found " + frames.Length);
                 }
 
                 for (int f = 0; f < frames.Length; f++)
                 {
                     if (!TryReadPngDimensions(frames[f], out int width, out int height)
-                        || width != expected.Width
-                        || height != expected.Height)
+                        || width != profile.Width
+                        || height != profile.Height)
                     {
                         summary.VfxFrameDimensionMismatchCount++;
                         string size = width > 0 && height > 0 ? width + "x" + height : "unreadable";
                         summary.AddIssue("VFX frame size mismatch: " + Normalize(frames[f])
-                            + " is " + size + ", expected " + expected.Width + "x" + expected.Height);
+                            + " is " + size + ", expected " + profile.Width + "x" + profile.Height);
                     }
                 }
             }
@@ -381,6 +389,17 @@ namespace GanglandUndercover.Editor
                     summary.AddIssue("Missing runtime UI sprite: " + assetPath);
                 }
             }
+        }
+
+        private static void CheckQuarantinedWatermarkedDrafts(Summary summary)
+        {
+            if (!Directory.Exists(WatermarkedReviewRoot))
+            {
+                return;
+            }
+
+            summary.QuarantinedWatermarkedSpriteCount =
+                Directory.GetFiles(WatermarkedReviewRoot, "*.png", SearchOption.AllDirectories).Length;
         }
 
         private static void CheckRuntimeMapPropCoverage(Summary summary)
@@ -454,22 +473,6 @@ namespace GanglandUndercover.Editor
             return path.Replace(Path.DirectorySeparatorChar, '/');
         }
 
-        private sealed class ExpectedVfx
-        {
-            public readonly string Name;
-            public readonly int FrameCount;
-            public readonly int Width;
-            public readonly int Height;
-
-            public ExpectedVfx(string name, int frameCount, int width, int height)
-            {
-                Name = name;
-                FrameCount = frameCount;
-                Width = width;
-                Height = height;
-            }
-        }
-
         private sealed class ExpectedCharacterSprite
         {
             public readonly string Name;
@@ -500,6 +503,7 @@ namespace GanglandUndercover.Editor
             public int VfxFrameDimensionMismatchCount;
             public int UiExpectedSpriteCount;
             public int UiSpriteCount;
+            public int QuarantinedWatermarkedSpriteCount;
             public int RuntimeMapPropExpectedSpriteCount;
             public int RuntimeMapPropSpriteCount;
             public int RuntimeMapPropSpriteDimensionMismatchCount;

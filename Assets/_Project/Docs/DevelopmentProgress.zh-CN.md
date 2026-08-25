@@ -1,11 +1,14 @@
 # 港区潜线：开发进度表
 
-更新时间：2026-06-24 11:05
+更新时间：2026-08-03
 
 当前总体状态：联网玩法骨架已跑通，基线资源已冻结，M-A~M-E 阶段全部完成。当前版本支持本地/联机开局、AI 补位、行动、任务、会议、投票、破坏、重开；Lobby 支持房间创建/加入、规则调节、开局锁定/返回解锁；文本聊天支持四通道（会议/近距/全局/鬼魂）和安全过滤（HTML 清洗/屏蔽/举报）；设置支持音量/画质/窗口/色盲/按键/语言完整持久化。2026-06-24 已补齐 PLAN8-PLAN12 的联机回归门禁、恶意消息边界、重连/Host 断线状态门禁、6-10 人 Alpha pacing 门禁和完整验证记录。但还不是可商用发行版，真实多进程 Host 迁移、Relay 恶意注入和内容资产化仍需继续推进。
 
 最近验证：
 
+- 2026-08-03 美术图标批次：EditMode 180/180 PASS；PlayMode 15 PASS / 7 条 Relay 双进程条件测试 ignored；Prototype Smoke PASS。
+- 运行时美术门禁：390 张 Sprite PNG、20 张 UI Sprite、0 个导入错误、59 张水印草稿保持隔离；报告见 `output/art_readiness_current.md`。
+- 实机 UI：任务修复面板已验证破坏图标在 94px 预览位清晰，无拉伸、正文遮挡或按钮染黑。
 - EditMode: 115/115 PASS — `ci-logs/plan12-editmode-full-results.xml`；含 Alpha pacing、聊天安全、ClientProfile/CharacterCustom/Camera 边界、Lobby 浏览器、房间锁定/密码/满员、世界构建、资产管线
 - PlayMode: 11/13 PASS，2 ignored — `ci-logs/plan12-playmode-full-results.xml`；主循环、聊天多客户端、会议事件、快照恢复、Host 断线提示、断线释放、小游戏授权、恶意消息拒绝均通过；ignored 为 Relay 双进程角色测试，需设置 `GANGLAND_RELAY_ROLE`
 - PLAN8-PLAN11 定向门禁：会议事件/快照恢复、恶意 ClientProfile、CharacterCustom/Camera 授权、Host 断线可见恢复、6/8/10 人 Alpha pacing 均已单项通过
@@ -171,3 +174,17 @@
 1. 真实多客户端 Host migration election 仍未自动化验证，当前只覆盖 Host 断线可见恢复和快照恢复。
 2. Relay 真双进程恶意 CharacterCustom/Chat 注入仍未跑，当前覆盖为 EditMode/单进程 NGO PlayMode harness。
 3. 6-10 人 Alpha 已有规则和 pacing 门禁，但 8-12 分钟完整局体验、内容节奏和正式资产表现仍需实测。
+
+## 2026-08-02 美术资源审阅与 UI 皮肤增量
+
+状态：已完成资源风险隔离与第一轮 UI 运行时收口
+
+本轮完成内容：
+
+1. 审阅角色、VFX、地图、小游戏和 UI 运行时资源，确认角色/VFX 覆盖完整，主要缺口集中在 UI 图标、小游戏交互图和实机截图基线。
+2. 隔离 59 张带可见水印的运行时草稿，文件保留在 `Assets/_Project/Art/Review/WatermarkedRuntime`，不再由 `Resources.Load` 命中。
+3. 从项目现有 2D 源文件建立 5 张干净运行时 UI 皮肤，与原 4 张已审阅按钮共同形成 9 张 UI 基线。
+4. 会议、任务和通用按钮接入统一 Point Filter、9-slice 无水印皮肤；缺失地图/小游戏资源继续安全回退。
+5. `ArtAssetReadinessReport` 新增水印草稿隔离统计，资源导入门禁恢复到 0 错误。
+
+下一阶段：补齐无水印能力/任务/破坏图标和 wire/keypad/scan 小游戏图，再刷新会议、任务、断电实机截图。

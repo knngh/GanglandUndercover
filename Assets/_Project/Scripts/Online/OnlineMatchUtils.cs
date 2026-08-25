@@ -649,16 +649,10 @@ namespace GanglandUndercover.Online
 
         internal static OnlineProfession ProfessionFor(OnlineRole role, int index)
         {
-            // 内鬼：公开为警察，分配警察职业维持掩护
+            // 真实职业用于本人能力；公开展示由 PublicProfessionFor 单独处理。
             if (role == OnlineRole.Mole)
             {
-                OnlineProfession[] moleCoverProfessions =
-                {
-                    OnlineProfession.Tech,       // 技术员可访问监控最不易暴露
-                    OnlineProfession.Forensics,
-                    OnlineProfession.Inspector,
-                };
-                return moleCoverProfessions[index % moleCoverProfessions.Length];
+                return OnlineProfession.Mole;
             }
 
             // 黑帮：打手/清道夫
@@ -691,6 +685,48 @@ namespace GanglandUndercover.Online
                 OnlineProfession.Tech
             };
             return policeProfessions[index % policeProfessions.Length];
+        }
+
+        /// <summary>实际胜负阵营是否属于黑帮侧。</summary>
+        public static bool IsGangSide(OnlineRole role)
+        {
+            return role == OnlineRole.Gang || role == OnlineRole.Mole;
+        }
+
+        /// <summary>实际胜负阵营是否属于警方侧。</summary>
+        public static bool IsPoliceSide(OnlineRole role)
+        {
+            return role == OnlineRole.Police || role == OnlineRole.Undercover;
+        }
+
+        /// <summary>该真实角色是否拥有破坏权限。</summary>
+        public static bool CanSabotage(OnlineRole role)
+        {
+            return role == OnlineRole.Gang || role == OnlineRole.Undercover || role == OnlineRole.Mole;
+        }
+
+        /// <summary>该真实角色是否能看见并使用暗线通道。</summary>
+        public static bool CanUseUnderworldPassage(OnlineRole role)
+        {
+            return role == OnlineRole.Gang || role == OnlineRole.Undercover;
+        }
+
+        /// <summary>将表面阵营映射为不会暴露双重身份的通用展示职业。</summary>
+        public static OnlineProfession PublicProfessionFor(OnlineRole publicRole)
+        {
+            return publicRole == OnlineRole.Gang || publicRole == OnlineRole.Undercover
+                ? OnlineProfession.Enforcer
+                : OnlineProfession.Inspector;
+        }
+
+        /// <summary>聊天中的阵营色只展示当前公开身份；出局或结算后才允许显示真实身份。</summary>
+        public static OnlineRole ChatPresentationRole(
+            OnlineRole privateRole,
+            OnlineRole publicRole,
+            bool alive,
+            OnlineMatchPhase phase)
+        {
+            return !alive || phase == OnlineMatchPhase.Result ? privateRole : publicRole;
         }
 
         public static string RoleName(OnlineRole role)
@@ -785,6 +821,11 @@ namespace GanglandUndercover.Online
         internal static void ListToCooldowns(Dictionary<ulong, float> dict, List<GameStateSnapshot.SnapshotCooldownEntry> list)
         {
             dict.Clear();
+            if (list == null)
+            {
+                return;
+            }
+
             foreach (var entry in list)
             {
                 dict[entry.ClientId] = entry.Value;

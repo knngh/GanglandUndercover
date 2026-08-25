@@ -111,14 +111,20 @@ namespace GanglandUndercover.Online.Services
         {
             if (controller == null) return false;
 
-            // 仅在会议或投票阶段接受投票
-            if (controller.Phase != OnlineMatchPhase.Meeting && controller.Phase != OnlineMatchPhase.Voting)
+            // 讨论阶段只允许发言与查证，选票必须等到独立投票阶段。
+            if (controller.Phase != OnlineMatchPhase.Voting)
             {
                 return false;
             }
 
             // 验证投票者合法性
             if (!controller.Players.TryGetValue(voterClientId, out OnlinePlayerState voter) || !voter.Alive)
+            {
+                return false;
+            }
+
+            // 投票提交后锁定，客户端重发或伪造请求不能改票。
+            if (votes.ContainsKey(voterClientId))
             {
                 return false;
             }
@@ -133,7 +139,7 @@ namespace GanglandUndercover.Online.Services
             }
 
             // 记录投票
-            votes[voterClientId] = targetClientId;
+            votes.Add(voterClientId, targetClientId);
 
             // 发布投票提交事件
             eventBus?.Publish(new VoteSubmittedEvent
@@ -164,8 +170,7 @@ namespace GanglandUndercover.Online.Services
 
             if (controller == null) return empty;
 
-            // 仅在会议或投票阶段结算
-            if (controller.Phase != OnlineMatchPhase.Voting && controller.Phase != OnlineMatchPhase.Meeting)
+            if (controller.Phase != OnlineMatchPhase.Voting)
             {
                 return empty;
             }

@@ -405,7 +405,8 @@ namespace GanglandUndercover.PlayTests
             StringAssert.Contains("强度3", digest);
             StringAssert.Contains("共 2 条证据", digest);
 
-            SetPhase("Meeting");
+            SetPhase("Voting");
+            InvokePublic("AccusePlayer", 1UL, 3UL);
             InvokePrivate("ApplyVote", 1UL, 3UL);
             yield return null;
             InvokePrivate("ApplyVote", 2UL, ulong.MaxValue);
@@ -695,16 +696,16 @@ namespace GanglandUndercover.PlayTests
 
         private bool TaskLockOwnedBy(int taskId, ulong ownerId)
         {
-            object locks = GetField("activeTaskUsers");
+            object locks = GetField("activeTaskByPlayer");
             if (locks == null)
             {
                 return false;
             }
 
             MethodInfo tryGetValue = locks.GetType().GetMethod("TryGetValue");
-            object[] args = { taskId, null };
+            object[] args = { ownerId, null };
             bool found = (bool)tryGetValue.Invoke(locks, args);
-            return found && Convert.ToUInt64(args[1]) == ownerId;
+            return found && Convert.ToInt32(args[1]) == taskId;
         }
 
         private static bool DictionaryContainsKey(object dictionary, ulong key)

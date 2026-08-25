@@ -16,12 +16,17 @@ namespace GanglandUndercover.Online
 
         /// <summary>暗视激活的玩家（Enforcer DarkVision）</summary>
         private readonly HashSet<ulong> _darkVisionActive = new HashSet<ulong>();
+        private readonly Dictionary<ulong, float> _darkVisionRemaining = new Dictionary<ulong, float>();
+        private const float DarkVisionDurationSeconds = 6f;
 
         /// <summary>尸体检验累积（Forensics CorpseExamine）</summary>
         private readonly Dictionary<ulong, int> _corpseExamineBonus = new Dictionary<ulong, int>();
 
         /// <summary>足迹数据（Inspector FootprintTrack）</summary>
         private readonly List<FootprintMark> _footprints = new List<FootprintMark>();
+        private string _lastProfessionAbilityFeedback = string.Empty;
+
+        public string LastProfessionAbilityFeedback => _lastProfessionAbilityFeedback;
 
         public struct FootprintMark
         {
@@ -93,11 +98,13 @@ namespace GanglandUndercover.Online
         {
             if (!HasAbility(clientId, AbilityType.DarkVision)) return;
             _darkVisionActive.Add(clientId);
+            _darkVisionRemaining[clientId] = DarkVisionDurationSeconds;
         }
 
         public void DeactivateDarkVision(ulong clientId)
         {
             _darkVisionActive.Remove(clientId);
+            _darkVisionRemaining.Remove(clientId);
         }
 
         // ============================================================
@@ -182,6 +189,13 @@ namespace GanglandUndercover.Online
             if (!_moleIntel.ContainsKey(moleId))
                 _moleIntel[moleId] = 0;
             _moleIntel[moleId] += amount;
+
+            if (_moleIntel[moleId] >= MoleIntelWinThreshold)
+            {
+                AssignMoleHit(moleId);
+            }
+
+            SendIdentityProgress(moleId);
         }
 
         public int GetMoleIntel(ulong moleId)
@@ -191,16 +205,7 @@ namespace GanglandUndercover.Online
 
         public bool CheckMoleWinCondition(ulong moleId)
         {
-            int intel = GetMoleIntel(moleId);
-            if (intel < MoleIntelWinThreshold) return false;
-
-            // Mole 翻盘：Intel 达标 + 关键警察被淘汰
-            if (!players.TryGetValue(moleId, out var moleState)) return false;
-            if (!moleState.Alive) return false;
-
-            int alivePolice = CountAliveRole(OnlineRole.Police);
-            int aliveGang = CountAliveRole(OnlineRole.Gang);
-            return aliveGang > 0 && alivePolice <= aliveGang; // 黑帮人数优势
+            return CheckMoleSoloWin(moleId);
         }
 
         // ============================================================
@@ -210,6 +215,37 @@ namespace GanglandUndercover.Online
         public bool CanRemoteSurveil(ulong clientId)
         {
             return HasAbility(clientId, AbilityType.RemoteSurveillance);
+        }
+
+        private int TrackNearbyFootprints(ulong viewerId)
+        {
+            if (!players.TryGetValue(viewerId, out OnlinePlayerState viewer)) return 0;
+
+            int tracked = 0;
+            foreach (OnlinePlayerState state in players.Values)
+            {
+                if (!state.Alive || state.ClientId == viewerId) continue;
+                if (Vector3.Distance(viewer.Position, state.Position) > 7f) continue;
+                LeaveFootprint(state.ClientId);
+                tracked++;
+            }
+
+            return tracked;
+        }
+
+        internal void EmitProfessionAbilityFeedback(
+            ulong clientId,
+            string abilityKey,
+            Color color,
+            Vector3 position)
+        {
+            if (worldRoot == null)
+                EnsureWorld();
+
+            if (worldRoot != null && worldBuilder != null)
+                worldBuilder.CreateAbilityFeedbackVisual(abilityKey, position, color);
+
+            _lastProfessionAbilityFeedback = abilityKey;
         }
 
         public bool CanClientWatchCamera(ulong clientId, Vector2 cameraCenter)
@@ -235,14 +271,33 @@ namespace GanglandUndercover.Online
         public void ClearProfessionAbilities()
         {
             _darkVisionActive.Clear();
+            _darkVisionRemaining.Clear();
             _corpseExamineBonus.Clear();
             _footprints.Clear();
             _moleIntel.Clear();
+            _lastProfessionAbilityFeedback = string.Empty;
         }
 
         public void TickProfessionAbilities(float deltaTime)
         {
-            // 足迹过期清理
+            if (_darkVisionRemaining.Count > 0)
+            {
+                List<ulong> expired = new List<ulong>();
+                List<ulong> active = new List<ulong>(_darkVisionRemaining.Keys);
+                for (int i = 0; i < active.Count; i++)
+                {
+                    ulong clientId = active[i];
+                    float remaining = _darkVisionRemaining[clientId] - Mathf.Max(0f, deltaTime);
+                    if (remaining <= 0f)
+                        expired.Add(clientId);
+                    else
+                        _darkVisionRemaining[clientId] = remaining;
+                }
+
+                for (int i = 0; i < expired.Count; i++)
+                    DeactivateDarkVision(expired[i]);
+            }
+
             _footprints.RemoveAll(f => matchElapsedSeconds > f.ExpireTime);
         }
     }

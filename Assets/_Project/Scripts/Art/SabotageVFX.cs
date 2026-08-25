@@ -12,6 +12,7 @@ namespace GanglandUndercover.Art
     ///   501 — 锁门红叉
     ///   502 — 通讯干扰 glitch
     ///   503 — 巡逻警报闪烁
+    ///   505 — 停电应急红灯
     ///   504 — 击杀溅血（最顶层）
     ///   506 — 命中冲击闪光
     ///
@@ -19,15 +20,6 @@ namespace GanglandUndercover.Art
     /// </summary>
     public sealed class SabotageVFX : MonoBehaviour
     {
-        private const float BlackoutSheetFps = 6f;
-        private const float LockdownSheetFps = 10f;
-        private const float CommJamSheetFps = 14f;
-        private const float EvidenceLeakSheetFps = 9f;
-        private const float PatrolAlertSheetFps = 6f;
-        private const float EmergencyLightSheetFps = 12f;
-        private const float KillSheetFps = 15f;
-        private const float HitSheetFps = 18f;
-
         [Header("Overlay Panels")]
         public SpriteRenderer blackoutOverlay;
         public SpriteRenderer lockdownOverlay;
@@ -135,16 +127,16 @@ namespace GanglandUndercover.Art
             }
 
             // ── 帧动画 VFX 初始化（Resources 加载失败则保持 null → 程序化回退）──
-            InitOverlaySheet(ref _blackoutSheet, blackoutOverlay, "blackout", 500, BlackoutSheetFps);
-            InitOverlaySheet(ref _lockdownSheet, lockdownOverlay, "door_lock", 501, LockdownSheetFps);
-            InitOverlaySheet(ref _commJamSheet, commJamOverlay, "comms_jam", 502, CommJamSheetFps);
-            InitOverlaySheet(ref _evidenceLeakSheet, evidenceLeakOverlay, "evidence_leak", 499, EvidenceLeakSheetFps);
-            InitOverlaySheet(ref _patrolAlertSheet, patrolAlertOverlay, "patrol_alert", 503, PatrolAlertSheetFps);
-            InitOverlaySheet(ref _emergencyLightSheet, _emergencyLightRenderer, "emergency_light", 505, EmergencyLightSheetFps);
+            InitOverlaySheet(ref _blackoutSheet, blackoutOverlay, VfxEffectProfile.Blackout);
+            InitOverlaySheet(ref _lockdownSheet, lockdownOverlay, VfxEffectProfile.DoorLock);
+            InitOverlaySheet(ref _commJamSheet, commJamOverlay, VfxEffectProfile.CommsJam);
+            InitOverlaySheet(ref _evidenceLeakSheet, evidenceLeakOverlay, VfxEffectProfile.EvidenceLeak);
+            InitOverlaySheet(ref _patrolAlertSheet, patrolAlertOverlay, VfxEffectProfile.PatrolAlert);
+            InitOverlaySheet(ref _emergencyLightSheet, _emergencyLightRenderer, VfxEffectProfile.EmergencyLight);
 
             // 预加载击杀帧（首次触发时不卡顿）
-            VFXSheetPlayer.Preload("kill");
-            VFXSheetPlayer.Preload("hit");
+            VFXSheetPlayer.Preload(VfxEffectProfile.Kill.Name);
+            VFXSheetPlayer.Preload(VfxEffectProfile.Hit.Name);
         }
 
         /// <summary>触发击杀溅血 VFX（帧动画优先，3 秒渐隐回退）</summary>
@@ -159,9 +151,9 @@ namespace GanglandUndercover.Art
 
             // 尝试帧动画（kill 序列 10 帧 @ 15fps ≈ 0.67s）
             var player = killBloodFX.AddComponent<VFXSheetPlayer>();
-            if (player.Init("kill", VFXSheetPlayer.PlayMode.OneShot, KillSheetFps))
+            if (player.Init(VfxEffectProfile.Kill.Name, VfxEffectProfile.Kill.PlaybackMode, VfxEffectProfile.Kill.FramesPerSecond))
             {
-                player.SetSortingOrder(504);
+                player.SetSortingOrder(VfxEffectProfile.Kill.SortingOrder);
                 player.Play();
                 _killSheetPlayer = player;
             }
@@ -172,7 +164,7 @@ namespace GanglandUndercover.Art
                 var sr = killBloodFX.GetComponent<SpriteRenderer>();
                 if (sr == null) sr = killBloodFX.AddComponent<SpriteRenderer>();
                 sr.sprite = Sprite2DAssetCache.BloodSplatter;
-                sr.sortingOrder = 504;
+                sr.sortingOrder = VfxEffectProfile.Kill.SortingOrder;
                 sr.transform.localScale = Vector3.one * 2f;
             }
 
@@ -220,7 +212,11 @@ namespace GanglandUndercover.Art
                 float emergencyPulse = Mathf.Abs(Mathf.Sin(_emergencyTimer * 3.5f));
                 Color blackoutTint = blackoutColor;
                 blackoutTint.a = 0.58f + emergencyPulse * 0.16f;
-                blackoutOverlay.color = Color.Lerp(blackoutOverlay.color, blackoutTint, Time.deltaTime * 4f);
+                ApplySheetAwareColor(
+                    blackoutOverlay,
+                    _blackoutSheet,
+                    Color.Lerp(blackoutOverlay.color, blackoutTint, Time.deltaTime * 4f),
+                    0.9f + emergencyPulse * 0.1f);
                 SetEmergencyLightPulse(true, emergencyPulse);
             }
             else
@@ -235,7 +231,11 @@ namespace GanglandUndercover.Art
                 float lockdownPulse = Mathf.Abs(Mathf.Sin(_pulseTimer * 2.5f));
                 Color lc = lockdownColor;
                 lc.a = 0.35f + lockdownPulse * 0.30f;
-                lockdownOverlay.color = Color.Lerp(lockdownOverlay.color, lc, Time.deltaTime * 3f);
+                ApplySheetAwareColor(
+                    lockdownOverlay,
+                    _lockdownSheet,
+                    Color.Lerp(lockdownOverlay.color, lc, Time.deltaTime * 3f),
+                    0.82f + lockdownPulse * 0.18f);
             }
 
             // ── 通讯干扰：暗蓝遮罩 + glitch 闪烁 + 偏移 ──
@@ -248,7 +248,11 @@ namespace GanglandUndercover.Art
 
                 Color gc = commJamColor;
                 gc.a = glitchOn ? 0.35f : 0.05f;
-                commJamOverlay.color = Color.Lerp(commJamOverlay.color, gc, Time.deltaTime * 8f);
+                ApplySheetAwareColor(
+                    commJamOverlay,
+                    _commJamSheet,
+                    Color.Lerp(commJamOverlay.color, gc, Time.deltaTime * 8f),
+                    glitchOn ? 1f : 0.45f);
 
                 // 周期性偏移 glitch
                 float xOffset = glitchOn ? Mathf.Sin(_glitchTimer * 47f) * 0.5f : 0f;
@@ -263,7 +267,11 @@ namespace GanglandUndercover.Art
                 float leakPulse = Mathf.Abs(Mathf.Sin(_pulseTimer * 5f));
                 Color lk = evidenceLeakColor;
                 lk.a = 0.25f + leakPulse * 0.55f;
-                evidenceLeakOverlay.color = Color.Lerp(evidenceLeakOverlay.color, lk, Time.deltaTime * 4f);
+                ApplySheetAwareColor(
+                    evidenceLeakOverlay,
+                    _evidenceLeakSheet,
+                    Color.Lerp(evidenceLeakOverlay.color, lk, Time.deltaTime * 4f),
+                    0.9f + leakPulse * 0.1f);
             }
 
             // ── 巡逻警报：橙色闪烁（每 1.5 秒闪一次）──
@@ -274,7 +282,7 @@ namespace GanglandUndercover.Art
                 float patrolAlpha = patrolPhase < 0.2f ? 0.6f : patrolPhase < 0.3f ? 0.1f : 0f;
                 Color pc = patrolAlertColor;
                 pc.a = patrolAlpha;
-                patrolAlertOverlay.color = pc;
+                ApplySheetAwareColor(patrolAlertOverlay, _patrolAlertSheet, pc, 1f);
 
                 // 从边缘向中心收缩
                 float shrink = patrolPhase < 0.2f ? 0.8f : 1.0f;
@@ -308,7 +316,7 @@ namespace GanglandUndercover.Art
 
         // ── 内部方法 ──
 
-        private void InitOverlaySheet(ref VFXSheetPlayer player, SpriteRenderer overlay, string effectName, int sortOrder, float fps)
+        private void InitOverlaySheet(ref VFXSheetPlayer player, SpriteRenderer overlay, VfxEffectProfile profile)
         {
             if (overlay == null) return;
 
@@ -321,10 +329,10 @@ namespace GanglandUndercover.Art
                 if (player == null) player = overlay.gameObject.AddComponent<VFXSheetPlayer>();
             }
 
-            if (player.Init(effectName, VFXSheetPlayer.PlayMode.Loop, fps))
+            if (player.Init(profile.Name, profile.PlaybackMode, profile.FramesPerSecond))
             {
-                player.SetSortingOrder(sortOrder);
-                player.SetColor(fallbackColor);
+                player.SetSortingOrder(profile.SortingOrder);
+                player.SetColor(SheetColor(1f));
                 player.Play();
                 return;
             }
@@ -334,12 +342,31 @@ namespace GanglandUndercover.Art
             player = null;
             overlay.sprite = fallbackSprite;
             overlay.color = fallbackColor;
-            overlay.sortingOrder = sortOrder;
+            overlay.sortingOrder = profile.SortingOrder;
         }
 
         private void SetOverlay(SpriteRenderer sr, bool active)
         {
             if (sr != null) sr.gameObject.SetActive(active);
+        }
+
+        private static void ApplySheetAwareColor(SpriteRenderer renderer, VFXSheetPlayer player, Color fallbackColor, float sheetAlpha)
+        {
+            if (renderer == null) return;
+
+            renderer.color = IsSheetBacked(player)
+                ? SheetColor(sheetAlpha)
+                : fallbackColor;
+        }
+
+        private static bool IsSheetBacked(VFXSheetPlayer player)
+        {
+            return player != null && player.HasFrames;
+        }
+
+        private static Color SheetColor(float alpha)
+        {
+            return new Color(1f, 1f, 1f, Mathf.Clamp01(alpha));
         }
 
         private GameObject CreateOverlayQuad(string name, Color color, int sortOrder)
@@ -400,7 +427,7 @@ namespace GanglandUndercover.Art
 
             Color em = emergencyRedColor;
             em.a = 0.18f + pulse * 0.42f;
-            _emergencyLightRenderer.color = em;
+            ApplySheetAwareColor(_emergencyLightRenderer, _emergencyLightSheet, em, 0.65f + pulse * 0.35f);
             float scale = 18f + pulse * 5f;
             _emergencyLightRenderer.transform.localScale = new Vector3(scale, scale, 1f);
         }
@@ -437,9 +464,9 @@ namespace GanglandUndercover.Art
             _hitImpactFX.transform.position = worldPos + Vector3.back * 1.05f;
 
             var player = _hitImpactFX.AddComponent<VFXSheetPlayer>();
-            if (player.Init("hit", VFXSheetPlayer.PlayMode.OneShot, HitSheetFps))
+            if (player.Init(VfxEffectProfile.Hit.Name, VfxEffectProfile.Hit.PlaybackMode, VfxEffectProfile.Hit.FramesPerSecond))
             {
-                player.SetSortingOrder(506);
+                player.SetSortingOrder(VfxEffectProfile.Hit.SortingOrder);
                 player.Play();
                 player.OnComplete += ClearHitImpact;
                 _hitSheetPlayer = player;

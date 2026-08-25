@@ -48,7 +48,6 @@ namespace GanglandUndercover.UI
         private static Font _pixelFont;
         private static Font _cjkFont;
         private static bool _fontInitDone;
-
         /// <summary>Kenney Future pixel font — English/alphanumeric.</summary>
         public static Font PixelFont
         {
@@ -103,8 +102,26 @@ namespace GanglandUndercover.UI
         /// </summary>
         public static Font GetFontForText(string text)
         {
+            return GetFontForText(text, 16);
+        }
+
+        /// <summary>
+        /// Returns a CJK font instance dedicated to one rendered size. Unity's
+        /// legacy Text system otherwise mixes every requested size into one
+        /// dynamic atlas, which can overflow during a long UI session.
+        /// </summary>
+        public static Font GetFontForText(string text, int fontSize)
+        {
             EnsureFonts();
-            return _cjkFont != null ? _cjkFont : _pixelFont;
+
+            int size = Mathf.Max(1, fontSize);
+            string content = text ?? string.Empty;
+            if (!ContainsCJK(content))
+            {
+                return _pixelFont != null ? _pixelFont : _cjkFont;
+            }
+
+            return CreateCjkFont(size);
         }
 
         private static bool ContainsCJK(string text)
@@ -133,8 +150,42 @@ namespace GanglandUndercover.UI
         public static void StylizeText(Text text)
         {
             if (text == null) return;
-            text.font = GetFontForText(text.text);
+
+            EnsureFonts();
+            string content = text.text ?? string.Empty;
+            if (!ContainsCJK(content))
+            {
+                text.font = _pixelFont != null ? _pixelFont : _cjkFont;
+                text.raycastTarget = false;
+                return;
+            }
+
+            Font componentFont = text.font;
+            if (componentFont == null
+                || componentFont == _pixelFont
+                || componentFont == _cjkFont
+                || componentFont.fontSize != Mathf.Max(1, text.fontSize))
+            {
+                componentFont = CreateCjkFont(text.fontSize);
+            }
+
+            text.font = componentFont;
             text.raycastTarget = false;
+        }
+
+        private static Font CreateCjkFont(int fontSize)
+        {
+            int size = Mathf.Max(1, fontSize);
+            if (_cjkFont != null && _cjkFont.fontNames != null && _cjkFont.fontNames.Length > 0)
+            {
+                Font font = Font.CreateDynamicFontFromOSFont(_cjkFont.fontNames, size);
+                if (font != null)
+                {
+                    return font;
+                }
+            }
+
+            return _cjkFont != null ? _cjkFont : _pixelFont;
         }
 
         // ═══════════════════════════════════════════════
@@ -216,7 +267,7 @@ namespace GanglandUndercover.UI
             var go = new GameObject(name, typeof(RectTransform), typeof(Text));
             go.transform.SetParent(parent, false);
             var text = go.GetComponent<Text>();
-            text.font = CJKFont;
+            text.font = GetFontForText(string.Empty, fontSize);
             text.fontSize = fontSize;
             text.alignment = alignment;
             text.color = color;
@@ -258,7 +309,7 @@ namespace GanglandUndercover.UI
             var labelGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
             labelGo.transform.SetParent(btnGo.transform, false);
             var labelText = labelGo.GetComponent<Text>();
-            labelText.font = CJKFont;
+            labelText.font = GetFontForText(label, 14);
             labelText.fontSize = 14;
             labelText.alignment = TextAnchor.MiddleCenter;
             labelText.color = Color.white;

@@ -64,6 +64,15 @@ else
   HOST_TEST="GanglandUndercover.PlayTests.RelayTwoProcessPlayTests.RelayHost_PublishesCodeAndAcceptsPeer"
   CLIENT_TEST="GanglandUndercover.PlayTests.RelayTwoProcessPlayTests.RelayClient_JoinsHostByCode"
 fi
+
+# Keep scenario-specific NUnit XML so a later migration run cannot overwrite
+# the normal baseline evidence. The generic names remain for normal runs and
+# for compatibility with existing tooling.
+if [ "$SCENARIO" != "normal" ]; then
+  HOST_XML="$MAIN/Logs/relay-${SCENARIO}-host-results.xml"
+  CLIENT_XML="$CLONE/Logs/relay-${SCENARIO}-client-results.xml"
+  OBSERVER_XML="$OBSERVER_CLONE/Logs/relay-${SCENARIO}-observer-results.xml"
+fi
 HOST_RESULT="$MAIN/Logs/relay-$HOST_ROLE-result.txt"
 CLIENT_RESULT="$CLONE/Logs/relay-$CLIENT_ROLE-result.txt"
 OBSERVER_RESULT="$OBSERVER_CLONE/Logs/relay-${OBSERVER_ROLE:-observer}-result.txt"
@@ -167,11 +176,14 @@ rm -f "$CODEFILE" "$CODEFILE.tmp" "$CODEFILE.malicious" "$CODEFILE.malicious.tmp
       "$CODEFILE.candidate-old" "$CODEFILE.candidate-old.tmp" \
       "$CODEFILE.observer-old" "$CODEFILE.observer-old.tmp" \
       "$CODEFILE.observer-new" "$CODEFILE.observer-new.tmp" \
+      "$CODEFILE.oldhost-reconnected" "$CODEFILE.oldhost-reconnected.tmp" \
       "$CODEFILE.remote-task" "$CODEFILE.remote-task.tmp" \
       "$CODEFILE.remote-task-submitted" "$CODEFILE.remote-task-submitted.tmp" \
       "$CODEFILE.remote-vote" "$CODEFILE.remote-vote.tmp" \
       "$CODEFILE.oldhost-vote-submitted" "$CODEFILE.oldhost-vote-submitted.tmp" \
       "$CODEFILE.observer-vote-submitted" "$CODEFILE.observer-vote-submitted.tmp" \
+      "$CODEFILE.camera-legal-ready" "$CODEFILE.camera-legal-ready.tmp" \
+      "$CODEFILE.camera-data-received" "$CODEFILE.camera-data-received.tmp" \
       "$TIMEOUT_MARK"
 mkdir -p "$CLONE"
 if [ "$THREEPROCESS" = "true" ]; then

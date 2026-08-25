@@ -251,7 +251,7 @@ namespace GanglandUndercover.Online
             if (_ctrl.TryFindNearestBody(bot.Position, out int bodyIndex) &&
                 Vector3.Distance(bot.Position, _ctrl.Bodies[bodyIndex].Position) < BotInteractDistance)
             {
-                if (UnityEngine.Random.value < 0.42f &&
+                if (UnityEngine.Random.value < _ctrl.RuleSet.BotBodyReportProbability &&
                     _ctrl.Bodies[bodyIndex].Reported == false)
                 {
                     var body = _ctrl.Bodies[bodyIndex];
@@ -303,7 +303,8 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            bool isGangSide = (role == OnlineRole.Gang || role == OnlineRole.Mole);
+            // 只有真黑帮的普通互动才是破坏；双面身份按公开身份完成伪装任务。
+            bool isGangSide = role == OnlineRole.Gang;
 
             // 警察方：推进任务或修复
             if (!isGangSide)
@@ -331,7 +332,7 @@ namespace GanglandUndercover.Online
                 if (_currentTaskId.TryGetValue(botId, out int taskId) &&
                     taskId >= 0 && taskId < _ctrl.Tasks.Count)
                 {
-                    var task = _ctrl.Tasks[taskId];
+                    OnlineTaskState task = _ctrl.TaskForPlayer(botId, _ctrl.Tasks[taskId]);
                     if (!task.Completed && !task.Sabotaged &&
                         Vector3.Distance(bot.Position, task.Position) < BotInteractDistance * 1.5f)
                     {
@@ -343,8 +344,12 @@ namespace GanglandUndercover.Online
                         {
                             _taskProgress[botId] = 0f;
                             _ctrl.TryInteractWithTask(botId, bot);
-                            _completedTaskCount++;
-                            _currentTaskId.Remove(botId);
+                            OnlineTaskState updated = _ctrl.TaskForPlayer(botId, _ctrl.Tasks[taskId]);
+                            if (updated.Completed)
+                            {
+                                _completedTaskCount++;
+                                _currentTaskId.Remove(botId);
+                            }
                         }
                         return;
                     }
@@ -375,16 +380,16 @@ namespace GanglandUndercover.Online
         /// </summary>
         private void MakeBotDecision(ulong botId, OnlinePlayerState bot, OnlineRole role, OnlineProfession profession)
         {
-            // ──  黑帮方：追杀 + 破坏 + 通风管 ──
-            if (role == OnlineRole.Gang || role == OnlineRole.Mole)
+            // ──  真黑帮：追杀 + 破坏 + 通风管 ──
+            if (role == OnlineRole.Gang)
             {
                 // 击杀逻辑
                 if (_ctrl.TryGetKillCooldown(botId, out float kcd) && kcd <= 0f &&
-                    _ctrl.TryFindNearestVictim(bot.Position, out ulong victimId, out OnlinePlayerState victim))
+                    _ctrl.TryFindNearestVictim(botId, bot.Position, out ulong victimId, out OnlinePlayerState victim))
                 {
                     if (Vector3.Distance(bot.Position, victim.Position) < BotInteractDistance)
                     {
-                        PerformKill(botId, bot, victimId, victim);
+                        PerformKill(botId, bot, victimId);
                         return;
                     }
                 }
@@ -412,9 +417,20 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            // 内鬼只有完成情报目标后才有一名指定卧底可击杀，平时必须维持警察伪装。
+            if (role == OnlineRole.Mole
+                && _ctrl.TryGetKillCooldown(botId, out float moleCooldown)
+                && moleCooldown <= 0f
+                && _ctrl.TryFindNearestVictim(botId, bot.Position, out ulong moleVictimId, out OnlinePlayerState moleVictim)
+                && Vector3.Distance(bot.Position, moleVictim.Position) < BotInteractDistance)
+            {
+                PerformKill(botId, bot, moleVictimId);
+                return;
+            }
+
             // ── 警察方：做任务 + 修复 + 报案 ──
             // 紧急会议
-            if (UnityEngine.Random.value < 0.12f &&
+            if (UnityEngine.Random.value < _ctrl.RuleSet.BotEmergencyMeetingProbability &&
                 _ctrl.EmergencyMeetingsLeft > 0 &&
                 _ctrl.TaskService.CommunicationJamTimer <= 0f &&
                 Vector3.Distance(bot.Position, _ctrl.MapService.ScaleMapPosition(Vector3.zero)) <= _ctrl.RuleSet.ReportRangeFor(_ctrl.Players.Count))
@@ -431,15 +447,16 @@ namespace GanglandUndercover.Online
             }
 
             // 选择任务目标
-            _targets[botId] = PickEvidenceTarget();
+            _targets[botId] = PickEvidenceTarget(botId);
 
             // 记录当前任务
             foreach (var task in _ctrl.Tasks)
             {
-                if (!task.Completed && !task.Sabotaged &&
-                    Vector3.Distance(task.Position, _targets[botId]) < 0.01f)
+                OnlineTaskState playerTask = _ctrl.TaskForPlayer(botId, task);
+                if (!playerTask.Completed && !playerTask.Sabotaged &&
+                    Vector3.Distance(playerTask.Position, _targets[botId]) < 0.01f)
                 {
-                    _currentTaskId[botId] = task.Id;
+                    _currentTaskId[botId] = playerTask.Id;
                     break;
                 }
             }
@@ -447,28 +464,9 @@ namespace GanglandUndercover.Online
 
         // ── 击杀 ──
 
-        private void PerformKill(ulong botId, OnlinePlayerState bot, ulong victimId, OnlinePlayerState victim)
+        private void PerformKill(ulong botId, OnlinePlayerState bot, ulong victimId)
         {
-            float killRange = _ctrl.RuleSet.KillRange;
-            ProfessionAbilitySet? abilities = _ctrl.RuleSet.GetProfessionAbilities(bot.Profession);
-            if (abilities?.HasAbility(AbilityType.KillRangeBonus) == true)
-                killRange += abilities.Value.GetBonus(AbilityType.KillRangeBonus);
-
-            victim.Alive = false;
-            victim.Input = Vector2.zero;
-            _ctrl.Players[victimId] = victim;
-            _ctrl.Bodies.Add(new OnlineBodyState(_ctrl.NextBodyId, victimId, victim.Position, false));
-            _ctrl.IncrementNextBodyId();
-
-            float cooldown = _ctrl.RuleSet.KillCooldownFor(_ctrl.Players.Count);
-            if (abilities?.HasAbility(AbilityType.KillCooldownReduce) == true)
-                cooldown *= abilities.Value.GetMultiplier(AbilityType.KillCooldownReduce);
-            _ctrl.SetKillCooldown(botId, cooldown);
-
-            _ctrl.Status = bot.DisplayName + " 击倒了 " + victim.DisplayName + "。";
-            _ctrl.AddCaseLog(_ctrl.Status);
-            _ctrl.EvaluateWinConditions();
-            _ctrl.BroadcastSnapshot();
+            _ctrl.TryKill(botId, bot, victimId);
         }
 
         // ── 职业能力 ──
@@ -497,34 +495,35 @@ namespace GanglandUndercover.Online
             // RemoteSurveillance: Bot 自动获取附近玩家位置
             if (_ctrl.RuleSet.HasAbility(profession, AbilityType.RemoteSurveillance))
             {
-                // 自动标记最近的嫌疑人
+                // Bot 只能按公开嫌疑判断，不能读取其他玩家的私密身份。
+                ulong suspectId = 0UL;
+                int bestSuspicion = int.MinValue;
                 foreach (var pair in _ctrl.Players)
                 {
-                    if (pair.Value.Alive && pair.Key != botId &&
-                        _ctrl.GetPrivateRole(pair.Key) == OnlineRole.Gang)
+                    if (pair.Value.Alive && pair.Key != botId && pair.Value.Suspicion > bestSuspicion)
                     {
-                        _ctrl.AddSuspicion(pair.Key, 1);
-                        break;
+                        suspectId = pair.Key;
+                        bestSuspicion = pair.Value.Suspicion;
                     }
                 }
+                if (suspectId != 0UL) _ctrl.AddSuspicion(suspectId, 1);
                 return;
             }
 
             // FootprintTrack: 标记最近的非警玩家
             if (_ctrl.RuleSet.HasAbility(profession, AbilityType.FootprintTrack))
             {
+                ulong suspectId = 0UL;
+                int bestSuspicion = int.MinValue;
                 foreach (var pair in _ctrl.Players)
                 {
-                    if (pair.Value.Alive && pair.Key != botId)
+                    if (pair.Value.Alive && pair.Key != botId && pair.Value.Suspicion > bestSuspicion)
                     {
-                        OnlineRole targetRole = _ctrl.GetPrivateRole(pair.Key);
-                        if (targetRole == OnlineRole.Gang || targetRole == OnlineRole.Mole)
-                        {
-                            _ctrl.AddSuspicion(pair.Key, 1);
-                            break;
-                        }
+                        suspectId = pair.Key;
+                        bestSuspicion = pair.Value.Suspicion;
                     }
                 }
+                if (suspectId != 0UL) _ctrl.AddSuspicion(suspectId, 1);
                 return;
             }
         }
@@ -608,6 +607,8 @@ namespace GanglandUndercover.Online
             if (profession == OnlineProfession.Driver)
                 bot.Input *= 1.08f;
 
+            bot.Input *= Mathf.Clamp(_ctrl.RuleSet.BotMoveSpeedMultiplier, 0.5f, 4f);
+
             _ctrl.Players[botId] = bot;
         }
 
@@ -663,18 +664,19 @@ namespace GanglandUndercover.Online
                 return UnityEngine.Random.value < 0.55f ? PickNearestLivingNonGang(botId) : PickSabotageTarget();
             }
 
-            return PickEvidenceTarget();
+            return PickEvidenceTarget(botId);
         }
 
-        private Vector3 PickEvidenceTarget()
+        private Vector3 PickEvidenceTarget(ulong botId)
         {
             List<OnlineTaskState> options = new List<OnlineTaskState>();
 
             foreach (OnlineTaskState task in _ctrl.Tasks)
             {
-                if (!task.Completed || task.Sabotaged)
+                OnlineTaskState playerTask = _ctrl.TaskForPlayer(botId, task);
+                if (_ctrl.IsTaskVisibleToPlayer(botId, playerTask) && (!playerTask.Completed || playerTask.Sabotaged))
                 {
-                    options.Add(task);
+                    options.Add(playerTask);
                 }
             }
 
@@ -719,7 +721,7 @@ namespace GanglandUndercover.Online
 
             foreach (KeyValuePair<ulong, OnlinePlayerState> pair in _ctrl.Players)
             {
-                if (!pair.Value.Alive || pair.Key == botId || _ctrl.GetPrivateRole(pair.Key) == OnlineRole.Gang)
+                if (!_ctrl.CanKillTarget(botId, pair.Key))
                 {
                     continue;
                 }
@@ -749,22 +751,22 @@ namespace GanglandUndercover.Online
                 if (!pair.Value.Alive || pair.Key == voterClientId)
                     continue;
 
-                OnlineRole targetRole = _ctrl.GetPrivateRole(pair.Key);
+                OnlineRole targetRole = pair.Value.PublicRole;
                 float weight = 0f;
 
                 // 阵营基础权重
                 if (voterRole == OnlineRole.Gang || voterRole == OnlineRole.Mole)
                 {
-                    // 黑帮投非黑帮
-                    if (targetRole != OnlineRole.Gang && targetRole != OnlineRole.Mole)
+                    // 黑帮 Bot 只按表面身份和公开嫌疑判断。
+                    if (targetRole == OnlineRole.Police)
                         weight = 30f;
                     else
-                        weight = -10f; // 不会投同伙
+                        weight = 4f;
                 }
                 else
                 {
                     // 警察投黑帮
-                    if (targetRole == OnlineRole.Gang || targetRole == OnlineRole.Mole)
+                    if (targetRole == OnlineRole.Gang)
                         weight = 25f;
                     else
                         weight = 5f + UnityEngine.Random.Range(0f, 10f);

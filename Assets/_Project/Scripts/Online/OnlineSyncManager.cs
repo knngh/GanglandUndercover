@@ -83,7 +83,10 @@ namespace GanglandUndercover.Online
             IList<ulong> nonGangIds,
             IReadOnlyList<OnlineTaskState> tasks)
         {
-            taskSync.AssignTasks(gangIds, nonGangIds, tasks);
+            int taskQuota = matchController != null && matchController.RuleSet != null
+                ? matchController.RuleSet.TasksPerNonGangPlayer
+                : 4;
+            taskSync.AssignTasks(gangIds, nonGangIds, tasks, tasksPerPlayer: taskQuota);
             taskSync.MarkCompletable(GetNonSabotageTaskIds(tasks));
             victoryBridge.ClearEliminations();
         }
