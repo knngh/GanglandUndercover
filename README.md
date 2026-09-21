@@ -54,3 +54,10 @@ Chinese setup notes are in `Assets/_Project/Docs/UnitySetup.zh-CN.md`.
 ## Engine Direction
 
 Continue in Unity for the full production track. The priority is building a distinctive online police-and-gang deduction game with fast iteration, Netcode/Lobby/Relay/online text chat, and a stable multiplayer vertical slice before considering a higher-cost engine switch. Unreal can be revisited later only if the project moves toward realistic third-person production, cinematic animation, and large authored environments.
+
+## License
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
+本项目采用 [AGPL-3.0](./LICENSE) 许可协议开源。基于本项目的修改版本及通过网络提供服务的衍生服务，须以相同协议开源。
+
