@@ -2721,6 +2721,36 @@ namespace GanglandUndercover.Online
                 buttonText.verticalOverflow = VerticalWrapMode.Truncate;
             }
 
+            Sprite abilityIcon = key switch
+            {
+                "Report" => GanglandUndercover.Art.UIArtCache.AbilityIcon("report"),
+                "Kill" => GanglandUndercover.Art.UIArtCache.AbilityIcon("kill"),
+                "Ability" => GanglandUndercover.Art.UIArtCache.AbilityIcon("evidence"),
+                _ => null
+            };
+            if (abilityIcon != null && buttonText != null)
+            {
+                RectTransform labelRect = buttonText.GetComponent<RectTransform>();
+                labelRect.anchorMin = new Vector2(0f, 0f);
+                labelRect.anchorMax = new Vector2(1f, 0.58f);
+                labelRect.offsetMin = new Vector2(4f, 2f);
+                labelRect.offsetMax = new Vector2(-4f, 0f);
+
+                GameObject iconObject = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+                iconObject.transform.SetParent(button.transform, false);
+                RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+                iconRect.anchorMin = new Vector2(0.5f, 0.55f);
+                iconRect.anchorMax = new Vector2(0.5f, 1f);
+                iconRect.pivot = new Vector2(0.5f, 0.5f);
+                iconRect.anchoredPosition = new Vector2(0f, -2f);
+                iconRect.sizeDelta = new Vector2(24f, 24f);
+                Image iconImage = iconObject.GetComponent<Image>();
+                iconImage.sprite = abilityIcon;
+                iconImage.preserveAspect = true;
+                iconImage.raycastTarget = false;
+                iconImage.color = Color.white;
+            }
+
             return button;
         }
 

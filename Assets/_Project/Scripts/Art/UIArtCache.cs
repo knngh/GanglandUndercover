@@ -41,6 +41,16 @@ namespace GanglandUndercover.Art
         public static Sprite IconTaskMemory { get; private set; }
         public static Sprite IconTaskSwipe { get; private set; }
 
+        // ── 职业/行动能力图标 ──
+        public static Sprite IconAbilityCamera { get; private set; }
+        public static Sprite IconAbilityEmergency { get; private set; }
+        public static Sprite IconAbilityEvidence { get; private set; }
+        public static Sprite IconAbilityKill { get; private set; }
+        public static Sprite IconAbilityPatrol { get; private set; }
+        public static Sprite IconAbilityReport { get; private set; }
+        public static Sprite IconAbilitySabotage { get; private set; }
+        public static Sprite IconAbilityVent { get; private set; }
+
         // ── 会议/投票 ──
         public static Sprite MeetingTableBg { get; private set; }
         public static Sprite VoteCard { get; private set; }
@@ -72,6 +82,15 @@ namespace GanglandUndercover.Art
             IconTaskDownload = Load("Icons/task_download_clean");
             IconTaskMemory = Load("Icons/task_memory_clean");
             IconTaskSwipe = Load("Icons/task_swipe_clean");
+
+            IconAbilityCamera = Load("Icons/ability_camera_clean");
+            IconAbilityEmergency = Load("Icons/ability_emergency_clean");
+            IconAbilityEvidence = Load("Icons/ability_evidence_clean");
+            IconAbilityKill = Load("Icons/ability_kill_clean");
+            IconAbilityPatrol = Load("Icons/ability_patrol_clean");
+            IconAbilityReport = Load("Icons/ability_report_clean");
+            IconAbilitySabotage = Load("Icons/ability_sabotage_clean");
+            IconAbilityVent = Load("Icons/ability_vent_clean");
 
             // 会议/投票
             MeetingTableBg = Load("Meeting/meeting_panel_clean");
@@ -109,6 +128,23 @@ namespace GanglandUndercover.Art
                 "download" or "DownloadTask" => IconTaskDownload,
                 "memory" or "MemoryTask" => IconTaskMemory,
                 "swipe" or "SwipeCardTask" => IconTaskSwipe,
+                _ => null
+            };
+        }
+
+        /// <summary>按行动能力键获取图标。未知键返回 null，调用方继续使用文字回退。</summary>
+        public static Sprite AbilityIcon(string abilityKey)
+        {
+            return abilityKey switch
+            {
+                "camera" or "Camera" => IconAbilityCamera,
+                "emergency" or "Emergency" => IconAbilityEmergency,
+                "evidence" or "Evidence" => IconAbilityEvidence,
+                "kill" or "Kill" => IconAbilityKill,
+                "patrol" or "Patrol" => IconAbilityPatrol,
+                "report" or "Report" => IconAbilityReport,
+                "sabotage" or "Sabotage" => IconAbilitySabotage,
+                "vent" or "Vent" => IconAbilityVent,
                 _ => null
             };
         }

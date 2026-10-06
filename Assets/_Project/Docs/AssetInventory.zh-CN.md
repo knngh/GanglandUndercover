@@ -40,7 +40,7 @@
 - LimeZu 运行时 manifest：`Assets/_Project/Resources/Sprites/Tilesets/LimeZu/limezu_runtime_manifest.json` 是当前权威清单；完整购买包继续只保留在 `.asset_cache/purchased/limezu`。
 - Kenney 精选 SFX：`Assets/_Project/Resources/Audio/SFX/Kenney` 当前共 16 个 `.ogg`，覆盖 UI click/hover、任务完成、击杀、报告、会议、投票、破坏、通风口、胜负等主要 gameplay cue。
 - Kenney 运行时 manifest：`Assets/_Project/Resources/Audio/SFX/Kenney/kenney_sfx_manifest.json` 是当前音频精选清单；完整原始 zip 继续只保留在 `.asset_cache/free/kenney`。
-- UI 图标批次：`Assets/_Project/Resources/Sprites/UI/Icons` 包含 5 个破坏图标与 6 个任务图标；`reviewed_icon_manifest.json` 记录 LimeZu / Kenney CC0 来源，`ReviewedUiIconBakeTool` 可从已登记的运行时单体设备图重复烘焙。
+- UI 图标批次：`Assets/_Project/Resources/Sprites/UI/Icons` 包含 5 个破坏图标、6 个任务图标和 8 个能力图标；`reviewed_icon_manifest.json` 记录 LimeZu / Kenney CC0 来源，`ReviewedUiIconBakeTool` 可从已登记的运行时单体设备图重复烘焙。
 
 ## 历史 / 可选 3D 资源
 
@@ -109,7 +109,7 @@
 - 新增 `ReviewedUiIconBakeTool`，从运行时清单中已有的 LimeZu / Kenney CC0 设备单体图裁切透明边并最近邻缩放，输出可重复生成的 UI 图标，不依赖隔离区草稿。
 - `UIArtCache` 已启用这批图标；任务弹窗站点预览按 CCTV、录音、电闸、车牌和通用模板切换图标，`SabotagePanel` 标准破坏按钮显示对应图标。
 - 当前运行时 UI 覆盖提升到 20 张；隔离区 59 张水印草稿保持原位，不作为运行依赖。
-- 下一美术切片：补齐 camera / emergency / evidence / kill / patrol / report / sabotage / vent 能力图标，再推进 wire / keypad / scan 小游戏交互素材。
+- 下一美术切片：推进 wire / keypad / scan 小游戏交互素材，并刷新行动 HUD 的能力图标实机截图。
 
 ## 阶段验收项
 

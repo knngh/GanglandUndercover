@@ -14,7 +14,7 @@ namespace GanglandUndercover.Tests
             ArtAssetReadinessReport.Summary summary = ArtAssetReadinessReport.BuildSummary();
 
             Assert.IsTrue(summary.IsReady, ArtAssetReadinessReport.ToMarkdown(summary));
-            Assert.AreEqual(392, summary.RuntimeSpritePngCount);
+            Assert.AreEqual(400, summary.RuntimeSpritePngCount);
             Assert.AreEqual(summary.RuntimeSpritePngCount, summary.RuntimeSpriteMetaCount);
             Assert.AreEqual(0, summary.MisconfiguredSpriteImportCount);
             Assert.AreEqual(5, summary.RuntimeMapPropSpriteCount);
@@ -24,7 +24,7 @@ namespace GanglandUndercover.Tests
             Assert.AreEqual(0, summary.CharacterSpriteDimensionMismatchCount);
             Assert.AreEqual(64, summary.VfxFrameCount);
             Assert.AreEqual(0, summary.VfxFrameDimensionMismatchCount);
-            Assert.AreEqual(20, summary.UiSpriteCount);
+            Assert.AreEqual(28, summary.UiSpriteCount);
             StringAssert.Contains("Quarantined watermarked draft PNG | 59", ArtAssetReadinessReport.ToMarkdown(summary));
         }
 
@@ -65,7 +65,7 @@ namespace GanglandUndercover.Tests
             StringAssert.Contains("Map polish", markdown);
             StringAssert.Contains("VFX polish", markdown);
             StringAssert.Contains("blackout, comms jam, door lock, patrol alert", markdown);
-            StringAssert.Contains("UI polish", markdown);
+            StringAssert.Contains("Minigame polish", markdown);
             StringAssert.Contains("VFX frame dimension mismatch", markdown);
             StringAssert.Contains("watermarked draft", markdown);
         }
@@ -124,6 +124,24 @@ namespace GanglandUndercover.Tests
 
             Assert.AreSame(UIArtCache.IconSabotageCommJam, UIArtCache.SabotageIcon(SabotageType.Communications.ToString()));
             Assert.AreSame(UIArtCache.IconSabotagePatrol, UIArtCache.SabotageIcon(SabotageType.PatrolAlert.ToString()));
+        }
+
+        [Test]
+        public void RuntimeAbilityIconBatch_UsesReviewedCleanAssets()
+        {
+            UIArtCache.ClearCache();
+            UIArtCache.Ensure();
+
+            string[] keys = { "camera", "emergency", "evidence", "kill", "patrol", "report", "sabotage", "vent" };
+            foreach (string key in keys)
+            {
+                UnityEngine.Sprite icon = UIArtCache.AbilityIcon(key);
+                Assert.IsNotNull(icon, key + " ability icon should load.");
+                StringAssert.EndsWith("_clean", icon.texture.name);
+                Assert.AreEqual(64, icon.texture.width);
+                Assert.AreEqual(64, icon.texture.height);
+                Assert.AreEqual(UnityEngine.FilterMode.Point, icon.texture.filterMode);
+            }
         }
     }
 }

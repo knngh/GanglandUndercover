@@ -187,4 +187,26 @@
 4. 会议、任务和通用按钮接入统一 Point Filter、9-slice 无水印皮肤；缺失地图/小游戏资源继续安全回退。
 5. `ArtAssetReadinessReport` 新增水印草稿隔离统计，资源导入门禁恢复到 0 错误。
 
-下一阶段：补齐无水印能力/任务/破坏图标和 wire/keypad/scan 小游戏图，再刷新会议、任务、断电实机截图。
+下一阶段：补齐 wire/keypad/scan 小游戏交互图，再刷新会议、任务、断电实机截图。
+
+## 2026-09-12 能力图标批次
+
+状态：已完成能力图标运行时收口
+
+本轮完成内容：
+
+1. 从已登记的 LimeZu 运行时设备切片重复烘焙 8 张 64×64 无水印能力图标：camera、emergency、evidence、kill、patrol、report、sabotage、vent。
+2. `UIArtCache` 增加能力图标缓存和按键查询；行动快捷栏的报案、击倒、职业技能按钮接入图标并保留文字状态回退。
+3. `reviewed_icon_manifest.json`、资源清单和 `ArtAssetReadinessReport` 同步记录来源与门禁，隔离区水印草稿仍不进入运行时。
+4. 运行时资源覆盖从 392/20 提升到 400/28（PNG/UI sprite），导入错误保持 0。
+
+验收结果：
+
+1. 能力图标专项 EditMode：7/7 PASS。
+2. 完整 EditMode：242/242 PASS，0 failed，0 skipped。
+3. `output/art_readiness_current.md` 已刷新，下一项转为 wire/keypad/scan 小游戏交互素材。
+
+当前风险：
+
+1. 能力图标已可运行，但尚未刷新真实 PlayMode 会议、任务和断电截图。
+2. wire/keypad/scan 仍使用干净素材和程序化回退，下一轮继续处理小游戏交互美术。

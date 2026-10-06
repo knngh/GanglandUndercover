@@ -27,6 +27,14 @@ namespace GanglandUndercover.Editor
             new IconSpec("task_download_clean", LimeZuRoot + "Office/room-props/Modern_Office_Singles_48x48_176_ServerRack.png", new Color32(70, 137, 219, 255)),
             new IconSpec("task_memory_clean", LimeZuRoot + "Exteriors/room-props/ME_Singles_Subway_and_Train_Station_48x48_Control_Big_Monitor.png", new Color32(150, 105, 203, 255)),
             new IconSpec("task_swipe_clean", LimeZuRoot + "Interiors/room-props/Modern_Interiors_48x48_TicketMachine.png", new Color32(69, 184, 153, 255)),
+            new IconSpec("ability_camera_clean", LimeZuRoot + "Office/room-props/Modern_Office_Singles_48x48_276_CctvCameraRig.png", new Color32(54, 194, 204, 255)),
+            new IconSpec("ability_emergency_clean", LimeZuRoot + "Exteriors/room-props/ME_Singles_Subway_and_Train_Station_48x48_SOS_Box.png", new Color32(231, 111, 43, 255)),
+            new IconSpec("ability_evidence_clean", LimeZuRoot + "Interiors/room-props/Modern_Interiors_48x48_SafeBucks.png", new Color32(212, 81, 126, 255)),
+            new IconSpec("ability_kill_clean", LimeZuRoot + "Exteriors/room-props/ME_Singles_Worksite_48x48_Tool_Box_1.png", new Color32(218, 62, 57, 255)),
+            new IconSpec("ability_patrol_clean", LimeZuRoot + "Exteriors/room-props/ME_Singles_Subway_and_Train_Station_48x48_Monitor.png", new Color32(231, 111, 43, 255)),
+            new IconSpec("ability_report_clean", LimeZuRoot + "Interiors/room-props/Modern_Interiors_48x48_HospitalTvReportage.png", new Color32(230, 162, 48, 255)),
+            new IconSpec("ability_sabotage_clean", LimeZuRoot + "Exteriors/room-props/24_Additional_Houses_Post_Apocalyptic_House_Generator_2_48x48.png", new Color32(150, 105, 203, 255)),
+            new IconSpec("ability_vent_clean", LimeZuRoot + "Exteriors/landmarks/ME_Singles_Office_48x48_Air_Duct_3_Roof_Prop.png", new Color32(69, 184, 153, 255)),
         };
 
         [MenuItem("Gangland/Art/Bake Reviewed UI Icons")]

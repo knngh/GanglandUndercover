@@ -64,6 +64,14 @@ namespace GanglandUndercover.Editor
             "Sprites/UI/Icons/task_download_clean",
             "Sprites/UI/Icons/task_memory_clean",
             "Sprites/UI/Icons/task_swipe_clean",
+            "Sprites/UI/Icons/ability_camera_clean",
+            "Sprites/UI/Icons/ability_emergency_clean",
+            "Sprites/UI/Icons/ability_evidence_clean",
+            "Sprites/UI/Icons/ability_kill_clean",
+            "Sprites/UI/Icons/ability_patrol_clean",
+            "Sprites/UI/Icons/ability_report_clean",
+            "Sprites/UI/Icons/ability_sabotage_clean",
+            "Sprites/UI/Icons/ability_vent_clean",
             "Sprites/UI/Meeting/meeting_panel_clean",
             "Sprites/UI/Meeting/vote_card_clean",
             "Sprites/UI/Panels/panel_noir_clean",
@@ -174,12 +182,11 @@ namespace GanglandUndercover.Editor
             builder.AppendLine();
             builder.AppendLine("## Next Art Slices");
             builder.AppendLine();
-            builder.AppendLine("1. UI polish pass 3: replace the remaining quarantined ability icon drafts with reviewed no-watermark camera, report, vent, kill, evidence, and emergency icons.");
-            builder.AppendLine("2. Minigame polish: author clean wire, keypad, and scan interaction art before enabling MinigameArtCache assets again.");
-            builder.AppendLine("3. VFX polish pass 2: capture blackout, comms jam, door lock, patrol alert in motion against live gameplay.");
-            builder.AppendLine("4. Character polish pass 3: review gameplay screenshots and replace procedural silhouettes with final hand-authored variants.");
-            builder.AppendLine("5. Map polish pass 2: extend authored prop replacement to police-station rooms and remaining high-traffic corridors.");
-            builder.AppendLine("6. Verification: rerun this report and Unity EditMode before each large art import batch.");
+            builder.AppendLine("1. Minigame polish: author clean wire, keypad, and scan interaction art before enabling MinigameArtCache assets again.");
+            builder.AppendLine("2. VFX polish pass 2: capture blackout, comms jam, door lock, patrol alert in motion against live gameplay.");
+            builder.AppendLine("3. Character polish pass 3: review gameplay screenshots and replace procedural silhouettes with final hand-authored variants.");
+            builder.AppendLine("4. Map polish pass 2: extend authored prop replacement to police-station rooms and remaining high-traffic corridors.");
+            builder.AppendLine("5. Verification: rerun this report and Unity EditMode before each large art import batch.");
             return builder.ToString();
         }
 

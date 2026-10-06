@@ -13,6 +13,14 @@
     { "file": "task_scan_clean.png", "source": "LimeZu security camera" },
     { "file": "task_download_clean.png", "source": "LimeZu server rack" },
     { "file": "task_memory_clean.png", "source": "LimeZu control monitor" },
-    { "file": "task_swipe_clean.png", "source": "LimeZu ticket machine" }
+    { "file": "task_swipe_clean.png", "source": "LimeZu ticket machine" },
+    { "file": "ability_camera_clean.png", "source": "LimeZu CCTV rig" },
+    { "file": "ability_emergency_clean.png", "source": "LimeZu SOS terminal" },
+    { "file": "ability_evidence_clean.png", "source": "LimeZu safe" },
+    { "file": "ability_kill_clean.png", "source": "LimeZu tool box" },
+    { "file": "ability_patrol_clean.png", "source": "LimeZu station monitor" },
+    { "file": "ability_report_clean.png", "source": "LimeZu hospital TV" },
+    { "file": "ability_sabotage_clean.png", "source": "LimeZu generator" },
+    { "file": "ability_vent_clean.png", "source": "LimeZu roof air duct" }
   ]
 }
