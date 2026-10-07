@@ -66,3 +66,6 @@ Assets/_Project/Resources/AssetStore/
 /Assets/Resources/
 /Assets/Resources.meta
 .asset_cache/
+
+# Art noise census working output (evidence snapshots live in output/art_batch*_evidence/)
+output/art_batch*_census/
