@@ -543,6 +543,46 @@ namespace GanglandUndercover.Art
             return Sprite.Create(texture, rect, new Vector2(0.5f, 0.5f), ppu);
         }
 
+        // ══════════════════════════════════════════════════════
+        // LimeZu atlas 任意格切片（风格锁定 v1.1：48px 网格/地砖换皮）
+        // ══════════════════════════════════════════════════════
+        private static Texture2D _limeZuFloorAtlas;
+        private static readonly Dictionary<(int, int), Sprite> LimeZuFloorCellCache = new();
+
+        /// <summary>
+        /// 从 atlas 取单个 cell 生成 Point-filter sprite（cellX/cellY 为左上原点格坐标）。
+        /// 越界或 atlas 尺寸不整除时返回 null，由调用方回退，不抛异常。
+        /// </summary>
+        public static Sprite CreateAtlasCellSprite(Texture2D texture, int cellX, int cellY, int cellSize)
+        {
+            if (texture == null || cellSize <= 0 || cellX < 0 || cellY < 0) return null;
+            if (texture.width % cellSize != 0 || texture.height % cellSize != 0) return null;
+            int cols = texture.width / cellSize;
+            int rows = texture.height / cellSize;
+            if (cellX >= cols || cellY >= rows) return null;
+
+            texture.filterMode = FilterMode.Point;
+            float x = cellX * (float)cellSize;
+            float y = texture.height - (cellY + 1) * (float)cellSize;
+            return Sprite.Create(texture, new Rect(x, y, cellSize, cellSize), new Vector2(0.5f, 0.5f), cellSize);
+        }
+
+        /// <summary>LimeZu 内装地板 atlas 的一个 16px 格（缓存）。atlas 缺失时返回 null。</summary>
+        public static Sprite LimeZuFloorCell(int cellX, int cellY)
+        {
+            if (_limeZuFloorAtlas == null)
+            {
+                _limeZuFloorAtlas = Resources.Load<Texture2D>(LimeZuInteriorFloorTilePath);
+                if (_limeZuFloorAtlas == null) return null;
+            }
+
+            if (LimeZuFloorCellCache.TryGetValue((cellX, cellY), out Sprite cached)) return cached;
+
+            Sprite sprite = CreateAtlasCellSprite(_limeZuFloorAtlas, cellX, cellY, 16);
+            LimeZuFloorCellCache[(cellX, cellY)] = sprite;
+            return sprite;
+        }
+
         private static Sprite LoadRuntimeTile(string resourcePath, out string loadedResourcePath, float pixelsPerUnit = 0f)
         {
             var tex = Resources.Load<Texture2D>(resourcePath);

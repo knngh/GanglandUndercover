@@ -18,13 +18,18 @@
 
 ## 批次 2：地图换皮（观感提升最大、风险最低）
 
-**现状**：`OnlineWorldBuilder`+`RoomDecorator` 纯色矩形拼图；LimeZu 48×48 已导入
-`Resources/Sprites/Tilesets/LimeZu/` 但 readiness 报告仅 5 个 prop 接线。
+**现状（2026-10-06 管线探查修正）**：运行时地图全部由 `OnlineWorldBuilder.BuildDistrictMap()`
+硬编码搭建；`GreyboxMapBuilder`/`RoomDecorator`/`MapTilePalette` 是**休眠代码**（零运行时调用方，
+不在本批次范围）。LimeZu 已部分接线（75+ 元素、室外地板 asphalt-48 已平铺），
+真正缺口：① 16px atlas 只切左上角一格（`Sprite2DAssetCache.cs:536-589`）；
+② 地面/道路/墙/房间底的纯色 `CreateProp`（圆角矩形+tint）占位。
 
-- `RoomDecorator` 的 PropWood/PropMetal/PropGreen 色块 → LimeZu 对应 prop 切片
-- 地板/墙按房间类型铺 theme（Art Bible §4.3 三图区分表）
-- **不引入 Tilemap 重构**——地图服务端权威生成，先 SpriteRenderer 换皮，Tilemap 留 Alpha 队列
-- 验收：风格 gate 全过 + 同局 4 客户端截图一致
+- 核心 unlock：`Sprite2DAssetCache` atlas 切片从"仅左上 cell"扩到按 cell 索引取
+- `CreateFloor`/`CreateRoadNetwork`/`CreateShipRoom` 底+墙等纯色点 → LimeZu tile
+  （Art Bible §4.3 三图区分表定 theme）
+- 硬不变量：solid prop 换 sprite 时 scale/位置不动（碰撞一致）；z 层级约定不动
+- **不引入 Tilemap 重构**；一致性风险低（地图各端本地确定性生成，网上只同步地图类型 int）
+- 验收：风格 gate 全过 + 同局多客户端截图一致
 
 ## 批次 3：角色替换
 

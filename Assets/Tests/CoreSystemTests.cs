@@ -3939,6 +3939,99 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void Sprite2DAssetCache_AtlasCellSpriteValidatesBoundsAndLayout()
+        {
+            Type cacheType = RuntimeType("GanglandUndercover.Art.Sprite2DAssetCache");
+            MethodInfo method = cacheType.GetMethod("CreateAtlasCellSprite",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.IsNotNull(method, "CreateAtlasCellSprite should exist");
+
+            var texture = new Texture2D(48, 32, TextureFormat.RGBA32, false);
+            try
+            {
+                Sprite inBounds = (Sprite)method.Invoke(null, new object[] { texture, 2, 1, 16 });
+                Assert.IsNotNull(inBounds, "合法格应生成 sprite");
+                Assert.AreEqual(16f, inBounds.rect.width, 0.001f, "cell 宽必须是 16px");
+                Assert.AreEqual(16f, inBounds.rect.height, 0.001f, "cell 高必须是 16px");
+                Assert.AreEqual(16f, inBounds.pixelsPerUnit, 0.001f, "PPU 必须等于 cellSize");
+                Assert.AreEqual(32f, inBounds.rect.x, 0.001f, "cellX=2 → rect.x=32");
+                Assert.AreEqual(0f, inBounds.rect.y, 0.001f, "左上原点：cellY=1 → rect.y=height-(1+1)*16=0");
+
+                Assert.IsNull((Sprite)method.Invoke(null, new object[] { texture, 3, 0, 16 }), "越界 cellX 应返回 null");
+                Assert.IsNull((Sprite)method.Invoke(null, new object[] { texture, 0, 2, 16 }), "越界 cellY 应返回 null");
+                Assert.IsNull((Sprite)method.Invoke(null, new object[] { texture, 0, 0, 20 }), "不整除 cellSize 应返回 null");
+                Assert.IsNull((Sprite)method.Invoke(null, new object[] { texture, -1, 0, 16 }), "负 cellX 应返回 null");
+                Assert.IsNull((Sprite)method.Invoke(null, new object[] { null, 0, 0, 16 }), "空纹理应返回 null");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(texture);
+            }
+        }
+
+        [Test]
+        public void Sprite2DAssetCache_LimeZuFloorCellReturnsVerifiedRoomTiles()
+        {
+            Type cacheType = RuntimeType("GanglandUndercover.Art.Sprite2DAssetCache");
+            MethodInfo method = cacheType.GetMethod("LimeZuFloorCell",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.IsNotNull(method, "LimeZuFloorCell should exist");
+
+            // 风格锁定批次 2a 已目检格子：木纹(13,27) 石砖(12,25) 花毯(9,19) 菱形(14,30) 灰格(4,18)
+            int[][] cells = { new[] { 13, 27 }, new[] { 12, 25 }, new[] { 9, 19 }, new[] { 14, 30 }, new[] { 4, 18 } };
+            foreach (int[] cell in cells)
+            {
+                Sprite sprite = (Sprite)method.Invoke(null, new object[] { cell[0], cell[1] });
+                Assert.IsNotNull(sprite, $"atlas 格 ({cell[0]},{cell[1]}) 应可用");
+                Assert.AreEqual(16f, sprite.rect.width, 0.001f, $"格 ({cell[0]},{cell[1]}) 宽应为 16px");
+                Assert.AreEqual(16f, sprite.rect.height, 0.001f, $"格 ({cell[0]},{cell[1]}) 高应为 16px");
+                Assert.AreEqual(16f, sprite.pixelsPerUnit, 0.001f, $"格 ({cell[0]},{cell[1]}) PPU 应为 16");
+            }
+
+            Assert.IsNull((Sprite)method.Invoke(null, new object[] { 999, 999 }), "越界格应返回 null");
+        }
+
+        [Test]
+        public void WorldBuilder_RoomFloorTilesUseLimeZuAtlasTextures()
+        {
+            Type builderType = RuntimeType("GanglandUndercover.Online.OnlineWorldBuilder");
+            Type mapServiceType = RuntimeType("GanglandUndercover.Online.OnlineMapService");
+            GameObject worldRoot = new GameObject("WorldBuilderRoomFloorTileRoot");
+            GameObject mapHost = new GameObject("WorldBuilderRoomFloorTileMapService");
+
+            try
+            {
+                object builder = Activator.CreateInstance(builderType);
+                object mapService = mapHost.AddComponent(mapServiceType);
+                var solidObstacles = new List<Rect>();
+                var walkableAreas = new List<Rect>();
+                var labels = new List<TextMesh>();
+
+                Invoke(builder, "Initialize", worldRoot, mapService, solidObstacles, walkableAreas, labels, 8);
+                Invoke(builder, "EnsureRuntimeSprites");
+                Invoke(builder, "BuildDistrictMap");
+
+                int texturedTiles = 0;
+                foreach (Transform child in worldRoot.transform)
+                {
+                    if (!child.name.Contains("顶视地砖")) continue;
+                    SpriteRenderer renderer = child.GetComponent<SpriteRenderer>();
+                    if (renderer != null && renderer.sprite != null && renderer.sprite.pixelsPerUnit == 16f)
+                    {
+                        texturedTiles++;
+                    }
+                }
+
+                Assert.GreaterOrEqual(texturedTiles, 100, "房间顶视地砖应大面积使用 16px LimeZu atlas 格");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(worldRoot);
+                UnityEngine.Object.DestroyImmediate(mapHost);
+            }
+        }
+
+        [Test]
         public void WorldBuilder_SortsPositiveZInFrontOfNegativeZ()
         {
             Type builderType = RuntimeType("GanglandUndercover.Online.OnlineWorldBuilder");
@@ -5090,7 +5183,26 @@ namespace GanglandUndercover.Tests
 
         private static object Invoke(object target, string methodName, params object[] args)
         {
-            return target.GetType().GetMethod(methodName).Invoke(target, args);
+            try
+            {
+                return target.GetType().GetMethod(methodName).Invoke(target, args);
+            }
+            catch (AmbiguousMatchException)
+            {
+                // 方法出现重载时（如 CreateTiledFloor 换皮变体）按参数个数消歧
+                MethodInfo candidate = null;
+                foreach (MethodInfo method in target.GetType().GetMethods())
+                {
+                    if (method.Name == methodName && method.GetParameters().Length == args.Length)
+                    {
+                        candidate = method;
+                        break;
+                    }
+                }
+
+                if (candidate == null) throw;
+                return candidate.Invoke(target, args);
+            }
         }
 
         private static object InvokeStatic(Type type, string methodName, params object[] args)

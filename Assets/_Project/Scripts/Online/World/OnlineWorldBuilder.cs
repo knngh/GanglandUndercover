@@ -149,6 +149,58 @@ namespace GanglandUndercover.Online
             return Sprite2DAssetCache.CreateRuntimeSprite(tex, resourcePath, pixelsPerUnit);
         }
 
+        // ── 房间地砖（LimeZu 内装地板 atlas 16px 格，风格锁定 v1.1 批次 2a）──
+        private readonly Dictionary<string, Sprite> _roomFloorTileCache = new();
+        private Sprite _roomFloorTileFallback;
+
+        private Sprite FallbackRoomFloorTile =>
+            _roomFloorTileFallback != null
+                ? _roomFloorTileFallback
+                : _roomFloorTileFallback = Sprite2DAssetCache.LimeZuFloorCell(4, 18) ?? FloorTileSprite;
+
+        /// <summary>
+        /// 按房间名关键词挑地砖：木纹（餐饮/市井）、灰石砖（机构/查验）、
+        /// 蓝花毯（金融/情报）、蓝菱形（医疗），未命中走中性灰格。
+        /// 全部来自同一张 atlas 的已验证格子，确定性映射（无 Random，各端一致）。
+        /// </summary>
+        private Sprite RoomFloorTile(string roomName)
+        {
+            if (string.IsNullOrEmpty(roomName)) return FallbackRoomFloorTile;
+            if (_roomFloorTileCache.TryGetValue(roomName, out Sprite cached)) return cached;
+
+            int cellX = 4, cellY = 18; // 中性灰格（fallback）
+            if (ContainsAny(roomName, "茶餐", "夜市", "排档", "后巷", "麻将"))
+            {
+                cellX = 13; cellY = 27; // 暖木纹
+            }
+            else if (ContainsAny(roomName, "海关", "监控", "指挥", "证物", "码头", "拘留", "审讯"))
+            {
+                cellX = 12; cellY = 25; // 灰石砖
+            }
+            else if (ContainsAny(roomName, "金融", "账房", "情报", "钱庄"))
+            {
+                cellX = 9; cellY = 19; // 蓝花毯
+            }
+            else if (ContainsAny(roomName, "诊所", "诊疗", "医疗", "药材"))
+            {
+                cellX = 14; cellY = 30; // 蓝菱形
+            }
+
+            Sprite sprite = Sprite2DAssetCache.LimeZuFloorCell(cellX, cellY) ?? FallbackRoomFloorTile;
+            _roomFloorTileCache[roomName] = sprite;
+            return sprite;
+        }
+
+        private static bool ContainsAny(string text, params string[] keys)
+        {
+            foreach (string key in keys)
+            {
+                if (text.Contains(key)) return true;
+            }
+
+            return false;
+        }
+
         public void Initialize(GameObject worldRoot, OnlineMapService mapService,
             List<Rect> solidObstacleRects, List<Rect> walkableRects, List<TextMesh> worldLabels,
             int underworldPassageCount = 8)
@@ -807,8 +859,14 @@ namespace GanglandUndercover.Online
         /// </summary>
         public void CreateTiledFloor(string name, Vector3 position, Vector2 size, Color tint)
         {
-            Sprite tile = FloorTileSprite;
-            float tileWorldSize = 1.0f;
+            CreateTiledFloor(name, position, size, tint, FloorTileSprite, 1.0f);
+        }
+
+        /// <summary>指定 tile sprite 的平铺变体（房间地砖换皮用），布局与默认版完全一致。</summary>
+        public void CreateTiledFloor(string name, Vector3 position, Vector2 size, Color tint, Sprite tile, float tileWorldSize)
+        {
+            if (tile == null) tile = FloorTileSprite;
+            if (tileWorldSize <= 0f) tileWorldSize = 1.0f;
             int cols = Mathf.Max(1, Mathf.CeilToInt(size.x / tileWorldSize));
             int rows = Mathf.Max(1, Mathf.CeilToInt(size.y / tileWorldSize));
             float stepX = size.x / cols;
@@ -2854,6 +2912,7 @@ namespace GanglandUndercover.Online
             float tileHeight = size.y * 0.62f / rows;
             float startX = center.x - size.x * 0.39f + tileWidth * 0.5f;
             float startY = center.y - size.y * 0.3f + tileHeight * 0.5f;
+            Sprite floorTile = RoomFloorTile(name);
 
             for (int row = 0; row < rows; row++)
             {
@@ -2862,7 +2921,7 @@ namespace GanglandUndercover.Online
                     float x = startX + column * tileWidth;
                     float y = startY + row * tileHeight;
                     float shade = (row + column) % 2 == 0 ? 1.26f : 1.08f;
-                    CreateProp("2.5D 建筑体 " + name + " 顶视地砖 " + row + "-" + column, new Vector3(x, y, 0.02f), new Vector3(tileWidth * 0.82f, tileHeight * 0.78f, 0.04f), Darken(baseColor, shade));
+                    CreateShapeProp("2.5D 建筑体 " + name + " 顶视地砖 " + row + "-" + column, floorTile, new Vector3(x, y, 0.02f), new Vector3(tileWidth * 0.82f, tileHeight * 0.78f, 0.04f), Darken(baseColor, shade));
                 }
             }
         }
@@ -3601,7 +3660,7 @@ namespace GanglandUndercover.Online
 
             CreateShapeProp("2.5D 建筑体 " + room.Name + " 外舱轮廓", RoundedRectSprite, room.Center + new Vector3(0f, 0f, -0.1f), new Vector3(room.Size.x + 0.22f, room.Size.y + 0.22f, 0.08f), wall);
             CreateShapeProp("2.5D 建筑体 " + room.Name + " 圆角房间底", RoundedRectSprite, room.Center + new Vector3(0f, 0f, -0.07f), room.Size, Darken(room.Floor, 0.86f));
-            CreateShapeProp("2.5D 建筑体 " + room.Name + " 中央地板", RoundedRectSprite, room.Center + new Vector3(0f, 0f, -0.04f), new Vector3(room.Size.x * 0.9f, room.Size.y * 0.76f, 0.08f), room.Floor);
+            CreateTiledFloor("2.5D 建筑体 " + room.Name + " 中央地板", room.Center + new Vector3(0f, 0f, -0.04f), new Vector2(room.Size.x * 0.9f, room.Size.y * 0.76f), room.Floor, RoomFloorTile(room.Name), 1f);
             CreateRoomVolumeShell(room, wall, trim);
             CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 北厚墙", room.Center + new Vector3(0f, halfHeight - 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.North);
             CreateWallSegmentWithDoor("2.5D 建筑体 " + room.Name + " 南厚墙", room.Center + new Vector3(0f, -halfHeight + 0.06f, 0.16f), new Vector3(room.Size.x * 0.86f, 0.14f, 0.14f), wall, room.Entrance == OnlineMapService.MapEntrance.South);
