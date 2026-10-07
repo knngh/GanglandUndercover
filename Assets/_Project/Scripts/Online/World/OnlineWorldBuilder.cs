@@ -2519,6 +2519,7 @@ namespace GanglandUndercover.Online
             CreateVerticalSliceProductionLayer();
 
             CreateOperationalLightingLayer();
+            ApplyDecorationNoiseMutePass();
         }
 
         /// <summary>
@@ -2542,6 +2543,7 @@ namespace GanglandUndercover.Online
             CreateOfficialFreeAssetStoreLayer();
             CreateCommercialArtAdapterLayer();
             CreateVerticalSliceProductionLayer();
+            ApplyDecorationNoiseMutePass();
         }
 
         private void CreateOperationalLightingLayer()
@@ -2595,6 +2597,78 @@ namespace GanglandUndercover.Online
         {
             CreateShapeProp("行动照明 " + name, _roundedRectSprite, position, scale, color);
             _operationalLightingElementCount++;
+        }
+
+        // ── 批次 2b 装饰降噪 ──
+        // 普查依据（Editor/DistrictMapCensusTool，output/art_batch2b_census/）：
+        // 建图 sprite 约 3855 个，其中 3358 个是程序化色块（"Runtime " 开头的几何
+        // sprite），1393 个亮白/高饱和，噪声主力为垂直切片展示层的巨型取景框/
+        // 锚点 footprint、走廊导向线、道路弧线、巡逻导光条、警戒黄线、灯牌与
+        // 霓虹条。此 pass 只调颜色与透明度——几何、计数、名字、碰撞全部不动，
+        // smoke 密度断言与服务端权威布局零影响。仅覆盖 2D sprite 后端（生产唯一路径）。
+
+        /// <summary>饱和压缩系数：s≥0.5 的装饰色统一压到约 1/3 饱和。</summary>
+        private const float DecorationMuteSaturationScale = 0.3f;
+
+        /// <summary>明度压缩系数：高饱和装饰同步压暗，避免压缩后发灰发飘。</summary>
+        private const float DecorationMuteValueScale = 0.62f;
+
+        /// <summary>SoftCircle 大色块（取景框 footprint/语音半径/光洗）额外透明度系数。</summary>
+        private const float DecorationMuteWashAlphaScale = 0.38f;
+
+        /// <summary>小于该尺寸的彩色微件（状态灯点/座位点/霓虹小条）保留原色——城市生气不压。</summary>
+        private const float DecorationMuteMinDimension = 0.35f;
+
+        /// <summary>玩法指代色豁免：门禁/入口/任务/暗线等颜色编码不动。</summary>
+        private static readonly string[] DecorationMuteGameplayTokens =
+        {
+            "任务", "交互", "门禁", "门灯", "门牌", "警戒门", "卷闸门", "铁门", "入口", "暗线", "紧急铃"
+        };
+
+        private void ApplyDecorationNoiseMutePass()
+        {
+            if (_worldRoot == null) return;
+
+            foreach (SpriteRenderer spriteRenderer in _worldRoot.GetComponentsInChildren<SpriteRenderer>())
+            {
+                if (spriteRenderer == null || spriteRenderer.sprite == null) continue;
+
+                Texture2D spriteTexture = spriteRenderer.sprite.texture;
+                if (spriteTexture == null
+                    || spriteTexture.name.IndexOf("Runtime ", StringComparison.Ordinal) != 0)
+                {
+                    continue; // 只压程序化色块，LimeZu/atlas 实物贴图保持原样
+                }
+
+                string propName = spriteRenderer.gameObject.name;
+                bool gameplayCoded = false;
+                foreach (string token in DecorationMuteGameplayTokens)
+                {
+                    if (propName.IndexOf(token, StringComparison.Ordinal) >= 0)
+                    {
+                        gameplayCoded = true;
+                        break;
+                    }
+                }
+                if (gameplayCoded) continue;
+
+                Vector3 lossyScale = spriteRenderer.transform.lossyScale;
+                if (Mathf.Max(lossyScale.x, lossyScale.y) < DecorationMuteMinDimension) continue;
+
+                Color color = spriteRenderer.color;
+                float hue;
+                float saturation;
+                float value;
+                Color.RGBToHSV(color, out hue, out saturation, out value);
+                if (saturation < 0.5f || value < 0.35f) continue; // 只压高饱和彩件
+
+                float washAlphaScale = spriteTexture.name.IndexOf("Runtime Soft Circle", StringComparison.Ordinal) >= 0
+                    ? DecorationMuteWashAlphaScale
+                    : 1f;
+                Color muted = Color.HSVToRGB(hue, saturation * DecorationMuteSaturationScale, value * DecorationMuteValueScale);
+                muted.a = color.a * washAlphaScale;
+                spriteRenderer.color = muted;
+            }
         }
 
         // ── Private implementation ──
