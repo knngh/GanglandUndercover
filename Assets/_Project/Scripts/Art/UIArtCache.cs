@@ -22,6 +22,9 @@ namespace GanglandUndercover.Art
 
         // ── 基础组件 ──
         public static Sprite ButtonNormal { get; private set; }
+        public static Sprite ButtonHover { get; private set; }
+        public static Sprite ButtonPressed { get; private set; }
+        public static Sprite ButtonCooldown { get; private set; }
         public static Sprite ButtonRound { get; private set; }
         public static Sprite PanelFrame { get; private set; }
         public static Sprite ProgressBar { get; private set; }
@@ -65,6 +68,9 @@ namespace GanglandUndercover.Art
             // Runtime UI uses only reviewed, no-watermark assets. The larger generated
             // previews remain in the art workspace but are intentionally not loaded.
             ButtonNormal = Load("Buttons/button_noir_clean");
+            ButtonHover = Load("Buttons/buttonSquare_hover");
+            ButtonPressed = Load("Buttons/buttonSquare_pressed");
+            ButtonCooldown = Load("Buttons/buttonSquare_cooldown");
             ButtonRound = Load("Buttons/button_round_gloss");
             PanelFrame = Load("Panels/panel_noir_clean");
             ProgressBar = Load("ProgressBar/progress_clean");

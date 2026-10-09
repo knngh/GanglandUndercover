@@ -174,6 +174,10 @@ namespace GanglandUndercover.Online
         private Button compactReportButton;
         private Button compactKillButton;
         private Button compactAbilityButton;
+        private Image killCooldownFill;
+        private Image abilityCooldownFill;
+        private float killCooldownRunningMax;
+        private float abilityCooldownRunningMax;
         private Button compactMapButton;
         private Button compactIntelButton;
 
@@ -552,6 +556,10 @@ namespace GanglandUndercover.Online
             compactReportButton = null;
             compactKillButton = null;
             compactAbilityButton = null;
+            killCooldownFill = null;
+            abilityCooldownFill = null;
+            killCooldownRunningMax = 0f;
+            abilityCooldownRunningMax = 0f;
             compactMapButton = null;
             compactIntelButton = null;
             voteButtonRoot = null;
@@ -1182,8 +1190,10 @@ namespace GanglandUndercover.Online
 
             compactInteractButton = CreateCompactCommandButton("E\n互动", "Interact", commandBar, () => controller.RequestAction(OnlineActionType.Interact));
             compactReportButton = CreateCompactCommandButton("R\n报案", "Report", commandBar, () => controller.RequestAction(OnlineActionType.Report));
-            compactKillButton = CreateCompactCommandButton("Q\n击倒", "Kill", commandBar, () => controller.RequestAction(OnlineActionType.Kill));
-            compactAbilityButton = CreateCompactCommandButton("F\n技能", "Ability", commandBar, () => controller.RequestAction(OnlineActionType.Ability));
+            compactKillButton = CreateCompactCommandButton("Q\n击倒", "Kill", commandBar, () => controller.RequestAction(OnlineActionType.Kill), true);
+            killCooldownFill = FindCooldownFill(compactKillButton);
+            compactAbilityButton = CreateCompactCommandButton("F\n技能", "Ability", commandBar, () => controller.RequestAction(OnlineActionType.Ability), true);
+            abilityCooldownFill = FindCooldownFill(compactAbilityButton);
             compactMapButton = CreateCompactCommandButton("M\n地图", "Map", commandBar, () => controller.ToggleTacticalMap());
             compactIntelButton = CreateCompactCommandButton("I\n案情", "Intel", commandBar, () => controller.ToggleIntelBoard());
         }
@@ -1416,6 +1426,8 @@ namespace GanglandUndercover.Online
             compactReportButton.interactable = actionPlayable;
             compactKillButton.interactable = killPlayable;
             compactAbilityButton.interactable = actionPlayable && controller.LocalAbilityCooldown <= 0f;
+            UpdateCooldownFill(killCooldownFill, ref killCooldownRunningMax, controller.LocalKillCooldown);
+            UpdateCooldownFill(abilityCooldownFill, ref abilityCooldownRunningMax, controller.LocalAbilityCooldown);
             compactMapButton.interactable = controller.IsOnline;
             compactIntelButton.interactable = controller.IsOnline;
             chatSendButton.interactable = controller.CanSendChatNow
@@ -2709,10 +2721,42 @@ namespace GanglandUndercover.Online
             return button;
         }
 
-        private Button CreateCompactCommandButton(string label, string key, Transform parent, UnityEngine.Events.UnityAction onClick)
+        private Button CreateCompactCommandButton(string label, string key, Transform parent, UnityEngine.Events.UnityAction onClick, bool withCooldownFill = false)
         {
             Button button = CreateButton(label, parent, 64f, onClick);
             button.gameObject.name = "Compact Visual Command Slot " + key;
+
+            // 三态接线（批次 4 收尾）：hover/pressed 换专用 sprite，观感不依赖 tint
+            if (GanglandUndercover.Art.UIArtCache.ButtonHover != null
+                && GanglandUndercover.Art.UIArtCache.ButtonPressed != null)
+            {
+                button.transition = Selectable.Transition.SpriteSwap;
+                SpriteState spriteState = button.spriteState;
+                spriteState.highlightedSprite = GanglandUndercover.Art.UIArtCache.ButtonHover;
+                spriteState.pressedSprite = GanglandUndercover.Art.UIArtCache.ButtonPressed;
+                spriteState.disabledSprite = GanglandUndercover.Art.UIArtCache.ButtonCooldown;
+                button.spriteState = spriteState;
+            }
+
+            if (withCooldownFill)
+            {
+                GameObject fillObject = new GameObject("CooldownFill", typeof(RectTransform), typeof(Image));
+                fillObject.transform.SetParent(button.transform, false);
+                RectTransform fillRect = fillObject.GetComponent<RectTransform>();
+                fillRect.anchorMin = Vector2.zero;
+                fillRect.anchorMax = Vector2.one;
+                fillRect.offsetMin = Vector2.zero;
+                fillRect.offsetMax = Vector2.zero;
+                Image fill = fillObject.GetComponent<Image>();
+                fill.sprite = GanglandUndercover.Art.UIArtCache.ButtonCooldown;
+                fill.type = Image.Type.Filled;
+                fill.fillMethod = Image.FillMethod.Radial360;
+                fill.fillOrigin = (int)Image.Origin360.Bottom;
+                fill.fillClockwise = false;
+                fill.fillAmount = 0f;
+                fill.raycastTarget = false;
+                fillObject.transform.SetAsLastSibling();
+            }
             Text buttonText = button.GetComponentInChildren<Text>();
             if (buttonText != null)
             {
@@ -2752,6 +2796,38 @@ namespace GanglandUndercover.Online
             }
 
             return button;
+        }
+
+        private static Image FindCooldownFill(Button button)
+        {
+            Transform fill = button != null ? button.transform.Find("CooldownFill") : null;
+            return fill != null ? fill.GetComponent<Image>() : null;
+        }
+
+        /// <summary>冷却扇形刷新：runningMax 启发式跟踪本局冷却上限（进入新冷却时自动更新），不复制服务端缩放公式。</summary>
+        private static void UpdateCooldownFill(Image fill, ref float runningMax, float remainingSeconds)
+        {
+            if (fill == null)
+            {
+                return;
+            }
+
+            if (remainingSeconds > 0f)
+            {
+                if (remainingSeconds > runningMax)
+                {
+                    runningMax = remainingSeconds;
+                }
+
+                fill.gameObject.SetActive(true);
+                fill.fillAmount = Mathf.Clamp01(remainingSeconds / Mathf.Max(0.01f, runningMax));
+            }
+            else
+            {
+                runningMax = 0f;
+                fill.fillAmount = 0f;
+                fill.gameObject.SetActive(false);
+            }
         }
 
         private static void AttachHoverSfx(GameObject buttonObject)

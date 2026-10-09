@@ -121,7 +121,10 @@ namespace GanglandUndercover.Art
             if (BodyRenderer != null && bodySprite != null)
             {
                 BodyRenderer.sprite = bodySprite;
-                BodyRenderer.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
+                // 旧 64px 帧 × 0.8 的视觉基线；批次 3 换 48px 帧（PPU 未变）后等比补偿，
+                // 保持 0.512 世界单位的既有角色比例（style_lock v1.1 §2）。
+                const float bodyScale = 0.8f * 64f / 48f;
+                BodyRenderer.transform.localScale = new Vector3(bodyScale, bodyScale, 1f);
             }
 
             // 方向箭头跟随移动方向

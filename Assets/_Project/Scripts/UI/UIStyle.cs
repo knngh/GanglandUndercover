@@ -71,7 +71,19 @@ namespace GanglandUndercover.UI
                 Debug.Log("[UIStyle] Loaded KenneyFuture pixel font.");
 
             // 2. Load or create CJK font
-            _cjkFont = Resources.Load<Font>("Fonts/CJKPixelFallback");
+            // 优先随包分发的思源黑体 CN（SIL OFL，覆盖 GB 常用字），
+            // 保证 Windows 构建上中文不依赖系统字体（PingFang 仅 macOS 存在）。
+            _cjkFont = Resources.Load<Font>("Fonts/SourceHanSansCN-Regular");
+            if (_cjkFont != null)
+            {
+                Debug.Log("[UIStyle] Loaded Source Han Sans CN (bundled, SIL OFL).");
+            }
+
+            if (_cjkFont == null)
+            {
+                _cjkFont = Resources.Load<Font>("Fonts/CJKPixelFallback");
+            }
+
             if (_cjkFont == null)
             {
                 // Try system CJK fonts
