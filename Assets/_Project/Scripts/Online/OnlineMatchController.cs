@@ -35,6 +35,7 @@ namespace GanglandUndercover.Online
         private const string MoleTargetMessage = "GanglandMoleTarget";
         private const string ChatSendMessage = "GanglandChatSend";
         private const string ChatBroadcastMessage = "GanglandChatBroadcast";
+        private const string AbilityFeedbackMessage = "GanglandAbilityFeedback"; // P0-3
         private const string MapSelectMessage = "GanglandMapSelect"; // D5
         private const string WorldRootName = "Online Gangland Runtime Map v5";
         private const string QuaterniusFbxRoot = "Assets/_Project/Art/ThirdParty/Quaternius/ModularSciFiMegaKit/FBX/";
@@ -1952,6 +1953,8 @@ namespace GanglandUndercover.Online
                     {
                         player.PublicRole = OnlineRole.Police;
                         status = player.DisplayName + " 公开卧底身份，转为警方证人。";
+                        // 公开事件：全场可见（伪装破坏分支不广播——不能暴露卧底位置）
+                        EmitProfessionAbilityFeedback(senderClientId, "UndercoverBetray", new Color(1f, 0.86f, 0.24f, 1f), player.Position);
                     }
                     else if (!TrySabotageNearestTask(senderClientId, player, role))
                     {
@@ -1991,6 +1994,8 @@ namespace GanglandUndercover.Online
                         player.Position = FindNearestOpenPosition(player.Position + new Vector3(UnityEngine.Random.Range(-2.4f, 2.4f), UnityEngine.Random.Range(-1.8f, 1.8f), 0f), player.Position);
                         player.Suspicion += OnlineMatchUtils.IsGangSide(role) ? 1 : 0;
                         status = "后巷传来短暂动静。";
+                        // 反馈放在落点而非玩家位置：文案语义是"后巷动静"，不暴露 Driver 本人
+                        EmitProfessionAbilityFeedback(senderClientId, "BackAlleyShift", new Color(0.62f, 0.66f, 0.72f, 1f), player.Position);
                     }
 
                     break;
@@ -2018,6 +2023,8 @@ namespace GanglandUndercover.Online
                         player.AbilityCooldown = ruleSet.AbilityCooldownSeconds;
                         status = "内鬼暴露! " + player.DisplayName + "背叛了警方!";
                         AddCaseLog(status);
+                        // 公开事件：全场可见（暗中干扰分支不广播——不能暴露内鬼位置）
+                        EmitProfessionAbilityFeedback(senderClientId, "MoleBetray", new Color(1f, 0.3f, 0.24f, 1f), player.Position);
                         // Global chat message
                         chatSystem?.ReceiveMessage("system", "系统", "内鬼暴露! " + player.DisplayName + "背叛了警方!", false, Faction.Police, ChatChannel.Meeting);
                     }

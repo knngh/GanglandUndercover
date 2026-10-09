@@ -246,6 +246,13 @@ namespace GanglandUndercover.Online
                 worldBuilder.CreateAbilityFeedbackVisual(abilityKey, position, color);
 
             _lastProfessionAbilityFeedback = abilityKey;
+
+            // P0-3 能力反馈联网：服务端在本地视觉之外，把同一次反馈广播给远端客户端。
+            // Host 本地视觉已生成，消息只发非 Host 客户端（与 ChatBroadcast 同模式）。
+            if (networkManager != null && networkManager.IsServer)
+            {
+                BroadcastAbilityFeedback(clientId, abilityKey, color, position);
+            }
         }
 
         public bool CanClientWatchCamera(ulong clientId, Vector2 cameraCenter)
