@@ -1,6 +1,6 @@
 {
-  "source": "Gangland procedural profession sprites baked into CC0-compatible runtime paths",
-  "sprite_size": "64x64 movement/death, 32x32 avatar",
+  "source": "LimeZu Modern Interiors Character_Generator baked layers (Body+Eyes+Outfit+Hairstyle), licensed via purchased pack",
+  "sprite_size": "48x48 movement/death, 48x48 avatar",
   "frame_count": {
     "profession_count": 8,
     "directions_per_profession": 4,
@@ -26,13 +26,13 @@
   ],
   "runtime_note": "Sprite2DAssetCache uses idle, walk_0, walk_1, death, and avatar. walk_2 is kept for import parity and future animation expansion.",
   "profession_map": {
-    "Inspector": "Cop",
-    "Forensics": "Cop",
-    "Tech": "Cop",
-    "UndercoverAgent": "Triad",
-    "Enforcer": "Thug",
-    "Fixer": "Dealer",
-    "Driver": "Informant",
-    "Mole": "CorpSec"
+    "Inspector": "LimeZu Outfit_19/H04/Body_01",
+    "Forensics": "LimeZu Outfit_8/H15/Body_01",
+    "Tech": "LimeZu Outfit_16/H24/Body_01",
+    "UndercoverAgent": "LimeZu Outfit_28/H14/Body_02",
+    "Enforcer": "LimeZu Outfit_26/H11/Body_03",
+    "Fixer": "LimeZu Outfit_3/H23/Body_04",
+    "Driver": "LimeZu Outfit_23/H06/Body_05",
+    "Mole": "LimeZu Outfit_19/H04/Body_01 (mirror of Inspector)"
   }
 }

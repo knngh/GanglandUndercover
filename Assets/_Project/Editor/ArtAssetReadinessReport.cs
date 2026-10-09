@@ -19,10 +19,10 @@ namespace GanglandUndercover.Editor
         public const string ResourceRoot = "Assets/_Project/Resources";
         public const string SpriteRoot = SpriteResourceImportSettings.SpriteResourcesRoot;
         public const string WatermarkedReviewRoot = "Assets/_Project/Art/Review/WatermarkedRuntime";
-        public const int RequiredCharacterFrameWidth = 64;
-        public const int RequiredCharacterFrameHeight = 64;
-        public const int RequiredCharacterAvatarWidth = 32;
-        public const int RequiredCharacterAvatarHeight = 32;
+        public const int RequiredCharacterFrameWidth = 48;
+        public const int RequiredCharacterFrameHeight = 48;
+        public const int RequiredCharacterAvatarWidth = 48;
+        public const int RequiredCharacterAvatarHeight = 48;
 
         private static readonly string[] CharacterDirections =
         {

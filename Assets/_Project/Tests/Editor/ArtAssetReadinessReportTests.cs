@@ -14,7 +14,7 @@ namespace GanglandUndercover.Tests
             ArtAssetReadinessReport.Summary summary = ArtAssetReadinessReport.BuildSummary();
 
             Assert.IsTrue(summary.IsReady, ArtAssetReadinessReport.ToMarkdown(summary));
-            Assert.AreEqual(400, summary.RuntimeSpritePngCount);
+            Assert.AreEqual(448, summary.RuntimeSpritePngCount);
             Assert.AreEqual(summary.RuntimeSpritePngCount, summary.RuntimeSpriteMetaCount);
             Assert.AreEqual(0, summary.MisconfiguredSpriteImportCount);
             Assert.AreEqual(5, summary.RuntimeMapPropSpriteCount);
@@ -38,10 +38,10 @@ namespace GanglandUndercover.Tests
                 Assert.IsTrue(Sprite2DAssetCache.CharacterSets.TryGetValue(profession, out Sprite2DAssetCache.ProfSpriteSet set));
                 Assert.IsNotNull(set.Dead, profession + " must load a downed character sprite.");
                 Assert.IsNotNull(set.Avatar, profession + " must load a meeting avatar sprite.");
-                Assert.AreEqual(64, set.Dead.texture.width, profession + " downed sprite width.");
-                Assert.AreEqual(64, set.Dead.texture.height, profession + " downed sprite height.");
-                Assert.AreEqual(32, set.Avatar.texture.width, profession + " avatar sprite width.");
-                Assert.AreEqual(32, set.Avatar.texture.height, profession + " avatar sprite height.");
+                Assert.AreEqual(ArtAssetReadinessReport.RequiredCharacterFrameWidth, set.Dead.texture.width, profession + " downed sprite width.");
+                Assert.AreEqual(ArtAssetReadinessReport.RequiredCharacterFrameHeight, set.Dead.texture.height, profession + " downed sprite height.");
+                Assert.AreEqual(ArtAssetReadinessReport.RequiredCharacterAvatarWidth, set.Avatar.texture.width, profession + " avatar sprite width.");
+                Assert.AreEqual(ArtAssetReadinessReport.RequiredCharacterAvatarHeight, set.Avatar.texture.height, profession + " avatar sprite height.");
             }
         }
 
