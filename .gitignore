@@ -69,3 +69,6 @@ Assets/_Project/Resources/AssetStore/
 
 # Art noise census working output (evidence snapshots live in output/art_batch*_evidence/)
 output/art_batch*_census/
+
+# BGM/ambience bake 中间产物 wav（可再生；交付物 ogg 在 Resources/，压缩备份在 art_batch*_audio/）
+output/art_batch*_audio/*.wav
