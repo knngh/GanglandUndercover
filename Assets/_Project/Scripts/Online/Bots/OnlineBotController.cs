@@ -383,11 +383,13 @@ namespace GanglandUndercover.Online
             // ──  真黑帮：追杀 + 破坏 + 通风管 ──
             if (role == OnlineRole.Gang)
             {
-                // 击杀逻辑
+                // 击杀逻辑（P0-2 节奏修复：判定窗口从 BotInteractDistance 0.45 对齐
+                // 服务端 RuleSet.KillRange，与真人玩家同权；此前 0.45 窗口配合直线追踪
+                // 移动目标，4 人自然采样 20 分钟 0 杀）
                 if (_ctrl.TryGetKillCooldown(botId, out float kcd) && kcd <= 0f &&
                     _ctrl.TryFindNearestVictim(botId, bot.Position, out ulong victimId, out OnlinePlayerState victim))
                 {
-                    if (Vector3.Distance(bot.Position, victim.Position) < BotInteractDistance)
+                    if (Vector3.Distance(bot.Position, victim.Position) < _ctrl.RuleSet.KillRange)
                     {
                         PerformKill(botId, bot, victimId);
                         return;
@@ -422,7 +424,7 @@ namespace GanglandUndercover.Online
                 && _ctrl.TryGetKillCooldown(botId, out float moleCooldown)
                 && moleCooldown <= 0f
                 && _ctrl.TryFindNearestVictim(botId, bot.Position, out ulong moleVictimId, out OnlinePlayerState moleVictim)
-                && Vector3.Distance(bot.Position, moleVictim.Position) < BotInteractDistance)
+                && Vector3.Distance(bot.Position, moleVictim.Position) < _ctrl.RuleSet.KillRange)
             {
                 PerformKill(botId, bot, moleVictimId);
                 return;
@@ -446,18 +448,40 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            // 选择任务目标
-            _targets[botId] = PickEvidenceTarget(botId);
-
-            // 记录当前任务
-            foreach (var task in _ctrl.Tasks)
+            // 粘性任务目标（P0-2 节奏修复）：当前任务未完成时不换目标。
+            // 此前每次 think（1.2~3.4s）随机重选，bot 到达后平均 ~2.3s 即被改派，
+            // 2.5s 的任务进度被反复清零，自然采样任务率因此≈0。
+            bool keepCurrentTask = false;
+            if (_currentTaskId.TryGetValue(botId, out int stickyId) &&
+                stickyId >= 0 && stickyId < _ctrl.Tasks.Count)
             {
-                OnlineTaskState playerTask = _ctrl.TaskForPlayer(botId, task);
-                if (!playerTask.Completed && !playerTask.Sabotaged &&
-                    Vector3.Distance(playerTask.Position, _targets[botId]) < 0.01f)
+                OnlineTaskState sticky = _ctrl.TaskForPlayer(botId, _ctrl.Tasks[stickyId]);
+                if (!sticky.Completed && !sticky.Sabotaged && _ctrl.IsTaskVisibleToPlayer(botId, sticky))
                 {
-                    _currentTaskId[botId] = playerTask.Id;
-                    break;
+                    keepCurrentTask = true;
+                    _targets[botId] = sticky.Position;
+                }
+                else
+                {
+                    _currentTaskId.Remove(botId);
+                }
+            }
+
+            if (!keepCurrentTask)
+            {
+                // 选择任务目标
+                _targets[botId] = PickEvidenceTarget(botId);
+
+                // 记录当前任务
+                foreach (var task in _ctrl.Tasks)
+                {
+                    OnlineTaskState playerTask = _ctrl.TaskForPlayer(botId, task);
+                    if (!playerTask.Completed && !playerTask.Sabotaged &&
+                        Vector3.Distance(playerTask.Position, _targets[botId]) < 0.01f)
+                    {
+                        _currentTaskId[botId] = playerTask.Id;
+                        break;
+                    }
                 }
             }
         }
@@ -575,6 +599,8 @@ namespace GanglandUndercover.Online
                     if (stuckTimer > StuckTimeBeforeReroute)
                     {
                         _targets.Remove(botId);
+                        // 与粘性任务目标联动：卡墙放弃当前任务，避免 think 把目标设回原位死循环
+                        _currentTaskId.Remove(botId);
                         _stuckTimers[botId] = 0f;
                         bot.Input = Vector2.zero;
                         _ctrl.Players[botId] = bot;
