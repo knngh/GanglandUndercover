@@ -44,6 +44,11 @@ namespace GanglandUndercover.Online.Surveillance
         /// </summary>
         private HashSet<ulong> _watchingPlayers = new HashSet<ulong>();
 
+        /// <summary>服务器推送节流间隔（秒）。每帧 tick 只在计时到期时真正发 RPC。</summary>
+        private const float ServerPushInterval = 0.25f;
+
+        private float _serverPushTimer;
+
         private OnlineMatchController _controller;
 
         public void BindController(OnlineMatchController controller)
@@ -52,6 +57,11 @@ namespace GanglandUndercover.Online.Surveillance
         }
 
         public void ServerTick(IReadOnlyDictionary<ulong, OnlinePlayerState> players)
+        {
+            ServerTick(players, Time.deltaTime);
+        }
+
+        public void ServerTick(IReadOnlyDictionary<ulong, OnlinePlayerState> players, float deltaTime)
         {
             if (!IsServer) return;
 
@@ -66,6 +76,16 @@ namespace GanglandUndercover.Online.Surveillance
                     _visiblePlayers.Add(kv.Key);
                 }
             }
+
+            // 复审观看者合法性：会议阶段/死亡/普通玩家已离开范围则停止推送
+            // （HandleStartWatchingRequest 只在请求时校验一次，这里周期性兜底）。
+            _watchingPlayers.RemoveWhere(id => _controller == null || !_controller.CanClientWatchCamera(id, ZoneCenter));
+
+            if (_watchingPlayers.Count == 0) return;
+
+            _serverPushTimer -= Mathf.Max(0f, deltaTime);
+            if (_serverPushTimer > 0f) return;
+            _serverPushTimer = ServerPushInterval;
 
             // 推送给正在观看的客户端
             foreach (ulong watcherId in _watchingPlayers)

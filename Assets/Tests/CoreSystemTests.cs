@@ -4370,7 +4370,8 @@ namespace GanglandUndercover.Tests
                 Assert.IsTrue((bool)Invoke(controller, "EditorForceActionPreviewForSmokeTest"));
                 Assert.IsTrue(PropertyBool(controller, "CanvasHudLayoutComplete"));
                 Assert.IsTrue(PropertyBool(controller, "CompactActionHudActive"));
-                Assert.AreEqual(6, PropertyInt(controller, "CompactActionCommandSlotCount"));
+                // E互动 R报案 Q击倒 F技能 M地图 G拖尸 I案情 C监控 = 8
+                Assert.AreEqual(8, PropertyInt(controller, "CompactActionCommandSlotCount"));
                 Assert.GreaterOrEqual(PropertyInt(controller, "ChatPanelCanvasElementCount"), 3);
             }
             finally

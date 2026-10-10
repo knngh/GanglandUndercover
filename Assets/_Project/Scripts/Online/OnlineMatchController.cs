@@ -516,6 +516,7 @@ namespace GanglandUndercover.Online
         {
             MaintainFallbackAudioListener();
             TickProfessionAbilities(Time.deltaTime);
+            TickSurveillanceView(Time.deltaTime);
 
             if (Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.M))
             {
@@ -939,9 +940,21 @@ namespace GanglandUndercover.Online
                 SendClientAction(OnlineActionType.Ability);
                 actionCooldown = 0.45f;
             }
+            else if (Input.GetKeyDown(KeyCode.G))
+            {
+                // P0-3: Fixer BodyDrag 玩家入口（服务端 CanDragBody 校验，非 Fixer 无效）
+                RequestAction(OnlineActionType.Drag);
+                actionCooldown = 0.45f;
+            }
             else if (Input.GetKeyDown(KeyCode.V))
             {
                 SendClientAction(OnlineActionType.Vent);
+                actionCooldown = 0.35f;
+            }
+            else if (Input.GetKeyDown(KeyCode.C))
+            {
+                // P0-3: RemoteSurveillance 入口（Tech 远程/普通玩家贴机观看，服务端终审）
+                ToggleSurveillanceView();
                 actionCooldown = 0.35f;
             }
         }
@@ -1060,7 +1073,7 @@ namespace GanglandUndercover.Online
 
             TickMoleExposureCheck();
 
-            TickSurveillanceCameras();
+            TickSurveillanceCameras(deltaTime);
             TickCooldowns(deltaTime);
 
             serverSnapshotTimer -= deltaTime;
@@ -3439,7 +3452,7 @@ namespace GanglandUndercover.Online
             }
         }
 
-        private void TickSurveillanceCameras()
+        private void TickSurveillanceCameras(float deltaTime)
         {
             if (surveillanceCameras.Count == 0)
             {
@@ -3450,7 +3463,7 @@ namespace GanglandUndercover.Online
             {
                 if (camera != null)
                 {
-                    camera.ServerTick(players);
+                    camera.ServerTick(players, deltaTime);
                 }
             }
         }

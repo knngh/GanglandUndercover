@@ -1278,8 +1278,8 @@ namespace GanglandUndercover.Online
         /// <summary>解除所有房间封锁。</summary>
         private void UnlockAllRooms() => _lockedRoomIndices.Clear();
 
-        /// <summary>Blackout 视野缩小倍数。</summary>
-        public float BlackoutVisionMultiplier => _blackoutVisionReduced && !IsDarkVisionActive(LocalClientId()) ? 0.4f : 1f;
+        /// <summary>Blackout 视野缩小倍数。（P0-3: 改用 LocalDarkVisionActive，客户端经快照镜像同样成立）</summary>
+        public float BlackoutVisionMultiplier => _blackoutVisionReduced && !LocalDarkVisionActive ? 0.4f : 1f;
 
         /// <summary>Blackout 交互范围倍率。</summary>
         public float BlackoutInteractionMultiplier => _blackoutInteractionHalved ? 0.5f : 1f;

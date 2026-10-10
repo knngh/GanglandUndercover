@@ -6,6 +6,7 @@ using GanglandUndercover;
 using GanglandUndercover.Core;
 using GanglandUndercover.Online;
 using GanglandUndercover.Gameplay;
+using GanglandUndercover.Online.Surveillance;
 
 namespace GanglandUndercover.Online
 {
@@ -1263,6 +1264,63 @@ namespace GanglandUndercover.Online
             }
 
             DrawRoleAbilityMeter();
+
+            if (surveillanceViewOpen)
+            {
+                DrawSurveillanceFallbackPanel();
+            }
+        }
+
+        // --- DrawSurveillanceFallbackPanel (P0-3: 编辑器 OnGUI 回退，正式 UI 在 Canvas HUD) ---
+        private void DrawSurveillanceFallbackPanel()
+        {
+            float width = Mathf.Clamp(Screen.width * 0.3f, 320f, 460f);
+            Rect rect = new Rect(Screen.width - width - 18f, 156f, width, 236f);
+            GUILayout.BeginArea(rect, GUI.skin.box);
+            GUILayout.Label("监控终端 (C 关闭)");
+
+            if (watchedCamera != null)
+            {
+                GUILayout.Label("当前: " + watchedCamera.CameraLabel);
+
+                if (SurveillanceDataAge > 1f)
+                {
+                    GUILayout.Label("信号中断（离开范围或权限失效）…");
+                }
+                else
+                {
+                    GUILayout.Label("视野内 " + lastSurveillanceData.Length + " 人");
+                    for (int i = 0; i < lastSurveillanceData.Length; i++)
+                    {
+                        var entry = lastSurveillanceData[i];
+                        string name = players.TryGetValue((ulong)entry.ClientId, out OnlinePlayerState state) ? state.DisplayName : ("Client " + entry.ClientId);
+                        GUILayout.Label((entry.IsSuspicious ? "⚠ " : "· ") + name);
+                    }
+                }
+            }
+            else
+            {
+                GUILayout.Label("未选择摄像头。");
+            }
+
+            if (GUILayout.Button("切换下一台"))
+            {
+                SwitchToNextSurveillanceCamera();
+            }
+
+            GUILayout.EndArea();
+        }
+
+        private void SwitchToNextSurveillanceCamera()
+        {
+            if (clientCameras.Count == 0)
+            {
+                return;
+            }
+
+            int currentIndex = watchedCamera != null ? clientCameras.IndexOf(watchedCamera) : -1;
+            OnlineSecurityCamera next = clientCameras[(currentIndex + 1) % clientCameras.Count];
+            WatchSurveillanceCamera(next);
         }
 
         // --- DrawRoleAbilityMeter (moved from main controller) ---

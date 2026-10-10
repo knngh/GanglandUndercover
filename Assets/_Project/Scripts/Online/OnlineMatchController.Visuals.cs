@@ -181,8 +181,10 @@ namespace GanglandUndercover.Online
         // --- ConfigureMainCamera ---
         private void ConfigureMainCamera()
         {
+            // P0-3: Enforcer 暗视豁免黑灯收缩——权威字典只在服务端，客户端经快照镜像感知
+            float effectiveBlackoutTimer = LocalDarkVisionActive ? 0f : taskService.BlackoutTimer;
             _cameraRig.Configure(phase, tacticalMapOpen, activeTaskId,
-                taskService.BlackoutTimer, players, LocalClientId(), localPosition);
+                effectiveBlackoutTimer, players, LocalClientId(), localPosition);
         }
 
         // --- UpdateWorldVisuals ---

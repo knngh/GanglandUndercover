@@ -1323,6 +1323,13 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            if (actionType == OnlineActionType.Drag)
+            {
+                // P0-3: Fixer BodyDrag 玩家入口（内部含 CanDragBody 职业校验）
+                TryDragNearbyBodyToSelf(senderClientId, player);
+                return;
+            }
+
             if (actionType == OnlineActionType.Interact)
             {
                 TryInteractWithTask(senderClientId, player);
@@ -1550,12 +1557,16 @@ namespace GanglandUndercover.Online
                 float killCooldown = killSystem.killCooldowns.TryGetValue(state.ClientId, out float cooldown) ? cooldown : 0f;
                 float abilityCooldown = abilityCooldowns.TryGetValue(state.ClientId, out float abilityCooldownValue) ? abilityCooldownValue : 0f;
                 float ventCooldown = ventCooldowns.TryGetValue(state.ClientId, out float ventCooldownValue) ? ventCooldownValue : 0f;
+                float darkVisionRemaining = IsDarkVisionActive(state.ClientId)
+                    && _darkVisionRemaining.TryGetValue(state.ClientId, out float darkVisionValue)
+                        ? darkVisionValue
+                        : 0f;
                 OnlinePlayerState broadcastState = state;
                 if (phase != OnlineMatchPhase.Result)
                 {
                     broadcastState.Profession = OnlineMatchUtils.PublicProfessionFor(state.PublicRole);
                 }
-                SnapshotIO.WritePlayerBroadcast(writer, broadcastState, killCooldown, abilityCooldown, ventCooldown);
+                SnapshotIO.WritePlayerBroadcast(writer, broadcastState, killCooldown, abilityCooldown, ventCooldown, darkVisionRemaining);
             }
 
             SnapshotIO.WriteTasks(writer, tasks);
@@ -1646,7 +1657,8 @@ namespace GanglandUndercover.Online
                     out ulong clientId, out string displayName, out Vector3 position,
                     out bool ready, out bool alive, out bool isBot,
                     out int roleValue, out int professionValue,
-                    out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown);
+                    out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown,
+                    out float darkVisionRemaining);
                 OnlineRole publicRole = ToDefinedOnlineRole(roleValue);
                 OnlineProfession profession = ToDefinedOnlineProfession(professionValue);
                 if (clientId == LocalClientId() && localRole != OnlineRole.Unassigned)
@@ -1676,6 +1688,8 @@ namespace GanglandUndercover.Online
                 {
                     hasSnapshotLocalPosition = true;
                     snapshotLocalPosition = position;
+                    // P0-3: DarkVision 客户端镜像——权威字典只在服务端存在，纯客户端靠快照感知
+                    _localDarkVisionRemainingFromSnapshot = darkVisionRemaining;
                 }
             }
 

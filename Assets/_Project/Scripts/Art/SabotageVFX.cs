@@ -195,7 +195,8 @@ namespace GanglandUndercover.Art
         {
             if (_ctrl == null) return;
 
-            bool blackout    = _ctrl.BlackoutTimer > 0f;
+            // P0-3: Enforcer 暗视豁免停电遮罩（客户端经快照镜像感知 DarkVision）
+            bool blackout    = _ctrl.BlackoutTimer > 0f && !_ctrl.LocalDarkVisionActive;
             bool lockdown    = _ctrl.LockdownTimer > 0f;
             bool commJam     = _ctrl.CommunicationJamTimer > 0f;
             bool evidenceLeak= _ctrl.EvidenceLeakTimer > 0f;

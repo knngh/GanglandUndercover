@@ -3,6 +3,7 @@ using System.Text;
 using GanglandUndercover.Art;
 using GanglandUndercover.Audio;
 using GanglandUndercover.Core;
+using GanglandUndercover.Online.Surveillance;
 using GanglandUndercover.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -179,7 +180,19 @@ namespace GanglandUndercover.Online
         private float killCooldownRunningMax;
         private float abilityCooldownRunningMax;
         private Button compactMapButton;
+        private Button compactDragButton;
         private Button compactIntelButton;
+        private Button compactSurveillanceButton;
+
+        private GameObject surveillanceOverlay;
+        private Transform surveillanceCameraRow;
+        private RectTransform surveillanceMarkerRoot;
+        private Text surveillanceTitleText;
+        private Text surveillanceStatusText;
+        private readonly List<GameObject> surveillanceMarkers = new List<GameObject>();
+        private readonly List<GameObject> surveillanceCameraButtons = new List<GameObject>();
+        private float nextSurveillanceRefreshTime;
+        private int lastSurveillanceCameraCount = -1;
 
         private Transform voteButtonRoot;
 
@@ -412,6 +425,8 @@ namespace GanglandUndercover.Online
                 && compactAbilityButton != null
                 && compactMapButton != null
                 && compactIntelButton != null
+                && compactSurveillanceButton != null
+                && surveillanceOverlay != null
                 && voteButtonRoot != null;
         }
 
@@ -419,6 +434,8 @@ namespace GanglandUndercover.Online
         {
             ClearGameObjects(voteButtons);
             ClearGameObjects(mapMarkers);
+            ClearGameObjects(surveillanceMarkers);
+            ClearGameObjects(surveillanceCameraButtons);
 
             for (int i = transform.childCount - 1; i >= 0; i--)
             {
@@ -460,6 +477,13 @@ namespace GanglandUndercover.Online
             resultOverlay = null;
             taskOverlay = null;
             mapOverlay = null;
+            surveillanceOverlay = null;
+            surveillanceCameraRow = null;
+            surveillanceMarkerRoot = null;
+            surveillanceTitleText = null;
+            surveillanceStatusText = null;
+            nextSurveillanceRefreshTime = 0f;
+            lastSurveillanceCameraCount = -1;
             compactActionHud = null;
             criticalTaskBanner = null;
             chatGroup = null;
@@ -561,7 +585,9 @@ namespace GanglandUndercover.Online
             killCooldownRunningMax = 0f;
             abilityCooldownRunningMax = 0f;
             compactMapButton = null;
+            compactDragButton = null;
             compactIntelButton = null;
+            compactSurveillanceButton = null;
             voteButtonRoot = null;
         }
 
@@ -677,6 +703,7 @@ namespace GanglandUndercover.Online
             BuildResultOverlay();
             BuildTaskOverlay();
             BuildCompactActionHud();
+            BuildSurveillanceOverlay();
         }
 
         private void BuildLeftDock(Transform leftDock)
@@ -1195,7 +1222,9 @@ namespace GanglandUndercover.Online
             compactAbilityButton = CreateCompactCommandButton("F\n技能", "Ability", commandBar, () => controller.RequestAction(OnlineActionType.Ability), true);
             abilityCooldownFill = FindCooldownFill(compactAbilityButton);
             compactMapButton = CreateCompactCommandButton("M\n地图", "Map", commandBar, () => controller.ToggleTacticalMap());
+            compactDragButton = CreateCompactCommandButton("G\n拖尸", "Drag", commandBar, () => controller.RequestAction(OnlineActionType.Drag));
             compactIntelButton = CreateCompactCommandButton("I\n案情", "Intel", commandBar, () => controller.ToggleIntelBoard());
+            compactSurveillanceButton = CreateCompactCommandButton("C\n监控", "Surveillance", commandBar, () => controller.ToggleSurveillanceView());
         }
 
         private void BuildMapOverlay()
@@ -1238,6 +1267,166 @@ namespace GanglandUndercover.Online
             Transform closeRow = CreateButtonRow(modal, 42f);
             CreateButton("收起大地图", closeRow, 42f, () => controller.ToggleTacticalMap());
             _ = mapRect;
+        }
+
+        // --- P0-3: RemoteSurveillance Canvas 面板（Tech 远程/贴机观看） ---
+        private void BuildSurveillanceOverlay()
+        {
+            surveillanceOverlay = CreatePanel("Surveillance Overlay", transform, new Color(0.004f, 0.006f, 0.008f, 0.62f));
+            Stretch(surveillanceOverlay.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+
+            Transform modal = CreateVerticalPanel(
+                "Surveillance Panel",
+                surveillanceOverlay.transform,
+                new Color(0.028f, 0.038f, 0.042f, 0.98f),
+                new Vector2(0.30f, 0.16f),
+                new Vector2(0.95f, 0.88f),
+                new RectOffset(18, 18, 14, 14),
+                8f);
+
+            surveillanceTitleText = CreateText("Surveillance Title", modal, 20, TextAnchor.MiddleLeft, TextColor);
+            surveillanceTitleText.text = "监控终端";
+            AddLayout(surveillanceTitleText.gameObject, 30f, 0f, 0f);
+
+            // 摄像头切换行（按钮按 ClientCameras 动态重建）
+            Transform cameraRow = CreateHorizontalPanel(
+                "Surveillance Camera Row",
+                modal,
+                new Color(0.02f, 0.028f, 0.032f, 0.9f),
+                Vector2.zero,
+                Vector2.one,
+                new RectOffset(6, 6, 6, 6),
+                6f);
+            surveillanceCameraRow = cameraRow.transform;
+
+            GameObject viewObject = CreatePanel("Surveillance View Board", modal, new Color(0.016f, 0.022f, 0.024f, 1f));
+            AddLayout(viewObject, 0f, 0f, 1f, 1f);
+
+            GameObject markerRootObject = new GameObject("Surveillance Markers", typeof(RectTransform));
+            markerRootObject.transform.SetParent(viewObject.transform, false);
+            surveillanceMarkerRoot = markerRootObject.GetComponent<RectTransform>();
+            Stretch(surveillanceMarkerRoot, Vector2.zero, Vector2.one, new Vector2(12f, 12f), new Vector2(-12f, -12f));
+
+            surveillanceStatusText = CreateText("Surveillance Status", modal, 13, TextAnchor.MiddleLeft, MutedTextColor);
+            AddLayout(surveillanceStatusText.gameObject, 24f, 0f, 0f);
+
+            Transform closeButtonRow = CreateButtonRow(modal, 38f);
+            CreateButton("关闭监控 (C)", closeButtonRow, 38f, () => controller.CloseSurveillanceView());
+        }
+
+        private void RefreshSurveillancePanel()
+        {
+            if (Time.unscaledTime < nextSurveillanceRefreshTime)
+            {
+                return;
+            }
+
+            nextSurveillanceRefreshTime = Time.unscaledTime + 0.2f;
+
+            var camera = controller.WatchedCamera;
+            if (camera == null)
+            {
+                surveillanceStatusText.text = "未选择摄像头。";
+                return;
+            }
+
+            surveillanceTitleText.text = "监控终端 | " + camera.CameraLabel;
+
+            RebuildSurveillanceCameraButtons();
+
+            ClearGameObjects(surveillanceMarkers);
+
+            var data = controller.LastSurveillanceData;
+            if (controller.SurveillanceDataAge > 1f)
+            {
+                surveillanceStatusText.text = "信号中断（离开范围或权限失效）… C 关闭";
+                return;
+            }
+
+            int suspicious = 0;
+            for (int i = 0; i < data.Count; i++)
+            {
+                VisiblePlayerData entry = data[i];
+                if (entry.IsSuspicious)
+                {
+                    suspicious++;
+                }
+
+                AddSurveillanceMarker(camera, entry);
+            }
+
+            surveillanceStatusText.text = "视野内 " + data.Count + " 人"
+                + (suspicious > 0 ? " | 可疑目标 " + suspicious : string.Empty)
+                + " | 服务端 0.25s 一推 | C 关闭";
+        }
+
+        private void RebuildSurveillanceCameraButtons()
+        {
+            var cameras = controller.ClientCameras;
+            if (cameras.Count == lastSurveillanceCameraCount)
+            {
+                return;
+            }
+
+            lastSurveillanceCameraCount = cameras.Count;
+            ClearGameObjects(surveillanceCameraButtons);
+
+            var current = controller.WatchedCamera;
+            for (int i = 0; i < cameras.Count; i++)
+            {
+                OnlineSecurityCamera candidate = cameras[i];
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                bool isActive = candidate == current;
+                OnlineSecurityCamera captured = candidate;
+                Button cameraButton = CreateButton(
+                    (isActive ? "▶ " : string.Empty) + ShortLabel(candidate.CameraLabel, 8),
+                    surveillanceCameraRow,
+                    34f,
+                    () => controller.WatchSurveillanceCamera(captured));
+                surveillanceCameraButtons.Add(cameraButton.gameObject);
+            }
+        }
+
+        private void AddSurveillanceMarker(OnlineSecurityCamera camera, VisiblePlayerData entry)
+        {
+            GameObject marker = CreatePanel("Surveillance Marker", surveillanceMarkerRoot, entry.IsSuspicious ? RedAccent : new Color(0.92f, 0.9f, 0.48f, 1f));
+            RectTransform markerRect = marker.GetComponent<RectTransform>();
+            Vector2 anchor = SurveillanceZoneToViewAnchor(camera, new Vector2(entry.PositionX, entry.PositionY));
+            markerRect.anchorMin = anchor;
+            markerRect.anchorMax = anchor;
+            markerRect.pivot = new Vector2(0.5f, 0.5f);
+            markerRect.sizeDelta = new Vector2(14f, 14f);
+            markerRect.anchoredPosition = Vector2.zero;
+
+            string label = entry.ClientId.ToString();
+            OnlinePlayerState state;
+            if (controller.Players.TryGetValue((ulong)entry.ClientId, out state))
+            {
+                label = ShortLabel(state.DisplayName, 4);
+            }
+
+            Text markerLabel = CreateText("Label", marker.transform, 11, TextAnchor.MiddleLeft, TextColor);
+            markerLabel.text = (entry.IsSuspicious ? "⚠ " : string.Empty) + label;
+            RectTransform labelRect = markerLabel.GetComponent<RectTransform>();
+            labelRect.anchorMin = new Vector2(1f, 0.5f);
+            labelRect.anchorMax = new Vector2(1f, 0.5f);
+            labelRect.pivot = new Vector2(0f, 0.5f);
+            labelRect.sizeDelta = new Vector2(96f, 18f);
+            labelRect.anchoredPosition = new Vector2(4f, 0f);
+            surveillanceMarkers.Add(marker);
+        }
+
+        private static Vector2 SurveillanceZoneToViewAnchor(OnlineSecurityCamera camera, Vector2 worldPosition)
+        {
+            Vector2 min = camera.ZoneCenter - camera.ZoneSize * 0.5f;
+            Vector2 size = camera.ZoneSize;
+            float x = (worldPosition.x - min.x) / Mathf.Max(0.01f, size.x);
+            float y = (worldPosition.y - min.y) / Mathf.Max(0.01f, size.y);
+            return new Vector2(Mathf.Clamp01(x), Mathf.Clamp01(y));
         }
 
         private void Refresh(bool force)
@@ -1288,6 +1477,7 @@ namespace GanglandUndercover.Online
             resultOverlay.SetActive(online && phase == OnlineMatchPhase.Result);
             taskOverlay.SetActive(controller.LocalTaskInputGateActive);
             mapOverlay.SetActive(online && phase == OnlineMatchPhase.Action && controller.TacticalMapOpen);
+            surveillanceOverlay.SetActive(online && phase == OnlineMatchPhase.Action && controller.SurveillanceViewOpen);
 
             RefreshInputs();
             RefreshButtons();
@@ -1302,6 +1492,11 @@ namespace GanglandUndercover.Online
             if (mapOverlay.activeSelf)
             {
                 RefreshMapMarkers();
+            }
+
+            if (surveillanceOverlay.activeSelf)
+            {
+                RefreshSurveillancePanel();
             }
         }
 
@@ -1429,7 +1624,13 @@ namespace GanglandUndercover.Online
             UpdateCooldownFill(killCooldownFill, ref killCooldownRunningMax, controller.LocalKillCooldown);
             UpdateCooldownFill(abilityCooldownFill, ref abilityCooldownRunningMax, controller.LocalAbilityCooldown);
             compactMapButton.interactable = controller.IsOnline;
+            // P0-3: Fixer BodyDrag 入口——服务端 CanDragBody 再校验，这里只按本地已知职业放行
+            compactDragButton.interactable = actionPlayable
+                && controller.CanDragBody(controller.LocalClientIdValue);
             compactIntelButton.interactable = controller.IsOnline;
+            // P0-3: 监控入口——非 Tech 玩家按钮不精确置灰（避免每帧扫描场景），
+            // 点开时由 CanLocalOpenSurveillance 判定并给出 status 提示。
+            compactSurveillanceButton.interactable = actionPlayable;
             chatSendButton.interactable = controller.CanSendChatNow
                 && chatInput != null
                 && !string.IsNullOrWhiteSpace(chatInput.text);

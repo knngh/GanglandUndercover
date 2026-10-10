@@ -45,6 +45,9 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<ulong, float> _repairProgress = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, float> _ventCooldowns = new Dictionary<ulong, float>();
         private readonly Dictionary<ulong, int> _currentTaskId = new Dictionary<ulong, int>();
+        // P0-2 房间中转导航：卡墙时先经房间中心走房间网络；同一目标最多中转 2 次
+        private readonly Dictionary<ulong, Vector3> _waypoints = new Dictionary<ulong, Vector3>();
+        private readonly Dictionary<ulong, int> _relayCounts = new Dictionary<ulong, int>();
         private int _completedTaskCount;
 
         // ── 控制器引用 ──
@@ -206,6 +209,8 @@ namespace GanglandUndercover.Online
             _repairProgress.Clear();
             _ventCooldowns.Clear();
             _currentTaskId.Clear();
+            _waypoints.Clear();
+            _relayCounts.Clear();
             _completedTaskCount = 0;
         }
 
@@ -469,7 +474,9 @@ namespace GanglandUndercover.Online
 
             if (!keepCurrentTask)
             {
-                // 选择任务目标
+                // 选择任务目标（新目标作废旧中转路点）
+                _waypoints.Remove(botId);
+                _relayCounts.Remove(botId);
                 _targets[botId] = PickEvidenceTarget(botId);
 
                 // 记录当前任务
@@ -598,10 +605,31 @@ namespace GanglandUndercover.Online
                     stuckTimer += Time.deltaTime;
                     if (stuckTimer > StuckTimeBeforeReroute)
                     {
+                        _stuckTimers[botId] = 0f;
+                        Vector3 stuckTarget = _targets.TryGetValue(botId, out Vector3 originalTarget)
+                            ? originalTarget
+                            : bot.Position;
+
+                        // P0-2: 直线移动无寻路，卡墙时先经房间中心中转（走房间网络而非穿墙）。
+                        // 同一目标最多中转 2 次，超过视为不可达 → 放弃换目标。
+                        int relays = _relayCounts.TryGetValue(botId, out int rc) ? rc : 0;
+                        Vector3? relay = FindNearestRoomRelay(bot.Position, stuckTarget);
+                        bool relayUsable = relay.HasValue
+                            && Vector3.Distance(bot.Position, relay.Value) > 0.6f
+                            && relays < 2;
+                        if (relayUsable)
+                        {
+                            _waypoints[botId] = relay.Value;
+                            _relayCounts[botId] = relays + 1;
+                            _ctrl.Players[botId] = bot;
+                            return;
+                        }
+
                         _targets.Remove(botId);
                         // 与粘性任务目标联动：卡墙放弃当前任务，避免 think 把目标设回原位死循环
                         _currentTaskId.Remove(botId);
-                        _stuckTimers[botId] = 0f;
+                        _waypoints.Remove(botId);
+                        _relayCounts.Remove(botId);
                         bot.Input = Vector2.zero;
                         _ctrl.Players[botId] = bot;
                         return;
@@ -617,6 +645,25 @@ namespace GanglandUndercover.Online
             if (!_stuckTimers.ContainsKey(botId)) _stuckTimers[botId] = 0f;
 
             Vector3 target = _targets.TryGetValue(botId, out Vector3 t) ? t : bot.Position;
+
+            // P0-2: 中转路点优先——卡墙后先去房间中心，到达后再走原目标
+            if (_waypoints.TryGetValue(botId, out Vector3 waypoint))
+            {
+                if (Vector3.Distance(bot.Position, waypoint) <= BotInteractDistance)
+                {
+                    _waypoints.Remove(botId);
+                }
+                else
+                {
+                    target = waypoint;
+                }
+            }
+            else if (_targets.ContainsKey(botId) && Vector3.Distance(bot.Position, target) <= BotInteractDistance)
+            {
+                // 到达最终目标：清中转计数，为下一个目标重置
+                _relayCounts.Remove(botId);
+            }
+
             Vector3 delta = target - bot.Position;
             Vector2 direction = new Vector2(delta.x, delta.y);
 
@@ -645,6 +692,42 @@ namespace GanglandUndercover.Online
             if (abs?.HasAbility(AbilityType.TaskSpeedBonus) == true)
                 return abs.Value.GetMultiplier(AbilityType.TaskSpeedBonus);
             return 1f;
+        }
+
+        /// <summary>
+        /// P0-2: 选一个卡墙中转用的房间中心——不选脚下的（<1 单位）和太远的（>12 单位），
+        /// 按"离目标近优先、离自己近微加成"打分。走房间网络绕开直线穿不过的墙。
+        /// </summary>
+        private Vector3? FindNearestRoomRelay(Vector3 position, Vector3 target)
+        {
+            OnlineMapService.OnlineMapType mapType = _ctrl.MapService.ActiveMapType;
+            OnlineMapService.ShipRoomSpec[] rooms = mapType switch
+            {
+                OnlineMapService.OnlineMapType.PoliceStation => _ctrl.MapService.PoliceStationRooms(),
+                OnlineMapService.OnlineMapType.KowloonWalledCity => _ctrl.MapService.KowloonWalledCityRooms(),
+                _ => _ctrl.MapService.HarbourDistrictRooms(),
+            };
+
+            Vector3? best = null;
+            float bestScore = float.MaxValue;
+            foreach (OnlineMapService.ShipRoomSpec room in rooms)
+            {
+                Vector3 center = room.Center;
+                float distToSelf = Vector3.Distance(center, position);
+                if (distToSelf < 1.0f || distToSelf > 12f)
+                {
+                    continue;
+                }
+
+                float score = Vector3.Distance(center, target) - 0.3f * distToSelf;
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = center;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>

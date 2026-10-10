@@ -281,7 +281,7 @@ namespace GanglandUndercover.Online
         //           KillCooldown, AbilityCooldown, VentCooldown
 
         public static void WritePlayerBroadcast(FastBufferWriter writer, OnlinePlayerState state,
-            float killCooldown, float abilityCooldown, float ventCooldown)
+            float killCooldown, float abilityCooldown, float ventCooldown, float darkVisionRemaining)
         {
             writer.WriteValueSafe(state.ClientId);
             writer.WriteValueSafe(state.DisplayName);
@@ -295,6 +295,7 @@ namespace GanglandUndercover.Online
             writer.WriteValueSafe(killCooldown);
             writer.WriteValueSafe(abilityCooldown);
             writer.WriteValueSafe(ventCooldown);
+            writer.WriteValueSafe(darkVisionRemaining);
         }
 
         /// <summary>读取玩家（Broadcast 格式）。返回原始值，enum 校验由调用方负责。</summary>
@@ -302,7 +303,8 @@ namespace GanglandUndercover.Online
             out ulong clientId, out string displayName, out Vector3 position,
             out bool ready, out bool alive, out bool isBot,
             out int roleValue, out int professionValue,
-            out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown)
+            out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown,
+            out float darkVisionRemaining)
         {
             reader.ReadValueSafe(out clientId);
             reader.ReadValueSafe(out displayName);
@@ -316,6 +318,7 @@ namespace GanglandUndercover.Online
             reader.ReadValueSafe(out killCooldown);
             reader.ReadValueSafe(out abilityCooldown);
             reader.ReadValueSafe(out ventCooldown);
+            reader.ReadValueSafe(out darkVisionRemaining);
         }
 
         // ─── Player (Migration 格式) ─────────────────────────────

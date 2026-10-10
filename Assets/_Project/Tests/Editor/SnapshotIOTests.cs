@@ -254,7 +254,7 @@ namespace GanglandUndercover.Tests
 
             using (var writer = CreateWriter())
             {
-                SnapshotIO.WritePlayerBroadcast(writer, state, 12.5f, 8.0f, 3.2f);
+                SnapshotIO.WritePlayerBroadcast(writer, state, 12.5f, 8.0f, 3.2f, 4.5f);
 
                 using (var reader = new FastBufferReader(writer, Allocator.Temp))
                 {
@@ -262,7 +262,8 @@ namespace GanglandUndercover.Tests
                         out ulong clientId, out string displayName, out Vector3 position,
                         out bool ready, out bool alive, out bool isBot,
                         out int roleValue, out int professionValue,
-                        out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown);
+                        out int suspicion, out float killCooldown, out float abilityCooldown, out float ventCooldown,
+                        out float darkVisionRemaining);
 
                     Assert.AreEqual(42UL, clientId);
                     Assert.AreEqual("测试玩家", displayName);
@@ -276,6 +277,7 @@ namespace GanglandUndercover.Tests
                     Assert.AreEqual(12.5f, killCooldown, 0.001f);
                     Assert.AreEqual(8.0f, abilityCooldown, 0.001f);
                     Assert.AreEqual(3.2f, ventCooldown, 0.001f);
+                    Assert.AreEqual(4.5f, darkVisionRemaining, 0.001f);
                 }
             }
         }

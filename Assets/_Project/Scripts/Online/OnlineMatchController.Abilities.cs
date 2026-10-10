@@ -19,6 +19,9 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<ulong, float> _darkVisionRemaining = new Dictionary<ulong, float>();
         private const float DarkVisionDurationSeconds = 6f;
 
+        /// <summary>本地玩家 DarkVision 剩余时间（客户端快照镜像；服务端直接读权威字典）</summary>
+        private float _localDarkVisionRemainingFromSnapshot;
+
         /// <summary>尸体检验累积（Forensics CorpseExamine）</summary>
         private readonly Dictionary<ulong, int> _corpseExamineBonus = new Dictionary<ulong, int>();
 
@@ -88,11 +91,56 @@ namespace GanglandUndercover.Online
             return false;
         }
 
+        /// <summary>
+        /// 玩家 BodyDrag 入口（P0-3 接线）：把身边 1.5 内最近未报案尸体拽到自己脚下。
+        /// 刻意不发任何反馈消息/状态文本——拖尸是隐蔽行为，不能暴露 Fixer 位置；
+        /// 尸体位置经快照 bodies 自动同步到所有端。
+        /// </summary>
+        internal bool TryDragNearbyBodyToSelf(ulong clientId, OnlinePlayerState player)
+        {
+            if (!CanDragBody(clientId) || killSystem == null || !player.Alive)
+            {
+                return false;
+            }
+
+            var bodies = killSystem.bodies;
+            int best = -1;
+            float bestDist = 1.5f;
+            for (int i = 0; i < bodies.Count; i++)
+            {
+                var b = bodies[i];
+                if (b.Reported) continue;
+                float d = Vector3.Distance(player.Position, new Vector3(b.Position.x, b.Position.y, 0));
+                if (d < bestDist)
+                {
+                    best = i;
+                    bestDist = d;
+                }
+            }
+
+            if (best < 0)
+            {
+                return false;
+            }
+
+            var body = bodies[best];
+            body.Position = new Vector2(player.Position.x, player.Position.y);
+            bodies[best] = body;
+            killSystem.UpdateBodyVisuals();
+            return true;
+        }
+
         // ============================================================
         //  DarkVision — Enforcer: 短暂穿墙轮廓
         // ============================================================
 
         public bool IsDarkVisionActive(ulong clientId) => _darkVisionActive.Contains(clientId);
+
+        /// <summary>本地玩家 DarkVision 是否激活。服务端走权威字典；纯客户端走快照镜像（P0-3 视觉接线）。</summary>
+        public bool LocalDarkVisionActive =>
+            networkManager == null || networkManager.IsServer
+                ? IsDarkVisionActive(LocalClientId())
+                : _localDarkVisionRemainingFromSnapshot > 0f;
 
         public void ActivateDarkVision(ulong clientId)
         {
@@ -279,6 +327,7 @@ namespace GanglandUndercover.Online
         {
             _darkVisionActive.Clear();
             _darkVisionRemaining.Clear();
+            _localDarkVisionRemainingFromSnapshot = 0f;
             _corpseExamineBonus.Clear();
             _footprints.Clear();
             _moleIntel.Clear();
