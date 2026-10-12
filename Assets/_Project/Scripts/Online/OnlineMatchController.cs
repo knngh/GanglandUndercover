@@ -106,6 +106,8 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<string, AudioClip> audioClips = new Dictionary<string, AudioClip>();
         private readonly List<Rect> solidObstacleRects = new List<Rect>();
         private readonly List<Rect> walkableRects = new List<Rect>();
+        /// <summary>可行走矩形（P0-2 起 bot BFS 寻路用）。</summary>
+        internal IReadOnlyList<Rect> WalkableRects => walkableRects;
         private readonly List<TextMesh> worldLabels = new List<TextMesh>();
         private Sprite roundedRectSprite;
         private Sprite circleSprite;
@@ -141,6 +143,8 @@ namespace GanglandUndercover.Online
         internal bool proximityVoiceEnabled;
         private OnlineMatchHud onlineHud;
         private OnlineSyncManager syncManager;
+        /// <summary>任务分配同步（P0-2 起统计口径用：已分配任务数）。</summary>
+        internal OnlineSyncManager SyncManager => syncManager;
         private HostMigrationManager migrationManager;
         internal MatchSnapshotService snapshotService;
         private AudioSource audioSource;

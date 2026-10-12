@@ -1551,7 +1551,8 @@ namespace GanglandUndercover.Online
 
             return FindNearestOpenPosition(clamped, from);
         }
-        private Vector3 FindNearestOpenPosition(Vector3 desired, Vector3 fallback)
+        /// <summary>最近开阔点搜索（P0-2 起 bot 脱困共用；确定性 ring 搜索）。</summary>
+        internal Vector3 FindNearestOpenPosition(Vector3 desired, Vector3 fallback)
         {
             Vector3 clamped = mapService.ClampToOnlineMap(desired);
 
@@ -1595,7 +1596,8 @@ namespace GanglandUndercover.Online
         {
             return players.TryGetValue(clientId, out OnlinePlayerState state) ? state.Position : Vector3.zero;
         }
-        private bool IsWalkable(Vector3 position)
+        /// <summary>位置可走性判定（P0-2 起 bot 卡死检测共用）。</summary>
+        internal bool IsWalkable(Vector3 position)
         {
             if (position.x < -mapService.MapHalfWidth + PlayerCollisionRadius
                 || position.x > mapService.MapHalfWidth - PlayerCollisionRadius

@@ -81,6 +81,134 @@ namespace GanglandUndercover.PlayTests
             yield return RunNaturalSample(10);
         }
 
+        /// <summary>
+        /// P0-2 诊断：4P 快进局（timeScale 加速），周期 dump bot 位置可走性、任务点可走性、
+        /// bot→任务直线路径的 walkable 采样率，用于定位"bot 集体卡死/任务不可达"的几何断点。
+        /// </summary>
+        [UnityTest]
+        [Timeout(TestTimeoutMilliseconds)]
+        public IEnumerator BotPacingDiag_Inspect4Players()
+        {
+            RequireOptIn();
+            yield return null;
+
+            UnityEngine.Random.InitState(20260824 + 4);
+            Invoke("SetRoomMinPlayers", 4);
+            Invoke("SetRoomMaxPlayers", 4);
+            SetControllerField("localPreviewMode", true);
+            Invoke("EditorSimulateNaturalPacingSample");
+
+            Assert.IsTrue(GetBoolProperty("MatchStarted"), "诊断局未开始。");
+            Assert.AreEqual("Opening", GetEnumProperty("Phase"));
+            Time.timeScale = 12f;
+
+            float startedAt = Time.realtimeSinceStartup;
+            float nextDump = 0f;
+            while (GetEnumProperty("Phase") != "Result" && Time.realtimeSinceStartup - startedAt < 150f)
+            {
+                if (Time.realtimeSinceStartup >= nextDump)
+                {
+                    nextDump = Time.realtimeSinceStartup + 15f;
+                    Debug.LogWarning("[BotDiag2] " + BuildWalkabilitySnapshot());
+                }
+
+                yield return new WaitForSecondsRealtime(0.5f);
+            }
+
+            Debug.LogWarning("[BotDiag2][final] " + BuildWalkabilitySnapshot());
+            Time.timeScale = 1f;
+        }
+
+        private object GetControllerField(string fieldName)
+        {
+            FieldInfo field = _controllerType.GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(field, "找不到控制器字段 " + fieldName);
+            return field.GetValue(_controller);
+        }
+
+        private bool InvokeWalkable(Vector3 position)
+        {
+            MethodInfo method = _controllerType.GetMethod("IsWalkable",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.IsNotNull(method, "找不到 IsWalkable。");
+            return Convert.ToBoolean(method.Invoke(_controller, new object[] { position }));
+        }
+
+        private string BuildWalkabilitySnapshot()
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("phase=").Append(GetEnumProperty("Phase"))
+                .Append(" elapsed=").Append(GetFloatProperty("MatchElapsedSeconds").ToString("F0"))
+                .Append(" walkRects=").Append(CountRects("walkableRects"))
+                .Append(" obstacles=").Append(CountRects("solidObstacleRects"))
+                .Append('\n');
+
+            IDictionary players = (IDictionary)GetProperty("Players");
+            Vector3 firstBotPos = Vector3.zero;
+            bool hasBot = false;
+            foreach (DictionaryEntry entry in players)
+            {
+                ulong clientId = Convert.ToUInt64(entry.Key);
+                if (clientId < 900000L) continue;
+                object state = entry.Value;
+                Vector3 pos = (Vector3)state.GetType().GetField("Position").GetValue(state);
+                if (!hasBot) { firstBotPos = pos; hasBot = true; }
+
+                sb.Append("bot ").Append(clientId % 1000)
+                    .Append(" pos=").Append(pos.x.ToString("F1")).Append(',').Append(pos.y.ToString("F1"))
+                    .Append(" walk=").Append(InvokeWalkable(pos));
+                for (int i = 0; i < 8; i++)
+                {
+                    float angle = i / 8f * Mathf.PI * 2f;
+                    Vector3 step = pos + new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f) * 1.2f;
+                    sb.Append(' ').Append((char)('0' + i)).Append(InvokeWalkable(step) ? '+' : '-');
+                }
+
+                sb.Append('\n');
+            }
+
+            IEnumerable tasks = GetProperty("Tasks") as IEnumerable;
+            if (tasks != null && hasBot)
+            {
+                int index = 0;
+                foreach (object task in tasks)
+                {
+                    if (index >= 6) { sb.Append("(tasks truncated)\n"); break; }
+                    Vector3 pos = (Vector3)task.GetType().GetField("Position").GetValue(task);
+                    string name = (string)task.GetType().GetField("Name").GetValue(task);
+                    bool completed = (bool)task.GetType().GetField("Completed").GetValue(task);
+                    bool sabotaged = (bool)task.GetType().GetField("Sabotaged").GetValue(task);
+                    int blocked = 0, samples = 0;
+                    for (float t = 0.1f; t < 1f; t += 0.1f)
+                    {
+                        Vector3 p = Vector3.Lerp(firstBotPos, pos, t);
+                        samples++;
+                        if (!InvokeWalkable(p)) blocked++;
+                    }
+
+                    sb.Append("task ").Append(index).Append('(').Append(name).Append(')')
+                        .Append(" pos=").Append(pos.x.ToString("F1")).Append(',').Append(pos.y.ToString("F1"))
+                        .Append(" walk=").Append(InvokeWalkable(pos))
+                        .Append(completed ? " done" : sabotaged ? " sab" : " open")
+                        .Append(" pathBlocked=").Append(blocked).Append('/').Append(samples)
+                        .Append('\n');
+                    index++;
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private int CountRects(string fieldName)
+        {
+            IEnumerable rects = GetControllerField(fieldName) as IEnumerable;
+            if (rects == null) return 0;
+            int count = 0;
+            foreach (object _ in rects) count++;
+            return count;
+        }
+
         private IEnumerator RunNaturalSample(int targetPlayers)
         {
             RequireOptIn();

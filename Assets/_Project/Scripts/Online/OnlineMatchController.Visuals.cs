@@ -163,6 +163,10 @@ namespace GanglandUndercover.Online
             {
                 tasks.Add(new OnlineTaskState(id, OnlineWorldBuilder.TaskNameFor(id), mapService.TaskPositionFor(id), 0, OnlineMatchUtils.TaskRequiredProgress(id), false, false));
             }
+
+            // P0-2: 对局开始会重跑本方法（覆盖 EnsureWorld 时的 snap 结果），
+            // 这里幂等重 snap（rects 未建时 IsWalkable 恒真，安全跳过）。
+            SnapTasksToWalkable();
         }
 
         // --- SetTask ---

@@ -139,11 +139,50 @@ namespace GanglandUndercover.Online
             entry.AliveMole = aliveMole;
 
             // ── 任务统计 ──
+            // P0-2 口径修正：分母用"已分配任务数"（TaskSync.PlayerAssignments），
+            // 而非地图站点总数（28）。4 人局配额仅 ~16 个，站点口径的完成率
+            // 数学上限 ~57%，60% 节奏验收线永远不可达；分配口径才反映玩家进度。
             var tasks = ctrl.Tasks;
             if (tasks != null)
             {
-                entry.TotalTasks = tasks.Count;
-                entry.CompletedTasks = tasks.Count(t => t.Completed);
+                var taskSync = ctrl.SyncManager?.TaskSync;
+                if (taskSync != null && taskSync.HasAssignments)
+                {
+                    int assignedTotal = 0;
+                    int assignedCompleted = 0;
+                    foreach (var kv in taskSync.PlayerAssignments)
+                    {
+                        foreach (int taskId in kv.Value)
+                        {
+                            assignedTotal++;
+                            foreach (OnlineTaskState task in tasks)
+                            {
+                                if (task.Id == taskId)
+                                {
+                                    if (ctrl.TaskForPlayer(kv.Key, task).Completed)
+                                    {
+                                        assignedCompleted++;
+                                    }
+
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (assignedTotal > 0)
+                    {
+                        entry.TotalTasks = assignedTotal;
+                        entry.CompletedTasks = assignedCompleted;
+                    }
+                }
+
+                if (entry.TotalTasks <= 0)
+                {
+                    entry.TotalTasks = tasks.Count;
+                    entry.CompletedTasks = tasks.Count(t => t.Completed);
+                }
+
                 entry.SabotagedTasks = tasks.Count(t => t.Sabotaged);
             }
 
