@@ -417,9 +417,11 @@ namespace GanglandUndercover.Online
             // ── 1) 尸体发现与报案 ──
             // P0-2 节奏: 每 bot 对每具尸体只 roll 一次（旧实现每帧 42%，
             // 路过 1 秒必报，会议链过快把任务窗口切碎——8P 采样 5 会议 0 任务）。
+            // 发现半径对齐平衡表 ReportRange（4P 1.25 / 8P 1.5）——旧值
+            // BotInteractDistance 0.45 要踩到尸体上才触发，v15 采样 3 杀 0 报案。
             if (bot.Alive &&
                 _ctrl.TryFindNearestBody(bot.Position, out int bodyIndex) &&
-                Vector3.Distance(bot.Position, _ctrl.Bodies[bodyIndex].Position) < BotInteractDistance)
+                Vector3.Distance(bot.Position, _ctrl.Bodies[bodyIndex].Position) < _ctrl.RuleSet.ReportRangeFor(_ctrl.Players.Count))
             {
                 int bodyId = _ctrl.Bodies[bodyIndex].Id;
                 var rollKey = (botId, bodyId);
