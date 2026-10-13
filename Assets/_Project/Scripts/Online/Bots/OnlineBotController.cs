@@ -26,7 +26,9 @@ namespace GanglandUndercover.Online
         internal const float BotThinkMinSeconds = 1.2f;
         internal const float BotThinkMaxSeconds = 3.4f;
         internal const float BotInteractDistance = 0.45f;
-        private const float BotTaskCompleteSeconds = 2.5f;   // Bot 任务完成耗时
+        // P0-2: 2.5→1.5s——会议/追杀频繁打断蓄力窗口，实测多轮采样 bot 到位后
+        // 常蓄到一半被事件清零；缩短单次蓄力提高完成率。
+        private const float BotTaskCompleteSeconds = 1.5f;
         private const float BotRepairSeconds = 2.0f;          // Bot 修复耗时
         private const ulong SkipVoteTarget = ulong.MaxValue;
 
@@ -76,6 +78,8 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<ulong, float> _chaseTimers = new Dictionary<ulong, float>();
         /// <summary>P0-2: 黑帮追击冷却——疲劳换活动后多久不再主动追杀。</summary>
         private readonly Dictionary<ulong, float> _chaseCooldowns = new Dictionary<ulong, float>();
+        /// <summary>P0-2: 尸体报案 roll 记录（每 bot 每尸体一次）。</summary>
+        private readonly HashSet<(ulong botId, int bodyId)> _bodyReportRolled = new HashSet<(ulong, int)>();
         private float _diagnosticsTimer;
         private int _completedTaskCount;
 
@@ -232,6 +236,7 @@ namespace GanglandUndercover.Online
             _unreachableTasks.Remove(clientId);
             _chaseTimers.Remove(clientId);
             _chaseCooldowns.Remove(clientId);
+            _bodyReportRolled.RemoveWhere(k => k.botId == clientId);
             _lastGoalDistances.Remove(clientId);
             _noProgressTimers.Remove(clientId);
         }
@@ -258,6 +263,7 @@ namespace GanglandUndercover.Online
             _unreachableTasks.Clear();
             _chaseTimers.Clear();
             _chaseCooldowns.Clear();
+            _bodyReportRolled.Clear();
             _lastGoalDistances.Clear();
             _noProgressTimers.Clear();
             _completedTaskCount = 0;
@@ -282,8 +288,17 @@ namespace GanglandUndercover.Online
 
             foreach (OnlinePlayerState state in _ctrl.Players.Values)
             {
-                if (state.IsBot && state.Alive)
+                if (!state.IsBot) continue;
+                if (state.Alive)
+                {
                     botIds.Add(state.ClientId);
+                }
+                else if (_ctrl.GetPrivateRole(state.ClientId) == OnlineRole.Police)
+                {
+                    // P0-2 节奏保底: Police 鬼魂继续做任务（Among Us 核心机制，
+                    // 服务端 TryInteractWithTask 的 CanGhostCompleteTasks 已放行）。
+                    botIds.Add(state.ClientId);
+                }
             }
 
             // P0-2: 自救/追击冷却递减
@@ -400,18 +415,27 @@ namespace GanglandUndercover.Online
             }
 
             // ── 1) 尸体发现与报案 ──
-            if (_ctrl.TryFindNearestBody(bot.Position, out int bodyIndex) &&
+            // P0-2 节奏: 每 bot 对每具尸体只 roll 一次（旧实现每帧 42%，
+            // 路过 1 秒必报，会议链过快把任务窗口切碎——8P 采样 5 会议 0 任务）。
+            if (bot.Alive &&
+                _ctrl.TryFindNearestBody(bot.Position, out int bodyIndex) &&
                 Vector3.Distance(bot.Position, _ctrl.Bodies[bodyIndex].Position) < BotInteractDistance)
             {
-                if (UnityEngine.Random.value < _ctrl.RuleSet.BotBodyReportProbability &&
-                    _ctrl.Bodies[bodyIndex].Reported == false)
+                int bodyId = _ctrl.Bodies[bodyIndex].Id;
+                var rollKey = (botId, bodyId);
+                if (!_bodyReportRolled.Contains(rollKey))
                 {
-                    var body = _ctrl.Bodies[bodyIndex];
-                    body.Reported = true;
-                    _ctrl.Bodies[bodyIndex] = body;
-                    AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
-                    _ctrl.BeginMeeting(bot.DisplayName + " 发现尸体并报案");
-                    return;
+                    _bodyReportRolled.Add(rollKey);
+                    if (UnityEngine.Random.value < _ctrl.RuleSet.BotBodyReportProbability &&
+                        _ctrl.Bodies[bodyIndex].Reported == false)
+                    {
+                        var body = _ctrl.Bodies[bodyIndex];
+                        body.Reported = true;
+                        _ctrl.Bodies[bodyIndex] = body;
+                        AudioManager.Instance?.PlaySFX(SoundEffect.BodyReport);
+                        _ctrl.BeginMeeting(bot.DisplayName + " 发现尸体并报案");
+                        return;
+                    }
                 }
             }
 
@@ -542,6 +566,13 @@ namespace GanglandUndercover.Online
         /// </summary>
         private void MakeBotDecision(ulong botId, OnlinePlayerState bot, OnlineRole role, OnlineProfession profession)
         {
+            // P0-2: 鬼魂（死 Police）只继续做任务——不追杀/不报案/不开会/不用能力。
+            if (!bot.Alive)
+            {
+                MaintainTaskGoal(botId);
+                return;
+            }
+
             // ──  真黑帮：追杀 + 破坏 + 通风管 ──
             if (role == OnlineRole.Gang)
             {
@@ -657,6 +688,16 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            // 粘性任务目标 + 新任务选择（活 bot 全流程尾部 / 鬼魂短路共用）
+            MaintainTaskGoal(botId);
+        }
+
+        /// <summary>
+        /// P0-2: 任务目标维护——粘性保留或选新任务并主动寻路。
+        /// 鬼魂 bot（死 Police 继续做任务）与活 bot 共用。
+        /// </summary>
+        private void MaintainTaskGoal(ulong botId)
+        {
             // 粘性任务目标（P0-2 节奏修复）：当前任务未完成时不换目标。
             // 此前每次 think（1.2~3.4s）随机重选，bot 到达后平均 ~2.3s 即被改派，
             // 2.5s 的任务进度被反复清零，自然采样任务率因此≈0。
