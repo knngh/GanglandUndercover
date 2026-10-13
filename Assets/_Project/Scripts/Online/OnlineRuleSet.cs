@@ -159,6 +159,8 @@ namespace GanglandUndercover.Online
         [Tooltip("Bot 在行动阶段主动发起紧急会议的概率。")]
         [Range(0f, 1f)]
         public float BotEmergencyMeetingProbability = 0.12f;
+        [Tooltip("黑帮 Bot 蛰伏期（秒）：此窗口内不追杀不击杀，只破坏/游荡，模拟真人开局散开期。")]
+        public float GangBotDormancySeconds = 180f;
         [Tooltip("Bot 移动速度倍率。")]
         [Range(0.5f, 4f)]
         public float BotMoveSpeedMultiplier = 1f;
@@ -302,6 +304,12 @@ namespace GanglandUndercover.Online
         public float FirstKillMinDelaySecondsFor(int playerCount)
         {
             return ScalePacingByPlayerCount(playerCount, 12f, 10f, FirstKillMinDelaySeconds);
+        }
+
+        /// <summary>黑帮 Bot 蛰伏期按人数缩放：4P 最长（散开慢、容错低），8P 缩短。</summary>
+        public float GangBotDormancySecondsFor(int playerCount)
+        {
+            return ScalePacingByPlayerCount(playerCount, GangBotDormancySeconds, 150f, 90f);
         }
 
         public float PostMeetingKillGraceSecondsFor(int playerCount)

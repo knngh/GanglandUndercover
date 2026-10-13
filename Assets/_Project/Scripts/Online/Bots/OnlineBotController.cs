@@ -38,9 +38,11 @@ namespace GanglandUndercover.Online
         private readonly Dictionary<ulong, Vector3> _lastPositions = new Dictionary<ulong, Vector3>();
         private readonly Dictionary<ulong, float> _stuckTimers = new Dictionary<ulong, float>();
         private const float StuckDistanceThreshold = 0.03f;
-        private const float StuckTimeBeforeReroute = 5.0f;
-        /// <summary>P0-2: 进度停滞重规划阈值——距目标超过此时长未缩短 0.4 单位即重规划。</summary>
-        private const float NoProgressTimeBeforeReplan = 12f;
+        /// <summary>P0-2: 5→3s——贴墙抖动 ~0.03-0.05 会让位移检测在阈值边缘震荡，
+        /// 计时器被钉在 4.7 附近永远不越线（采样实测 bot 冻结 2 分钟 stuck 恒 4.7）。</summary>
+        private const float StuckTimeBeforeReroute = 3.0f;
+        /// <summary>P0-2: 进度停滞重规划阈值——距目标超过此时长未缩短 1 单位即重规划。</summary>
+        private const float NoProgressTimeBeforeReplan = 8f;
         /// <summary>P0-2: 路点消化停滞阈值——与队首路点距离超过此时长未缩短 0.2 即按阻塞处理。</summary>
         private const float WaypointStallSeconds = 8f;
         private const float DiagnosticsIntervalSeconds = 15f;   // P0-2 节奏诊断输出间隔
@@ -48,14 +50,12 @@ namespace GanglandUndercover.Online
 
         /// <summary>
         /// P0-2 节奏修复：bot 任务/修复/破坏的进入半径。
-        /// 旧值 BotInteractDistance*1.5 = 0.675 单位，比玩家 InteractionRange(≈2.5) 苛刻 4 倍；
-        /// 诊断采样显示 bot 常年在任务点 1.0~1.5 单位徘徊、prog 恒 0（任务率 1/28 的主因）。
-        /// 取 InteractionRange*0.6：进入即蓄力，蓄力完成后 TryInteractWithTask 在
-        /// InteractionRange 内必然找到该任务。
+        /// 旧值 BotInteractDistance*1.5 = 0.675 单位，与玩家 InteractionRange(1.08) 同级苛刻；
+        /// 诊断采样显示 bot 常年停在任务点 2~3 单位外徘徊、prog 恒 0（任务率 ≤1/28 的主因）。
+        /// bot 没有 player 级微操，取 1.5 常量（宽于玩家按 E 圈），蓄力期间继续逼近，
+        /// 完成时通常已在 InteractionRange 内。
         /// </summary>
-        private float TaskChargeDistance => _ctrl.RuleSet != null
-            ? _ctrl.RuleSet.InteractionRange * 0.6f
-            : 1.5f;
+        private const float TaskChargeDistance = 1.5f;
 
         // M8.3 新增状态
         private readonly Dictionary<ulong, float> _taskProgress = new Dictionary<ulong, float>();
@@ -444,13 +444,23 @@ namespace GanglandUndercover.Online
         /// </summary>
         private void TryProgressTaskOrRepair(ulong botId, OnlinePlayerState bot, OnlineRole role, OnlineProfession profession, float deltaTime)
         {
+            // P0-2: 重置判定只看"蓄力任务本身"的距离。旧逻辑量的是 _targets 目标距离
+            // （避险撤离点/追杀目标），bot 明明站在任务点旁却被每帧清进度
+            // （采样实测 UC 站在任务点 0.00 处蓄到 2.3/2.5 被清零）。
+            // 任务进度在下方蓄力分支按任务点距离判定，无需前置重置。
+            if (_currentTaskId.TryGetValue(botId, out int resetTaskId)
+                && resetTaskId >= 0 && resetTaskId < _ctrl.Tasks.Count
+                && Vector3.Distance(bot.Position, _ctrl.Tasks[resetTaskId].Position) > TaskChargeDistance)
+            {
+                _taskProgress[botId] = 0f;
+            }
+
             Vector3 target = _targets.TryGetValue(botId, out Vector3 t) ? t : bot.Position;
             float dist = Vector3.Distance(bot.Position, target);
 
             if (dist > TaskChargeDistance)
             {
-                // 远离目标，重置进度
-                _taskProgress[botId] = 0f;
+                // 远离移动目标，重置修复进度（修复没有 sticky id，按目标距离算）
                 _repairProgress[botId] = 0f;
                 return;
             }
@@ -535,10 +545,14 @@ namespace GanglandUndercover.Online
             // ──  真黑帮：追杀 + 破坏 + 通风管 ──
             if (role == OnlineRole.Gang)
             {
+                // P0-2 节奏：蛰伏期——窗口内不追杀不击杀，只破坏/游荡
+                // （模拟真人开局散开期；用户拍板 4P 拉长对局的主要手段）。
+                bool dormant = _ctrl.MatchElapsedSeconds < _ctrl.RuleSet.GangBotDormancySecondsFor(_ctrl.Players.Count);
+
                 // 击杀逻辑（P0-2 节奏修复：判定窗口从 BotInteractDistance 0.45 对齐
                 // 服务端 RuleSet.KillRange，与真人玩家同权；此前 0.45 窗口配合直线追踪
                 // 移动目标，4 人自然采样 20 分钟 0 杀）
-                if (_ctrl.TryGetKillCooldown(botId, out float kcd) && kcd <= 0f &&
+                if (!dormant && _ctrl.TryGetKillCooldown(botId, out float kcd) && kcd <= 0f &&
                     _ctrl.TryFindNearestVictim(botId, bot.Position, out ulong victimId, out OnlinePlayerState victim))
                 {
                     if (Vector3.Distance(bot.Position, victim.Position) < _ctrl.RuleSet.KillRange
@@ -586,7 +600,7 @@ namespace GanglandUndercover.Online
                 }
 
                 float chaseCooldown = _chaseCooldowns.TryGetValue(botId, out float chaseCd) ? chaseCd : 0f;
-                if (!chaseFatigued && chaseCooldown <= 0f && UnityEngine.Random.value < 0.55f)
+                if (!dormant && !chaseFatigued && chaseCooldown <= 0f && UnityEngine.Random.value < 0.55f)
                 {
                     SetBotGoal(botId, PickNearestLivingNonGang(botId), planPath: false); // 追杀目标会动，直线追
                     if (!_chaseTimers.ContainsKey(botId)) _chaseTimers[botId] = 0f;
@@ -823,7 +837,7 @@ namespace GanglandUndercover.Online
             Vector3 progressTarget = _targets.TryGetValue(botId, out Vector3 trackedTarget) ? trackedTarget : bot.Position;
             float currentGoalDistance = Vector3.Distance(bot.Position, progressTarget);
             float lastGoalDistance = _lastGoalDistances.TryGetValue(botId, out float remembered) ? remembered : currentGoalDistance;
-            bool makingProgress = currentGoalDistance < lastGoalDistance - 0.4f;
+            bool makingProgress = currentGoalDistance < lastGoalDistance - 1f;
             _lastGoalDistances[botId] = makingProgress ? currentGoalDistance : Mathf.Min(lastGoalDistance, currentGoalDistance);
             float noProgressTimer = _noProgressTimers.TryGetValue(botId, out float np) ? np : 0f;
             noProgressTimer = makingProgress ? 0f : noProgressTimer + Time.deltaTime;
@@ -982,6 +996,37 @@ namespace GanglandUndercover.Online
         }
 
         /// <summary>
+        /// P0-2: 近距离局部绕行——目标 4.5 单位内被"矩形内障碍"挡住时，
+        /// 取中点两侧偏移试探可走点作为两段路点（像人绕过屋内桌柜）。
+        /// </summary>
+        private bool TryLocalDetour(ulong botId, Vector3 from, Vector3 to)
+        {
+            Vector3 delta = to - from;
+            if (delta.sqrMagnitude < 0.04f)
+            {
+                return false;
+            }
+
+            Vector3 direction = delta.normalized;
+            Vector3 perpendicular = new Vector3(-direction.y, direction.x, 0f);
+            Vector3 midpoint = (from + to) * 0.5f;
+            float[] offsets = { 2f, -2f, 3.5f, -3.5f };
+            foreach (float offset in offsets)
+            {
+                Vector3 candidate = midpoint + perpendicular * offset;
+                if (_ctrl.IsWalkable(candidate))
+                {
+                    _waypoints[botId] = new List<Vector3> { candidate, to };
+                    _waypointStallTimers.Remove(botId);
+                    _lastWaypointDistances.Remove(botId);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// P0-2 平衡：击杀目击者检查——攻击者 7 单位内存在第三方活人时不动手
         /// （模拟真人黑帮"有人看着就收手"，同时给会议留下位置信息博弈；
         /// 无此约束时 bot 会 39 秒无差别锁定击杀关键角色直接终局）。
@@ -1012,13 +1057,20 @@ namespace GanglandUndercover.Online
         /// </summary>
         private bool HandleBotBlocked(ulong botId, OnlinePlayerState bot)
         {
-            // ①: 已在走路点链却长期停滞——传送跳过卡点（服务端权威位置，客户端经快照同步）
+            // ①: 已在走路点链却长期停滞——传送跳过卡点（服务端权威位置，客户端经快照同步）。
+            // 传送目标取队首路点的最近开阔点（路点可能落在接缝/障碍上），到达即消化该路点。
             if (_waypoints.TryGetValue(botId, out List<Vector3> existing) && existing.Count > 0)
             {
                 float cooldown = _rescueCooldowns.TryGetValue(botId, out float cd) ? cd : 0f;
                 if (cooldown <= 0f)
                 {
-                    bot.Position = existing[0];
+                    bot.Position = _ctrl.FindNearestOpenPosition(existing[0], existing[0]);
+                    existing.RemoveAt(0);
+                    if (existing.Count == 0)
+                    {
+                        _waypoints.Remove(botId);
+                    }
+
                     _ctrl.Players[botId] = bot;
                     _rescueCooldowns[botId] = RescueCooldownSeconds;
                     _waypointStallTimers.Remove(botId);
@@ -1034,6 +1086,15 @@ namespace GanglandUndercover.Online
             Vector3 stuckTarget = _targets.TryGetValue(botId, out Vector3 originalTarget)
                 ? originalTarget
                 : bot.Position;
+
+            // ②a: 近距离局部绕行——BFS 对"同矩形"返回空链（视为直线可达），
+            // 但矩形内部可注册障碍（walkable 与 solidObstacle 独立），实测 bot
+            // 反复卡在任务点 2~3 单位外换任务。侧向偏移中点试探可走点绕过。
+            if (Vector3.Distance(bot.Position, stuckTarget) < 7f && TryLocalDetour(botId, bot.Position, stuckTarget))
+            {
+                _ctrl.Players[botId] = bot;
+                return true;
+            }
 
             // ②: walkableRects BFS 寻路——卡墙说明直线不可达，
             // 沿可行走矩形链走到目标（取代此前"最近房间中心"单点中转）。
@@ -1173,6 +1234,13 @@ namespace GanglandUndercover.Online
             for (int i = 0; i < rectPath.Count; i++)
             {
                 Vector3 hinge = RectOverlapCenter(rects[previous], rects[rectPath[i]]);
+                // P0-2: 路点必须落在真正可走的位置——重叠区中心可能在矩形接缝/
+                // 障碍上（bot 传送到不可走点会被立即挤回，路点永远消化不了）。
+                if (!_ctrl.IsWalkable(hinge))
+                {
+                    hinge = _ctrl.FindNearestOpenPosition(hinge, hinge);
+                }
+
                 // 过滤离当前位置过近的路点（减少绕行）
                 if (waypoints.Count == 0 || Vector3.Distance(waypoints[waypoints.Count - 1], hinge) > 0.5f)
                 {
