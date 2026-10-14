@@ -200,12 +200,13 @@ namespace GanglandUndercover.Online
             int gangSide = aliveGang + aliveMole;
             int policeSide = alivePolice + aliveUndercover;
 
-            // 卧底是警方收网的必要条件；卧底出局立即触发黑帮胜利。
-            if (totalUndercover > 0 && aliveUndercover == 0)
-                return "黑帮胜利：卧底已被拔除。";
-
+            // P0-2 平衡（用户拍板）：卧底阵亡不再立即黑帮胜——警方仍可闭合
+            // 证据链翻案，黑帮需转防守（防证据/灭口减员）。多杀手局
+            // （8P 三杀手）"杀中 UC 抽奖秒胜"由此消除。
             if (evidenceScore >= evidenceTarget)
-                return "警方胜利：卧底存活，证据链闭合，收网成功。";
+                return totalUndercover > 0 && aliveUndercover == 0
+                    ? "警方胜利：卧底虽殉职，证据链闭合，铁案收网。"
+                    : "警方胜利：卧底存活，证据链闭合，收网成功。";
 
             if (gangSide == 0 && totalAlive >= 1)
                 return "警方胜利：黑帮全部出局。";

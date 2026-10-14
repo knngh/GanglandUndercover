@@ -1953,7 +1953,9 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
-        public void Victory_EvidenceClosureWithoutLivingUndercover_GangWins()
+        // P0-2 平衡（用户拍板 2026-10-13）：卧底阵亡不再立即黑帮胜，
+        // 证据链闭合仍可翻案；黑帮需防证据或灭口到警方阵营全灭。
+        public void Victory_EvidenceClosureAfterUndercoverFallen_PoliceWins()
         {
             object result = EvaluateVictory(
                 evidenceScore: 44,
@@ -1963,11 +1965,11 @@ namespace GanglandUndercover.Tests
                 matchStarted: true,
                 phaseName: "Action");
 
-            AssertResult(result, true, "黑帮胜利");
+            AssertResult(result, true, "警方胜利");
         }
 
         [Test]
-        public void Victory_UndercoverEliminated_GangWins()
+        public void Victory_UndercoverEliminated_MatchContinues()
         {
             object result = EvaluateVictory(
                 evidenceScore: 10,
@@ -1977,7 +1979,8 @@ namespace GanglandUndercover.Tests
                 matchStarted: true,
                 phaseName: "Action");
 
-            AssertResult(result, true, "黑帮胜利");
+            Assert.IsFalse(PropertyBool(result, "HasResult"),
+                "卧底阵亡后对局应继续（警方仍可闭合证据链翻案）。");
         }
 
         [Test]

@@ -1894,6 +1894,17 @@ namespace GanglandUndercover.Online
 
             syncManager?.OnKilled(victimClientId, senderClientId);
             PlayCue("kill");
+
+            // P0-2 平衡（用户拍板）：卧底阵亡不再立即终局——播报翻盘条件，
+            // 引导双轴博弈（警方推证据链 / 黑帮转防灭口）。
+            if (GetPrivateRole(victimClientId) == OnlineRole.Undercover)
+            {
+                string ucFallMessage = "卧底 " + victim.DisplayName + " 殉职！警方仍可闭合证据链铁案收网。";
+                status = ucFallMessage;
+                AddCaseLog(ucFallMessage);
+                chatSystem?.ReceiveMessage("system", "系统", ucFallMessage, false, Faction.Police, ChatChannel.Meeting);
+            }
+
             EvaluateWinConditions();
             BroadcastSnapshot();
         }
@@ -2477,13 +2488,12 @@ namespace GanglandUndercover.Online
                 }
             }
 
-            if (totalUndercover > 0 && aliveUndercover == 0)
+            // P0-2 平衡（用户拍板）：卧底阵亡不再立即黑帮胜——证据链闭合仍可翻案。
+            if (taskService.EvidenceScore >= taskService.EvidenceTarget)
             {
-                SetResult("黑帮胜利：卧底已被拔除。");
-            }
-            else if (taskService.EvidenceScore >= taskService.EvidenceTarget && aliveUndercover > 0)
-            {
-                SetResult("警方胜利：卧底存活，证据链闭合，收网成功。");
+                SetResult(totalUndercover > 0 && aliveUndercover == 0
+                    ? "警方胜利：卧底虽殉职，证据链闭合，铁案收网。"
+                    : "警方胜利：卧底存活，证据链闭合，收网成功。");
             }
             else if (aliveGangSide == 0 && totalAlive >= 1)
             {
