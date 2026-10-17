@@ -34,7 +34,7 @@ open "$APP"
 
 sleep "$WAIT_SECONDS"
 
-if pgrep -f "Gangland Undercover.app/Contents/MacOS" > /dev/null; then
+if pgrep -f "Undercover.app/Contents/MacOS" > /dev/null; then
   log "PASS: 进程存活 ${WAIT_SECONDS}s"
   PROC_ALIVE=1
 else
@@ -63,11 +63,11 @@ else
 fi
 
 if [ "$PROC_ALIVE" = "1" ]; then
-  osascript -e 'quit app id "com.gangland.undercover"' 2>/dev/null || pkill -f "Gangland Undercover.app/Contents/MacOS"
+  osascript -e 'quit app id "com.gangland.undercover"' 2>/dev/null || pkill -f "Undercover.app/Contents/MacOS"
   sleep 3
-  if pgrep -f "Gangland Undercover.app/Contents/MacOS" > /dev/null; then
+  if pgrep -f "Undercover.app/Contents/MacOS" > /dev/null; then
     log "WARN: 进程未响应 quit，强制 kill"
-    pkill -9 -f "Gangland Undercover.app/Contents/MacOS" || true
+    pkill -9 -f "Undercover.app/Contents/MacOS" || true
   fi
   log "已退出游戏进程"
 fi
