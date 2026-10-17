@@ -2155,8 +2155,12 @@ namespace GanglandUndercover.Online
             Faction faction = ChatSystem.RoleToFaction(presentedRole);
             string senderName = senderState.DisplayName;
 
-            // 本地显示（服务器也显示）
-            chatSystem.ReceiveMessage(senderClientId.ToString(), senderName, content, isDead, faction, channel);
+            // 本地显示（服务器也显示）。
+            // Host 即发送者时已在 SendChatMessage 本地显示过——跳过避免双显。
+            if (senderClientId != LocalClientId())
+            {
+                chatSystem.ReceiveMessage(senderClientId.ToString(), senderName, content, isDead, faction, channel);
+            }
 
             // 按通道路由转发
             FastBufferWriter writer = new FastBufferWriter(ChatWriterCapacityBytes, Unity.Collections.Allocator.Temp);
@@ -2173,14 +2177,12 @@ namespace GanglandUndercover.Online
 
                 if (channel == ChatChannel.Meeting)
                 {
-                    // 会议频道：仅发送给存活玩家
+                    // 会议频道：全员可见（死亡玩家旁观——鬼魂不能发言但能看讨论，
+                    // 修复"死亡玩家会议零信息"；发言侧 CanSendNow/频道判定已拦截）
                     foreach (KeyValuePair<ulong, OnlinePlayerState> kv in players)
                     {
                         if (kv.Key == senderClientId) continue;
-                        if (kv.Value.Alive)
-                        {
-                            networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
-                        }
+                        networkManager.CustomMessagingManager.SendNamedMessage(ChatBroadcastMessage, kv.Key, writer, Unity.Netcode.NetworkDelivery.ReliableSequenced);
                     }
                 }
                 else if (channel == ChatChannel.Ghost)

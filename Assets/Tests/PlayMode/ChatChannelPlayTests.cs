@@ -124,9 +124,9 @@ namespace GanglandUndercover.PlayTests
             yield return WaitUntilOrFail(
                 () => CapturedContains(nearRecipient, meetingContent, "Meeting"),
                 "会议频道应通过真实 ChatBroadcast 到达存活玩家。");
-            yield return RunFrames(10);
-            Assert.IsFalse(CapturedContains(farOrDeadRecipient, meetingContent),
-                "会议频道不应发给死亡玩家。");
+            yield return WaitUntilOrFail(
+                () => CapturedContains(farOrDeadRecipient, meetingContent, "Meeting"),
+                "会议频道应同样到达死亡玩家（鬼魂可旁观讨论，发言仍被频道判定拦截）。");
 
             SetPhase("Action");
             SetPlayer(senderId, "Sender", Vector3.zero, alive: true);

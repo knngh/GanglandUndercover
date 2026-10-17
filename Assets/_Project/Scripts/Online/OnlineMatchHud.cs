@@ -824,7 +824,7 @@ namespace GanglandUndercover.Online
 
             chatFeedText = CreateScrollText("Chat Canvas Feed", chat, 70f);
 
-            chatInput = CreateInputRow(chat, "发言", "输入消息", _ => { });
+            chatInput = CreateInputRow(chat, "发言", "输入消息", _ => SendChatInput());
             chatInput.characterLimit = 256;
             chatInput.onValueChanged.AddListener(_ =>
             {
