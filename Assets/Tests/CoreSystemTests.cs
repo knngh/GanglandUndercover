@@ -427,6 +427,84 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void ActionMovement_ClientInputClampedBeforeIntegration()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                ulong moverId = 1UL;
+                // 已知开阔起点（同 stale 测试坐标），避免出生点贴墙导致合法位移被碰撞回退吞掉。
+                fixture.SetPlayerPosition(moverId, new Vector3(10f, 10f, 0f));
+                Vector3 start = fixture.PlayerPosition(moverId);
+                // 生产路径注入（ApplyClientState）：超大幅值输入必须先被服务端钳到 1。
+                fixture.ReportClientState(moverId, start, new Vector2(3f, 0f), ready: true);
+                Assert.LessOrEqual(fixture.PlayerInput(moverId).sqrMagnitude, 1.0001f,
+                    "服务端必须把客户端输入幅值钳到 1。");
+
+                fixture.TickActionMovement(0.5f);
+                Vector3 afterMove = fixture.PlayerPosition(moverId);
+                // 位移幅度不在此断言：真实地图障碍会触发既有的 FindNearestOpenPosition 防卡死
+                // 环形传送（合法机制），严格上界不成立。安全属性=幅值钳制（上）+ 过期归零（另一用例）。
+                Assert.LessOrEqual((afterMove - start).sqrMagnitude, (3.2f + 2.25f) * (3.2f + 2.25f),
+                    $"位移不得超过 MoveSpeed×dt 与防卡死最大传送半径之和。start={start} after={afterMove}");
+            }
+        }
+
+        [Test]
+        public void ActionMovement_ZeroesInputAfterClientStopsReporting()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                ulong moverId = 1UL;
+                fixture.SetPlayerPosition(moverId, new Vector3(10f, 10f, 0f));
+                fixture.SetPlayerInput(moverId, Vector2.right);
+                fixture.TickActionMovement(0.2f);
+
+                // 客户端停更状态：计时器累计越过 ClientInputStaleSeconds(1s) 后必须静止。
+                // （计时器已从首 tick 起步，再走 20×0.1s 越过阈值并继续验证完全静止）
+                for (int i = 0; i < 20; i++)
+                {
+                    fixture.TickActionMovement(0.1f);
+                }
+
+                fixture.TickActionMovement(0.1f);
+                Vector3 stoppedPosition = fixture.PlayerPosition(moverId);
+                fixture.TickActionMovement(0.5f);
+                Vector3 afterStale = fixture.PlayerPosition(moverId);
+                Assert.AreEqual(stoppedPosition, afterStale,
+                    "客户端停止上报状态后，位置不得继续按最后一次输入积分。");
+
+                // 重新上报状态后输入复活，向已走过的开阔方向恢复移动。
+                fixture.ReportClientState(moverId, afterStale, Vector2.left, ready: true);
+                fixture.TickActionMovement(0.2f);
+                Vector3 afterResume = fixture.PlayerPosition(moverId);
+                Assert.Greater(Vector3.Distance(afterStale, afterResume), 0.3f,
+                    "重新上报状态后移动应恢复。");
+            }
+        }
+
+        [Test]
         public void TaskList_ShowsLocalAssignmentsAndGlobalRepairCrisesOnly()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -5462,6 +5540,30 @@ namespace GanglandUndercover.Tests
                 object state = GetPlayerState(clientId);
                 playerStateType.GetField("Position").SetValue(state, position);
                 SetPlayerState(clientId, state);
+            }
+
+            public void SetPlayerInput(ulong clientId, Vector2 input)
+            {
+                object state = GetPlayerState(clientId);
+                playerStateType.GetField("Input").SetValue(state, input);
+                SetPlayerState(clientId, state);
+            }
+
+            public void TickActionMovement(float deltaTime)
+            {
+                InvokeNonPublicArgs("TickActionMovement", deltaTime);
+            }
+
+            public void ReportClientState(ulong clientId, Vector3 position, Vector2 input, bool ready)
+            {
+                InvokeNonPublicArgs("ApplyClientState", clientId, position, input, ready);
+            }
+
+            private void InvokeNonPublicArgs(string methodName, params object[] args)
+            {
+                controllerType
+                    .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(controller, args);
             }
 
             public bool CanClientWatchCamera(ulong clientId, Vector2 cameraCenter)

@@ -858,6 +858,7 @@ namespace GanglandUndercover.Online
             }
 
             players.Clear();
+            clientInputStaleTimers.Clear();
             killSystem.Reset();
             caseLog.Clear();
             if (votingService != null) votingService.ClearVotes(); else votes.Clear();
@@ -1012,6 +1013,7 @@ namespace GanglandUndercover.Online
             killSystem.killCooldowns.Remove(clientId);
             abilityCooldowns.Remove(clientId);
             serverChatLastSendTimes.Remove(clientId);
+            clientInputStaleTimers.Remove(clientId);
             _botController?.RemoveBot(clientId);
 
             if (networkManager != null && networkManager.IsServer)
@@ -1382,6 +1384,7 @@ namespace GanglandUndercover.Online
             }
 
             state.Input = phase == OnlineMatchPhase.Action ? ClampClientInput(input) : Vector2.zero;
+            clientInputStaleTimers[senderClientId] = 0f;
             players[senderClientId] = state;
         }
 

@@ -167,6 +167,10 @@ namespace GanglandUndercover.Online
         internal OnlineMatchPhase phase = OnlineMatchPhase.Lobby;
         private ChatSystem chatSystem;
         private readonly Dictionary<ulong, float> serverChatLastSendTimes = new Dictionary<ulong, float>();
+        // 移动校验：Action 阶段位置由服务端按输入积分；本表记录自该客户端上次上报状态以来的时长，
+        // 超过阈值视为输入过期（掉线/停发），按零输入处理，防止角色按最后一次方向无限滑行。
+        internal float ClientInputStaleSeconds = 1.0f;
+        private readonly Dictionary<ulong, float> clientInputStaleTimers = new Dictionary<ulong, float>();
         private bool localReady;
         internal bool roomAutoFillAi;
         internal bool revealRoleOnEject;
@@ -1044,35 +1048,7 @@ namespace GanglandUndercover.Online
                     TickBotAction(deltaTime);
                 }
 
-                List<ulong> ids = new List<ulong>(players.Keys);
-
-                foreach (ulong clientId in ids)
-                {
-                    OnlinePlayerState state = players[clientId];
-
-                    if (state.Alive)
-                    {
-                        Vector3 direction = new Vector3(state.Input.x, state.Input.y, 0f);
-                        float speedMultiplier = taskService.LockdownTimer > 0f ? 0.72f : taskService.PatrolAlertTimer > 0f && GetPrivateRole(clientId) == OnlineRole.Gang ? 0.9f : 1f;
-                        // C1: 被动能力 MoveSpeedBonus (Driver 1.08x)
-                        if (ruleSet != null && ruleSet.HasAbility(state.Profession, AbilityType.MoveSpeedBonus))
-                            speedMultiplier *= ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.MoveSpeedBonus);
-                        state.Position = ResolveMapCollision(state.Position, state.Position + direction * MoveSpeed * speedMultiplier * deltaTime);
-                    }
-                    else
-                    {
-                        Vector3 ghostDirection = new Vector3(state.Input.x, state.Input.y, 0f);
-                        state.Position = mapService.ClampToOnlineMap(
-                            state.Position + ghostDirection * MoveSpeed * 1.2f * deltaTime);
-                    }
-
-                    players[clientId] = state;
-
-                    if (clientId == LocalClientId())
-                    {
-                        localPosition = state.Position;
-                    }
-                }
+                TickActionMovement(deltaTime);
             }
 
             TickMoleExposureCheck();
@@ -1086,6 +1062,48 @@ namespace GanglandUndercover.Online
             {
                 serverSnapshotTimer = SnapshotIntervalSeconds;
                 BroadcastSnapshot();
+            }
+        }
+
+        // --- TickActionMovement ---
+        // Action 阶段玩家移动：位置由服务端按（已钳幅值的）客户端输入积分，客户端只上报方向——
+        // 服务端视角瞬移/加速/穿墙不可构造；输入停更超过 ClientInputStaleSeconds 视为过期，按零输入处理。
+        private void TickActionMovement(float deltaTime)
+        {
+            List<ulong> ids = new List<ulong>(players.Keys);
+
+            foreach (ulong clientId in ids)
+            {
+                OnlinePlayerState state = players[clientId];
+
+                clientInputStaleTimers.TryGetValue(clientId, out float staleTimer);
+                staleTimer += deltaTime;
+                clientInputStaleTimers[clientId] = staleTimer;
+                // bot 是服务端可信代码、不走客户端上报路径，豁免过期看门狗。
+                Vector2 effectiveInput = !state.IsBot && staleTimer > ClientInputStaleSeconds ? Vector2.zero : state.Input;
+
+                if (state.Alive)
+                {
+                    Vector3 direction = new Vector3(effectiveInput.x, effectiveInput.y, 0f);
+                    float speedMultiplier = taskService.LockdownTimer > 0f ? 0.72f : taskService.PatrolAlertTimer > 0f && GetPrivateRole(clientId) == OnlineRole.Gang ? 0.9f : 1f;
+                    // C1: 被动能力 MoveSpeedBonus (Driver 1.08x)
+                    if (ruleSet != null && ruleSet.HasAbility(state.Profession, AbilityType.MoveSpeedBonus))
+                        speedMultiplier *= ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.MoveSpeedBonus);
+                    state.Position = ResolveMapCollision(state.Position, state.Position + direction * MoveSpeed * speedMultiplier * deltaTime);
+                }
+                else
+                {
+                    Vector3 ghostDirection = new Vector3(effectiveInput.x, effectiveInput.y, 0f);
+                    state.Position = mapService.ClampToOnlineMap(
+                        state.Position + ghostDirection * MoveSpeed * 1.2f * deltaTime);
+                }
+
+                players[clientId] = state;
+
+                if (clientId == LocalClientId())
+                {
+                    localPosition = state.Position;
+                }
             }
         }
 
@@ -2776,6 +2794,7 @@ namespace GanglandUndercover.Online
                 players.Remove(clientId);
                 _botController?.RemoveBot(clientId);
                 abilityCooldowns.Remove(clientId);
+                clientInputStaleTimers.Remove(clientId);
             }
         }
 
