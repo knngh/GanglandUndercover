@@ -1,5 +1,9 @@
 # D-4 Demo 发布记录（macOS 单平台，2026-10-17）
 
+> **2026-10-18 更新**：migration 隔夜重试（run 5，09:11）**双端 PASS**（DJB688→BPMKPD，
+> reconnected=true / replacementHost=true）——印证前夜定性为网络抖动，同代码清晨全绿。
+> 里程碑门禁（每里程碑重跑双进程 migration）已满足；连续两绿关闭判定见文末补记。
+
 > 里程碑：M-Demo.1 公开 Demo 的 macOS 部分（Windows 按 P0-1 用户拍板暂缓）。
 > 本记录只含可自动化验证项；真人 30 分钟走查归 D-5 外部试玩。
 
@@ -22,7 +26,7 @@
 | EditMode 全量 | **245/245 PASS** | `ci-logs/chat3fix-editmode-results.xml` |
 | PlayMode 全量 | **24 过 / 0 败 / 12 skip**（skip=opt-in 采样+Relay 双进程） | `ci-logs/chat3fix-playmode-results.xml` |
 | Relay 双进程 normal | **双端 PASS**（房间码 W9MDGQ，防注入门禁全 true） | `ci-logs/d4-relay-normal-run.log` |
-| Relay 双进程 migration | **未过，判定网络环境问题**（见下） | `ci-logs/d4-relay-migration-run{1,2,3,4}.log` |
+| Relay 双进程 migration | **✅ 已关闭**：10-18 run5+run6 连续双端 PASS（前夜 4 败定性网络抖动坐实） | `ci-logs/d4-relay-migration-run{1..6}.log` |
 | 构建产物启动冒烟 | **PASS**（进程存活 20s、Player.log 零异常、主菜单渲染完整） | `ci-logs/d4-smoke-player.log` + `d4-smoke-screen.png` |
 
 ## migration 回归未过的定性（诚实记录）
