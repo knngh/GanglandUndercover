@@ -171,6 +171,9 @@ namespace GanglandUndercover.Online
         // 超过阈值视为输入过期（掉线/停发），按零输入处理，防止角色按最后一次方向无限滑行。
         internal float ClientInputStaleSeconds = 1.0f;
         private readonly Dictionary<ulong, float> clientInputStaleTimers = new Dictionary<ulong, float>();
+        // 重连宽限期：对局中人掉线后保留身份槽位的时长，同行动代号重连可认领；到期未回归正式拆除。
+        internal float ClientReconnectGraceSeconds = 90f;
+        private readonly Dictionary<ulong, float> pendingDisconnectTeardowns = new Dictionary<ulong, float>();
         private bool localReady;
         internal bool roomAutoFillAi;
         internal bool revealRoleOnEject;
@@ -1050,6 +1053,8 @@ namespace GanglandUndercover.Online
 
                 TickActionMovement(deltaTime);
             }
+
+            TickReconnectGrace(deltaTime);
 
             TickMoleExposureCheck();
 

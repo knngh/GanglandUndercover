@@ -505,6 +505,107 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void Reconnect_DisconnectMidMatchDefersTeardown()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                fixture.ReportClientProfile(2UL, "断线测试员");
+                fixture.DisconnectClient(2UL);
+
+                Assert.IsTrue(fixture.HasPendingReconnect(2UL),
+                    "对局中断线应进入重连宽限期，不得立即拆除身份。");
+                Assert.IsNotEmpty(fixture.PrivateRoleName(2UL),
+                    "宽限期内必须保留私人角色。");
+                Assert.DoesNotThrow(() => fixture.PlayerPosition(2UL),
+                    "宽限期内玩家条目应保留（快照继续可见，看门狗冻结其位置）。");
+            }
+        }
+
+        [Test]
+        public void Reconnect_GraceExpiryTearsDownIdentity()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                fixture.ReportClientProfile(2UL, "逾期测试员");
+                fixture.DisconnectClient(2UL);
+                Assert.IsTrue(fixture.HasPendingReconnect(2UL));
+
+                fixture.TickReconnectGrace(90.1f);
+
+                Assert.IsFalse(fixture.HasPendingReconnect(2UL),
+                    "宽限期到期应移除挂起项。");
+                Assert.IsEmpty(fixture.PrivateRoleName(2UL),
+                    "宽限期到期未回归应正式拆除身份（角色移除）。");
+            }
+        }
+
+        [Test]
+        public void Reconnect_SameCodenameClaimsDisconnectedSlot()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                ulong disconnectedId = fixture.FindClientIdByPrivateRole("Undercover");
+                fixture.ReportClientProfile(disconnectedId, "重连测试员");
+                string roleBefore = fixture.PrivateRoleName(disconnectedId);
+                int[] tasksBefore = fixture.AssignedTaskIds(disconnectedId);
+                Vector3 positionBefore = fixture.PlayerPosition(disconnectedId);
+
+                fixture.DisconnectClient(disconnectedId);
+                Assert.IsTrue(fixture.HasPendingReconnect(disconnectedId));
+
+                fixture.ReportClientProfile(99UL, "重连测试员");
+
+                Assert.IsFalse(fixture.HasPendingReconnect(disconnectedId),
+                    "认领成功后应清除挂起项。");
+                Assert.AreEqual(roleBefore, fixture.PrivateRoleName(99UL),
+                    "新连接应继承断连者的私人角色。");
+                Assert.IsEmpty(fixture.PrivateRoleName(disconnectedId),
+                    "旧 clientId 的身份应完成迁移而非重复保留。");
+                // 分配集合经 HashSet 迁移，迭代顺序不保证——排序后比较集合内容。
+                int[] tasksAfter = fixture.AssignedTaskIds(99UL);
+                System.Array.Sort(tasksBefore);
+                System.Array.Sort(tasksAfter);
+                Assert.AreEqual(tasksBefore, tasksAfter,
+                    $"任务分配应迁移到新 clientId。before=[{string.Join(",", tasksBefore)}] after=[{string.Join(",", tasksAfter)}]");
+                Assert.AreEqual(positionBefore, fixture.PlayerPosition(99UL),
+                    "断连者的位置状态应随身份迁移。");
+            }
+        }
+
+        [Test]
         public void TaskList_ShowsLocalAssignmentsAndGlobalRepairCrisesOnly()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -5557,6 +5658,42 @@ namespace GanglandUndercover.Tests
             public void ReportClientState(ulong clientId, Vector3 position, Vector2 input, bool ready)
             {
                 InvokeNonPublicArgs("ApplyClientState", clientId, position, input, ready);
+            }
+
+            public void DisconnectClient(ulong clientId)
+            {
+                InvokeNonPublicArgs("HandleClientDisconnected", clientId);
+            }
+
+            public void TickReconnectGrace(float deltaTime)
+            {
+                InvokeNonPublicArgs("TickReconnectGrace", deltaTime);
+            }
+
+            public void ReportClientProfile(ulong clientId, string displayName)
+            {
+                InvokeNonPublicArgs("ApplyClientProfile", clientId, displayName);
+            }
+
+            public bool HasPendingReconnect(ulong clientId)
+            {
+                object table = GetField("pendingDisconnectTeardowns");
+                return (bool)table.GetType().GetMethod("ContainsKey").Invoke(table, new object[] { clientId });
+            }
+
+            public string PrivateRoleName(ulong clientId)
+            {
+                object roles = GetField("privateRoles");
+                foreach (object entry in (System.Collections.IEnumerable)roles)
+                {
+                    Type entryType = entry.GetType();
+                    if (Convert.ToUInt64(entryType.GetProperty("Key").GetValue(entry)) == clientId)
+                    {
+                        return entryType.GetProperty("Value").GetValue(entry).ToString();
+                    }
+                }
+
+                return string.Empty;
             }
 
             private void InvokeNonPublicArgs(string methodName, params object[] args)

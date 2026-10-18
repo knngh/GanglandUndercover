@@ -859,6 +859,7 @@ namespace GanglandUndercover.Online
 
             players.Clear();
             clientInputStaleTimers.Clear();
+            pendingDisconnectTeardowns.Clear();
             killSystem.Reset();
             caseLog.Clear();
             if (votingService != null) votingService.ClearVotes(); else votes.Clear();
@@ -1004,6 +1005,39 @@ namespace GanglandUndercover.Online
                 return;
             }
 
+            // 对局中人掉线进入重连宽限期：保留身份/角色/冷却，到期未回归才正式拆除。
+            // （断连回调只在 host/单机侧触发——client 侧 host 丢失已被 IsRemoteHostDisconnect 拦截）
+            bool midMatch = matchStarted && phase != OnlineMatchPhase.Lobby;
+            bool isBot = players.TryGetValue(clientId, out OnlinePlayerState disconnectedState) && disconnectedState.IsBot;
+            if (midMatch && !isBot)
+            {
+                DeferDisconnectedClientTeardown(clientId);
+                return;
+            }
+
+            TeardownDisconnectedClient(clientId);
+        }
+
+        // --- DeferDisconnectedClientTeardown ---
+        // 宽限期内保留 players 条目（输入停更看门狗会冻结其位置），仅剥离其进行中贡献：
+        // 释放手持任务/维修、剔除已投票——防会议卡死与挂机推进。身份映射到正式拆除时再清。
+        private void DeferDisconnectedClientTeardown(ulong clientId)
+        {
+            pendingDisconnectTeardowns[clientId] = ClientReconnectGraceSeconds;
+            ReleaseTasksHeldByClient(clientId);
+            RemoveDisconnectedPlayerVotes(clientId);
+
+            string displayName = players.TryGetValue(clientId, out OnlinePlayerState state)
+                ? state.DisplayName
+                : "玩家" + clientId;
+            AddCaseLog(displayName + " 已断线，" + Mathf.RoundToInt(ClientReconnectGraceSeconds) + " 秒内用相同行动代号可重连回归。");
+            BroadcastSnapshot();
+        }
+
+        // --- TeardownDisconnectedClient ---
+        private void TeardownDisconnectedClient(ulong clientId)
+        {
+            pendingDisconnectTeardowns.Remove(clientId);
             ReleaseTasksHeldByClient(clientId);
             RemoveDisconnectedPlayerVotes(clientId);
 
@@ -1031,6 +1065,113 @@ namespace GanglandUndercover.Online
 
                 EvaluateWinConditions();
                 BroadcastSnapshot();
+            }
+        }
+
+        // --- TickReconnectGrace ---
+        // 宽限期倒计时；到期未回归者正式拆除。dt 累加制（同输入看门狗），EditMode 可直调测试。
+        private void TickReconnectGrace(float deltaTime)
+        {
+            if (pendingDisconnectTeardowns.Count == 0)
+            {
+                return;
+            }
+
+            List<ulong> pendingIds = new List<ulong>(pendingDisconnectTeardowns.Keys);
+            foreach (ulong clientId in pendingIds)
+            {
+                float remaining = pendingDisconnectTeardowns[clientId] - deltaTime;
+                if (remaining > 0f)
+                {
+                    pendingDisconnectTeardowns[clientId] = remaining;
+                    continue;
+                }
+
+                Debug.Log("[Reconnect] 宽限期到期，正式移除客户端 " + clientId);
+                TeardownDisconnectedClient(clientId);
+            }
+        }
+
+        // --- TryReclaimReconnectingClient ---
+        // 断连宽限期内，同行动代号的新连接可认领旧身份槽位（角色/存活/冷却/任务分配整体迁移）。
+        // 局限（v1）：以 DisplayName 精确匹配为凭证——代号需唯一；正式身份令牌见 Alpha 队列。
+        private bool TryReclaimReconnectingClient(ulong newClientId, string displayName)
+        {
+            if (!matchStarted || pendingDisconnectTeardowns.Count == 0)
+            {
+                return false;
+            }
+
+            ulong oldClientId = ulong.MaxValue;
+            foreach (KeyValuePair<ulong, float> pair in pendingDisconnectTeardowns)
+            {
+                if (players.TryGetValue(pair.Key, out OnlinePlayerState pendingState)
+                    && string.Equals(pendingState.DisplayName, displayName, System.StringComparison.Ordinal))
+                {
+                    oldClientId = pair.Key;
+                    break;
+                }
+            }
+
+            if (oldClientId == ulong.MaxValue || !players.TryGetValue(oldClientId, out OnlinePlayerState state))
+            {
+                return false;
+            }
+
+            pendingDisconnectTeardowns.Remove(oldClientId);
+            state.ClientId = newClientId;
+            players.Remove(oldClientId);
+            players[newClientId] = state;
+
+            if (privateRoles.TryGetValue(oldClientId, out OnlineRole role))
+            {
+                privateRoles.Remove(oldClientId);
+                privateRoles[newClientId] = role;
+            }
+
+            RemapCooldownKey(killSystem?.killCooldowns, oldClientId, newClientId);
+            RemapCooldownKey(abilityCooldowns, oldClientId, newClientId);
+            RemapCooldownKey(serverChatLastSendTimes, oldClientId, newClientId);
+            RemapCooldownKey(clientInputStaleTimers, oldClientId, newClientId);
+            RemapTaskAssignments(oldClientId, newClientId);
+
+            AddCaseLog(state.DisplayName + " 已重连回归。");
+            status = state.DisplayName + " 已重连回归。";
+            return true;
+        }
+
+        // --- RemapCooldownKey ---
+        private static void RemapCooldownKey(Dictionary<ulong, float> table, ulong oldClientId, ulong newClientId)
+        {
+            if (table == null || !table.TryGetValue(oldClientId, out float value))
+            {
+                return;
+            }
+
+            table.Remove(oldClientId);
+            table[newClientId] = value;
+        }
+
+        // --- RemapTaskAssignments ---
+        // 任务分配/进度整表导出→换 clientId→重载（走快照同款通道，保进度与完成态）。
+        private void RemapTaskAssignments(ulong oldClientId, ulong newClientId)
+        {
+            List<GameStateSnapshot.SnapshotTaskAssignmentEntry> entries = TaskSyncAssignmentsSnapshot();
+            bool changed = false;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                if (entries[i].ClientId == oldClientId)
+                {
+                    GameStateSnapshot.SnapshotTaskAssignmentEntry entry = entries[i];
+                    entry.ClientId = newClientId;
+                    entries[i] = entry;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                LoadTaskSyncAssignments(entries);
             }
         }
 
@@ -1484,6 +1625,13 @@ namespace GanglandUndercover.Online
         private void ApplyClientProfile(ulong senderClientId, string displayName)
         {
             string safeName = OnlineMatchUtils.LimitText(displayName, 16, "港区玩家");
+
+            // 对局中掉线玩家的同代号重连：优先认领旧身份槽位。
+            if (TryReclaimReconnectingClient(senderClientId, safeName))
+            {
+                BroadcastSnapshot();
+                return;
+            }
 
             if (players.TryGetValue(senderClientId, out OnlinePlayerState state))
             {
