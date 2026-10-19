@@ -2520,6 +2520,7 @@ namespace GanglandUndercover.Online
 
             CreateOperationalLightingLayer();
             ApplyDecorationNoiseMutePass();
+            ApplyFloorLiftPass();
         }
 
         /// <summary>
@@ -2544,6 +2545,7 @@ namespace GanglandUndercover.Online
             CreateCommercialArtAdapterLayer();
             CreateVerticalSliceProductionLayer();
             ApplyDecorationNoiseMutePass();
+            ApplyFloorLiftPass();
         }
 
         private void CreateOperationalLightingLayer()
@@ -2618,6 +2620,73 @@ namespace GanglandUndercover.Online
 
         /// <summary>小于该尺寸的彩色微件（状态灯点/座位点/霓虹小条）保留原色——城市生气不压。</summary>
         private const float DecorationMuteMinDimension = 0.35f;
+
+        /// <summary>
+        /// 批次 2c：暗部灰阶提升。2b 降噪后整图瓶颈转为明度对比（整体偏深灰），
+        /// 本 pass 只抬 value ∈ [0.06, 0.28] 的低饱和大面积面（地板/走廊/街块），
+        /// 外暗区/围挡（&lt;0.06）保持压暗做取景对比，彩色件与玩法色不碰。
+        /// </summary>
+        private void ApplyFloorLiftPass()
+        {
+            if (_worldRoot == null) return;
+
+            foreach (SpriteRenderer spriteRenderer in _worldRoot.GetComponentsInChildren<SpriteRenderer>())
+            {
+                if (spriteRenderer == null || spriteRenderer.sprite == null) continue;
+
+                Texture2D spriteTexture = spriteRenderer.sprite.texture;
+                if (spriteTexture == null
+                    || spriteTexture.name.IndexOf("Runtime ", StringComparison.Ordinal) != 0)
+                {
+                    continue; // 只调程序化色块，LimeZu/atlas 实物贴图保持原样
+                }
+
+                string propName = spriteRenderer.gameObject.name;
+                bool gameplayCoded = false;
+                foreach (string token in DecorationMuteGameplayTokens)
+                {
+                    if (propName.IndexOf(token, StringComparison.Ordinal) >= 0)
+                    {
+                        gameplayCoded = true;
+                        break;
+                    }
+                }
+                if (gameplayCoded) continue;
+
+                Vector3 lossyScale = spriteRenderer.transform.lossyScale;
+                if (Mathf.Max(lossyScale.x, lossyScale.y) < FloorLiftMinDimension) continue;
+
+                Color color = spriteRenderer.color;
+                float hue;
+                float saturation;
+                float value;
+                Color.RGBToHSV(color, out hue, out saturation, out value);
+                if (saturation >= FloorLiftMaxSaturation || value < FloorLiftValueFloor || value > 0.30f) continue;
+
+                float lifted = Mathf.Min(value * FloorLiftValueScale, FloorLiftValueClamp);
+                spriteRenderer.color = Color.HSVToRGB(hue, saturation, lifted);
+            }
+        }
+
+        // ── 批次 2c：整图提亮（2b 遗留瓶颈：明度对比，整体偏深灰）──
+
+        /// <summary>暗部灰阶提升系数：只动 value ∈ [0.05, 0.30] 的低饱和面（地板/走廊/街块）。</summary>
+        private const float FloorLiftValueScale = 1.6f;
+
+        /// <summary>提亮上限：不催生新的亮块层级。</summary>
+        private const float FloorLiftValueClamp = 0.40f;
+
+        /// <summary>提亮下限：外暗区(0.025)/围挡(0.035) 等取景框暗色保持压暗对比。</summary>
+        private const float FloorLiftValueFloor = 0.05f;
+
+        /// <summary>只动低饱和灰阶；彩色件（玩法色/彩饰）不动。</summary>
+        private const float FloorLiftMaxSaturation = 0.5f;
+
+        /// <summary>小微件不参与（同降噪豁免）。</summary>
+        private const float FloorLiftMinDimension = 0.35f;
+
+        /// <summary>主走廊暖白洗颜色：低饱和（≈0.16）免疫降噪/提亮两 pass 误伤。</summary>
+        private static readonly Color CorridorLiftWashColor = new Color(0.88f, 0.85f, 0.74f, 0.11f);
 
         /// <summary>玩法指代色豁免：门禁/入口/任务/暗线等颜色编码不动。</summary>
         private static readonly string[] DecorationMuteGameplayTokens =
@@ -2735,6 +2804,22 @@ namespace GanglandUndercover.Online
             CreateRotatedProp("北走廊导向线 B", new Vector3(5.9f, 3.98f, -0.07f), new Vector3(5.4f, 0.05f, 0.09f), guide, -1f);
             CreateRotatedProp("南走廊导向线 A", new Vector3(-5.8f, -3.72f, -0.07f), new Vector3(5.1f, 0.05f, 0.09f), guide, -1.5f);
             CreateRotatedProp("南走廊导向线 B", new Vector3(5.25f, -3.58f, -0.07f), new Vector3(5.0f, 0.05f, 0.09f), guide, 1.5f);
+
+            // 批次 2c：主走廊暖白提亮洗（2b 遗留瓶颈）。低饱和（≈0.16）免疫降噪/提亮 pass，
+            // z=-0.15 位于走廊地面上方、导向线/圆节点下方——只提走廊明度不改任何几何。
+            CreateCorridorLiftWash("会议中心圆舱", new Vector3(0f, -0.08f, -0.15f), new Vector3(2.35f, 1.6f));
+            CreateCorridorLiftWash("西中段弯廊", new Vector3(-3.85f, 0.08f, -0.15f), new Vector3(6.9f, 1.15f));
+            CreateCorridorLiftWash("东中段弯廊", new Vector3(4.15f, -0.15f, -0.15f), new Vector3(7.3f, 1.15f));
+            CreateCorridorLiftWash("中心南向短舱", new Vector3(0.18f, -3.16f, -0.15f), new Vector3(1.25f, 4.8f));
+            CreateCorridorLiftWash("西上斜向连接舱", new Vector3(-3.82f, 2.38f, -0.14f), new Vector3(4.55f, 0.72f));
+            CreateCorridorLiftWash("东上斜向连接舱", new Vector3(2.7f, 2.4f, -0.14f), new Vector3(4.45f, 0.72f));
+            CreateCorridorLiftWash("西下斜向连接舱", new Vector3(-3.6f, -2.1f, -0.14f), new Vector3(4.7f, 0.72f));
+            CreateCorridorLiftWash("东下斜向连接舱", new Vector3(3.1f, -2.02f, -0.14f), new Vector3(4.5f, 0.72f));
+        }
+
+        private void CreateCorridorLiftWash(string washName, Vector3 center, Vector2 size)
+        {
+            CreateShapeProp("走廊提亮 " + washName, _roundedRectSprite, new Vector3(center.x, center.y, center.z), new Vector3(size.x, size.y, 0.06f), CorridorLiftWashColor);
         }
 
         private void CreateCorridorSegment(string corridorName, Vector3 center, Vector3 size, Color color, bool roundNode)
