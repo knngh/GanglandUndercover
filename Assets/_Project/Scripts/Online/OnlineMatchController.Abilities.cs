@@ -223,6 +223,48 @@ namespace GanglandUndercover.Online
         }
 
         // ============================================================
+        //  KillRangeBonus — Enforcer: 击杀范围
+        //  ReportRangeBonus — Inspector: 报警范围
+        //  SabotageRangeBonus — Fixer: 破坏范围
+        //  VentCooldownReduce — Driver: 通风管冷却
+        // ============================================================
+
+        public float KillRangeMultiplier(ulong clientId)
+        {
+            if (!HasAbility(clientId, AbilityType.KillRangeBonus)) return 1f;
+            if (!players.TryGetValue(clientId, out var state)) return 1f;
+            return ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.KillRangeBonus);
+        }
+
+        public float ReportRangeMultiplier(ulong clientId)
+        {
+            if (!HasAbility(clientId, AbilityType.ReportRangeBonus)) return 1f;
+            if (!players.TryGetValue(clientId, out var state)) return 1f;
+            return ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.ReportRangeBonus);
+        }
+
+        public float SabotageRangeMultiplier(ulong clientId)
+        {
+            if (!HasAbility(clientId, AbilityType.SabotageRangeBonus)) return 1f;
+            if (!players.TryGetValue(clientId, out var state)) return 1f;
+            return ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.SabotageRangeBonus);
+        }
+
+        public float VentCooldownReduceMultiplier(ulong clientId)
+        {
+            if (!HasAbility(clientId, AbilityType.VentCooldownReduce)) return 1f;
+            if (!players.TryGetValue(clientId, out var state)) return 1f;
+            return ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.VentCooldownReduce);
+        }
+
+        public float ReportCooldownMultiplier(ulong clientId)
+        {
+            if (!HasAbility(clientId, AbilityType.ReportCooldownReduce)) return 1f;
+            if (!players.TryGetValue(clientId, out var state)) return 1f;
+            return ruleSet.GetAbilityMultiplier(state.Profession, AbilityType.ReportCooldownReduce);
+        }
+
+        // ============================================================
         //  MoleIntel — Mole: 窃取 Police 任务进度
         // ============================================================
 

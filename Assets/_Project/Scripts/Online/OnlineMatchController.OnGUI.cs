@@ -1044,7 +1044,7 @@ namespace GanglandUndercover.Online
                     + " | 类型: " + OnlineMatchUtils.SabotageName(OnlineMatchUtils.SabotageForTask(nearestTask.Id));
             }
 
-            if (TryFindNearestBody(localState.Position, out _))
+            if (TryFindNearestBody(localState.ClientId, localState.Position, out _))
             {
                 return "附近发现尸体，按 R 报案开会。";
             }

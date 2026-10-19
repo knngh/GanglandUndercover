@@ -1142,7 +1142,7 @@ namespace GanglandUndercover.Online
                 return false;
             }
 
-            OnlineTaskState task = FindNearestTask(player.Position);
+            OnlineTaskState task = FindNearestTask(player.Position, ruleSet.InteractionRange * SabotageRangeMultiplier(senderClientId));
             if (task.Id < 0 || task.Sabotaged)
             {
                 return false;
@@ -1861,7 +1861,7 @@ namespace GanglandUndercover.Online
 
             if (!CanKillTarget(senderClientId, targetClientId)
                 || !players.TryGetValue(targetClientId, out OnlinePlayerState victim)
-                || Vector3.Distance(player.Position, victim.Position) > ruleSet.KillRange)
+                || Vector3.Distance(player.Position, victim.Position) > ruleSet.KillRange * KillRangeMultiplier(senderClientId))
             {
                 status = "附近没有可击倒目标。";
                 BroadcastSnapshot();
@@ -1981,7 +1981,7 @@ namespace GanglandUndercover.Online
                 case OnlineProfession.Forensics:
                     int corpseBonus = CorpseExamineBonus(senderClientId);
                     int evidenceGain = 1;
-                    if (TryFindNearestBody(player.Position, out int corpseIndex))
+                    if (TryFindNearestBody(senderClientId, player.Position, out int corpseIndex))
                     {
                         evidenceGain += corpseBonus;
                         OnlineBodyState corpse = killSystem.bodies[corpseIndex];
@@ -2199,13 +2199,17 @@ namespace GanglandUndercover.Online
                 return;
             }
 
-            if (killSystem.reportCooldownTimer > 0f)
+            // 报告冷却为全局单计时器（BeginMeeting 重置）；ReportCooldownReduce 职业按比例
+            // 缩短对自己生效的冷却窗：允许在剩余时间 < (1-乘数)×总窗口 时提前报案。
+            float reportCooldownAllowance = ruleSet.ReportCooldownSecondsFor(players.Count)
+                * (1f - ReportCooldownMultiplier(senderClientId));
+            if (killSystem.reportCooldownTimer > reportCooldownAllowance)
             {
                 status = "报案冷却中：" + Mathf.CeilToInt(killSystem.reportCooldownTimer) + "s，请稍后再试。";
                 BroadcastSnapshot();
                 return;
             }
-            if (TryFindNearestBody(player.Position, out int bodyIndex))
+            if (TryFindNearestBody(senderClientId, player.Position, out int bodyIndex))
             {
                 OnlineBodyState body = killSystem.bodies[bodyIndex];
                 body.Reported = true;
@@ -2826,10 +2830,10 @@ namespace GanglandUndercover.Online
 
         /// <summary>检查房间是否被封锁。</summary>
 
-        internal bool TryFindNearestBody(Vector3 position, out int bodyIndex)
+        internal bool TryFindNearestBody(ulong reporterId, Vector3 position, out int bodyIndex)
         {
             if (killSystem != null)
-                return killSystem.TryFindNearestBody(position, out bodyIndex);
+                return killSystem.TryFindNearestBody(reporterId, position, out bodyIndex);
             bodyIndex = -1;
             return false;
         }

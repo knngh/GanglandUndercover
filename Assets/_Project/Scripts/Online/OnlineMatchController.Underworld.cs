@@ -61,8 +61,9 @@ namespace GanglandUndercover.Online
 
             // 6. 执行瞬移
             player.Position = destination;
-            ventCooldowns[senderClientId] = ruleSet.VentCooldownSeconds;
-            player.VentCooldown = ruleSet.VentCooldownSeconds;
+            float ventCooldown = ruleSet.VentCooldownSeconds * VentCooldownReduceMultiplier(senderClientId);
+            ventCooldowns[senderClientId] = ventCooldown;
+            player.VentCooldown = ventCooldown;
             players[senderClientId] = player;
 
             string msg = "暗线通道出现短暂动静。";

@@ -1482,10 +1482,10 @@ namespace GanglandUndercover.Online
 
             return best;
         }
-        private OnlineTaskState FindNearestTask(Vector3 position)
+        private OnlineTaskState FindNearestTask(Vector3 position, float maxDistance = -1f)
         {
             OnlineTaskState best = new OnlineTaskState(-1, string.Empty, Vector3.zero, 0, 1, false, false);
-            float bestDistance = ruleSet.InteractionRange;
+            float bestDistance = maxDistance > 0f ? maxDistance : ruleSet.InteractionRange;
 
             foreach (OnlineTaskState task in tasks)
             {

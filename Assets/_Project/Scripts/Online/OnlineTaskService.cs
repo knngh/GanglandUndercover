@@ -138,10 +138,10 @@ namespace GanglandUndercover.Online
         /// <summary>
         /// 查找最近的任务。Id == -1 表示范围内无任务。
         /// </summary>
-        public OnlineTaskState FindNearestTask(Vector3 position)
+        public OnlineTaskState FindNearestTask(Vector3 position, float maxDistance = -1f)
         {
             OnlineTaskState best = new OnlineTaskState(-1, string.Empty, Vector3.zero, 0, 1, false, false);
-            float bestDistance = ruleSet.InteractionRange;
+            float bestDistance = maxDistance > 0f ? maxDistance : ruleSet.InteractionRange;
 
             foreach (OnlineTaskState task in tasks)
             {

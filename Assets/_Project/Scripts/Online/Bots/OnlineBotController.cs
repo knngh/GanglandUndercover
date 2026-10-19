@@ -420,8 +420,7 @@ namespace GanglandUndercover.Online
             // 发现半径对齐平衡表 ReportRange（4P 1.25 / 8P 1.5）——旧值
             // BotInteractDistance 0.45 要踩到尸体上才触发，v15 采样 3 杀 0 报案。
             if (bot.Alive &&
-                _ctrl.TryFindNearestBody(bot.Position, out int bodyIndex) &&
-                Vector3.Distance(bot.Position, _ctrl.Bodies[bodyIndex].Position) < _ctrl.RuleSet.ReportRangeFor(_ctrl.Players.Count))
+                _ctrl.TryFindNearestBody(botId, bot.Position, out int bodyIndex))
             {
                 int bodyId = _ctrl.Bodies[bodyIndex].Id;
                 var rollKey = (botId, bodyId);

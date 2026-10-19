@@ -606,6 +606,133 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void AbilityRanges_EnforcerKillRangeBoostsServerKillValidation()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                // 同一黑帮攻击者自对照：先无加成职业（Fixer），再 Enforcer。
+                // StartOnlineMatchCore 会重派角色/重锚位置，故职业与坐标都在 core 之后设置。
+                // 开局会给黑帮发初始击杀冷却（12s），不归零会被冷却门先拦，范围门测不到。
+                ulong attacker = fixture.FindClientIdByPrivateRole("Gang");
+                ulong victim = fixture.FindClientIdByPrivateRole("Police");
+                fixture.SetPlayerPosition(attacker, Vector3.zero);
+                fixture.SetPlayerPosition(victim, new Vector3(1.2f, 0f, 0f));
+                fixture.SetKillCooldown(attacker, 0f);
+
+                fixture.SetPlayerProfession(attacker, "Fixer");
+                fixture.InvokeNonPublicArgs("TryKill", attacker, fixture.PlayerState(attacker), victim);
+                Assert.IsTrue(fixture.PlayerAlive(victim),
+                    "无 KillRangeBonus 的黑帮在超出基础范围（1.1）的 1.2 距离不得击杀。");
+
+                fixture.SetPlayerProfession(attacker, "Enforcer");
+                fixture.InvokeNonPublicArgs("TryKill", attacker, fixture.PlayerState(attacker), victim);
+                Assert.IsFalse(fixture.PlayerAlive(victim),
+                    $"Enforcer 的 KillRangeBonus（1.1×1.25=1.375）应放行 1.2 距离的击杀。实际职业={fixture.ProfessionName(attacker)} 角色={fixture.PrivateRoleName(attacker)} mult={fixture.InvokePublicFloat("KillRangeMultiplier", attacker)} KillRange={fixture.RuleSetKillRange()} status={fixture.StatusText()}");
+            }
+        }
+
+        [Test]
+        public void AbilityRanges_InspectorReportRangeBoostsBodyReport()
+        {
+            // 反例（独立 fixture）：无加成职业（Forensics）在 1.3 距离超出基础报警范围（4P 1.25），
+            // 报不了案。注意负例会跌进紧急铃分支召开会议——所以正例必须用独立 fixture，
+            // 否则 phase 被切成 Meeting 后正例在入口就被静默返回。
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                fixture.SetPlayerPosition(2UL, Vector3.zero);
+                fixture.SetPlayerProfession(2UL, "Forensics");
+                fixture.SetReportCooldownTimer(0f);
+                fixture.AddUnreportedBody(101, 3UL, new Vector3(1.3f, 0f, 0f));
+
+                fixture.InvokeNonPublicArgs("TryReportOrEmergency", 2UL, fixture.PlayerState(2UL));
+                Assert.IsFalse(fixture.BodyReported(101),
+                    "无 ReportRangeBonus 的职业在超出基础范围的距离不得报案。");
+            }
+
+            // 正例（独立 fixture）：Inspector（1.25×1.15≈1.4375）同距离应能报案。
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                fixture.SetPlayerPosition(1UL, Vector3.zero);
+                fixture.SetPlayerProfession(1UL, "Inspector");
+                fixture.SetReportCooldownTimer(0f);
+                fixture.AddUnreportedBody(102, 3UL, new Vector3(1.3f, 0f, 0f));
+
+                fixture.InvokeNonPublicArgs("TryReportOrEmergency", 1UL, fixture.PlayerState(1UL));
+                Assert.IsTrue(fixture.BodyReported(102),
+                    $"Inspector 的 ReportRangeBonus 应放行 1.3 距离的报案。实际职业={fixture.ProfessionName(1UL)} status={fixture.StatusText()}");
+            }
+        }
+
+        [Test]
+        public void AbilityCooldowns_InspectorReportsEarlierInGlobalReportCooldown()
+        {
+            using (ControllerFixture fixture = new ControllerFixture())
+            {
+                fixture.SetLocalPreviewMode(true);
+                fixture.ConfigureRoom(minPlayers: 4, maxPlayers: 4, autoFillAi: false);
+                fixture.AttachSyncManager();
+                for (ulong clientId = 1UL; clientId <= 4UL; clientId++)
+                {
+                    fixture.SetPlayer(clientId, Vector3.zero, alive: true);
+                }
+
+                fixture.StartOnlineMatchCore();
+                fixture.SetPhase("Action");
+
+                // 全局报告冷却 5s（4P）；Inspector 乘数 0.8 → 对其有效门槛 5×(1-0.8)=1.0s。
+                fixture.AddUnreportedBody(201, 3UL, new Vector3(0.3f, 0f, 0f));
+                fixture.SetPlayerPosition(1UL, Vector3.zero);
+                fixture.SetPlayerProfession(1UL, "Inspector");
+                fixture.SetPlayerProfession(2UL, "Forensics");
+                fixture.SetReportCooldownTimer(0.8f);
+
+                // 普通职业：0.8 > 0 仍被拦（门禁先于范围判定，位置无所谓）。
+                fixture.InvokeNonPublicArgs("TryReportOrEmergency", 2UL, fixture.PlayerState(2UL));
+                StringAssert.Contains("报案冷却中", fixture.StatusText(),
+                    "无 ReportCooldownReduce 的职业在冷却期不得报案。");
+                Assert.IsFalse(fixture.BodyReported(201));
+
+                // Inspector：剩余 0.8 ≤ 1.0 允许提前报案。
+                fixture.InvokeNonPublicArgs("TryReportOrEmergency", 1UL, fixture.PlayerState(1UL));
+                Assert.IsTrue(fixture.BodyReported(201),
+                    "Inspector 的 ReportCooldownReduce 应允许在冷却末段提前报案。");
+            }
+        }
+
+        [Test]
         public void TaskList_ShowsLocalAssignmentsAndGlobalRepairCrisesOnly()
         {
             using (ControllerFixture fixture = new ControllerFixture())
@@ -5614,6 +5741,39 @@ namespace GanglandUndercover.Tests
                 return (Vector3)playerStateType.GetField("Position").GetValue(GetPlayerState(clientId));
             }
 
+            public object PlayerState(ulong clientId)
+            {
+                return GetPlayerState(clientId);
+            }
+
+            public void SetPlayerProfession(ulong clientId, string professionName)
+            {
+                object state = GetPlayerState(clientId);
+                playerStateType.GetField("Profession").SetValue(state, Enum.Parse(professionType, professionName));
+                SetPlayerState(clientId, state);
+            }
+
+            public string ProfessionName(ulong clientId)
+            {
+                object state = GetPlayerState(clientId);
+                return playerStateType.GetField("Profession").GetValue(state).ToString();
+            }
+
+            public float InvokePublicFloat(string methodName, params object[] args)
+            {
+                return Convert.ToSingle(controllerType
+                    .GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public)
+                    .Invoke(controller, args));
+            }
+
+            public float RuleSetKillRange()
+            {
+                object ruleSet = GetField("ruleSet");
+                return ruleSet != null
+                    ? Convert.ToSingle(ruleSet.GetType().GetField("KillRange").GetValue(ruleSet))
+                    : -1f;
+            }
+
             public Vector2 PlayerInput(ulong clientId)
             {
                 return (Vector2)playerStateType.GetField("Input").GetValue(GetPlayerState(clientId));
@@ -5696,7 +5856,58 @@ namespace GanglandUndercover.Tests
                 return string.Empty;
             }
 
-            private void InvokeNonPublicArgs(string methodName, params object[] args)
+            public void AddUnreportedBody(int bodyId, ulong victimClientId, Vector3 position)
+            {
+                object killSystem = GetField("killSystem");
+                object bodies = killSystem.GetType()
+                    .GetField("bodies", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                    .GetValue(killSystem);
+                Type bodyType = bodies.GetType().GetGenericArguments()[0];
+                object body = Activator.CreateInstance(bodyType, bodyId, victimClientId, position, false);
+                bodies.GetType().GetMethod("Add").Invoke(bodies, new[] { body });
+            }
+
+            public bool BodyReported(int bodyId)
+            {
+                object killSystem = GetField("killSystem");
+                object bodies = killSystem.GetType()
+                    .GetField("bodies", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                    .GetValue(killSystem);
+                foreach (object body in (System.Collections.IEnumerable)bodies)
+                {
+                    if (Convert.ToInt32(body.GetType().GetField("Id").GetValue(body)) == bodyId)
+                    {
+                        return (bool)body.GetType().GetField("Reported").GetValue(body);
+                    }
+                }
+
+                Assert.Fail("找不到尸体 Id=" + bodyId);
+                return false;
+            }
+
+            public void SetReportCooldownTimer(float seconds)
+            {
+                object killSystem = GetField("killSystem");
+                killSystem.GetType()
+                    .GetField("reportCooldownTimer", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                    .SetValue(killSystem, seconds);
+            }
+
+            public void SetKillCooldown(ulong clientId, float seconds)
+            {
+                object killSystem = GetField("killSystem");
+                object cooldowns = killSystem.GetType()
+                    .GetField("killCooldowns", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                    .GetValue(killSystem);
+                cooldowns.GetType().GetMethod("set_Item").Invoke(cooldowns, new[] { (object)clientId, seconds });
+            }
+
+            public string StatusText()
+            {
+                return (string)GetField("status");
+            }
+
+            internal void InvokeNonPublicArgs(string methodName, params object[] args)
             {
                 controllerType
                     .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)

@@ -212,13 +212,14 @@ namespace GanglandUndercover.Online
         }
 
         /// <summary>
-        /// 服务器端：查找指定位置附近的最近未报案尸体。
+        /// 服务器端：查找指定位置附近的最近未报案尸体（报告者可携带 ReportRangeBonus）。
         /// </summary>
-        internal bool TryFindNearestBody(Vector3 position, out int bodyIndex)
+        internal bool TryFindNearestBody(ulong reporterId, Vector3 position, out int bodyIndex)
         {
             bodyIndex = -1;
             if (controller == null) return false;
-            float bestDistance = controller.RuleSet.ReportRangeFor(controller.Players.Count);
+            float bestDistance = controller.RuleSet.ReportRangeFor(controller.Players.Count)
+                * controller.ReportRangeMultiplier(reporterId);
 
             for (int i = 0; i < bodies.Count; i++)
             {
@@ -720,7 +721,7 @@ namespace GanglandUndercover.Online
             if (!localState.Alive) return false;
 
             Vector3 localPos = localState.Position;
-            float bestDistance = EffectiveKillRange + 0.01f;
+            float bestDistance = EffectiveKillRange * controller.KillRangeMultiplier(localId) + 0.01f;
             ulong bestId = 0;
             OnlinePlayerState bestVictim = default;
 

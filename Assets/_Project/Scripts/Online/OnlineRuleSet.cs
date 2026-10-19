@@ -194,6 +194,7 @@ namespace GanglandUndercover.Online
                 Abilities = new[]
                 {
                     new ProfessionAbility { Type = AbilityType.ReportCooldownReduce, Multiplier = 0.8f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.ReportRangeBonus, Multiplier = 1.15f, BonusValue = 0f, Enabled = true },
                     new ProfessionAbility { Type = AbilityType.FootprintTrack, Multiplier = 1f, BonusValue = 0f, Enabled = true },
                 }
             },
@@ -223,6 +224,7 @@ namespace GanglandUndercover.Online
                 Abilities = new[]
                 {
                     new ProfessionAbility { Type = AbilityType.KillCooldownReduce, Multiplier = 0.75f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.KillRangeBonus, Multiplier = 1.25f, BonusValue = 0f, Enabled = true },
                     new ProfessionAbility { Type = AbilityType.DarkVision, Multiplier = 1f, BonusValue = 0f, Enabled = true },
                 }
             },
@@ -233,6 +235,7 @@ namespace GanglandUndercover.Online
                 {
                     new ProfessionAbility { Type = AbilityType.BodyDrag, Multiplier = 1f, BonusValue = 0f, Enabled = true },
                     new ProfessionAbility { Type = AbilityType.SabotageCooldownReduce, Multiplier = 0.8f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.SabotageRangeBonus, Multiplier = 1.2f, BonusValue = 0f, Enabled = true },
                 }
             },
 
@@ -248,6 +251,7 @@ namespace GanglandUndercover.Online
                 Abilities = new[]
                 {
                     new ProfessionAbility { Type = AbilityType.VentSpeedBonus, Multiplier = 1.5f, BonusValue = 0f, Enabled = true },
+                    new ProfessionAbility { Type = AbilityType.VentCooldownReduce, Multiplier = 0.8f, BonusValue = 0f, Enabled = true },
                     new ProfessionAbility { Type = AbilityType.MoveSpeedBonus, Multiplier = 1.08f, BonusValue = 0f, Enabled = true },
                 }
             },
