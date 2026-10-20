@@ -28,7 +28,6 @@ namespace GanglandUndercover.Online
     {
         private const string ClientStateMessage = "GanglandClientState";
         private const string ClientActionMessage = "GanglandClientAction";
-        private const string ClientProfileMessage = "GanglandClientProfile";
         private const string ServerSnapshotMessage = "GanglandServerSnapshot";
         private const string RoleAssignMessage = "GanglandRoleAssign";
         private const string IdentityProgressMessage = "GanglandIdentityProgress";
