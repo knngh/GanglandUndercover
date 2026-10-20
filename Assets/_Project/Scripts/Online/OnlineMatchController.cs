@@ -33,7 +33,6 @@ namespace GanglandUndercover.Online
         private const string RoleAssignMessage = "GanglandRoleAssign";
         private const string IdentityProgressMessage = "GanglandIdentityProgress";
         private const string MoleTargetMessage = "GanglandMoleTarget";
-        private const string AbilityFeedbackMessage = "GanglandAbilityFeedback"; // P0-3
         private const string MapSelectMessage = "GanglandMapSelect"; // D5
         private const string WorldRootName = "Online Gangland Runtime Map v5";
         private const string QuaterniusFbxRoot = "Assets/_Project/Art/ThirdParty/Quaternius/ModularSciFiMegaKit/FBX/";
