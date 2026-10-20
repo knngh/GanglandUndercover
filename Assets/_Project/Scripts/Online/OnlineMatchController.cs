@@ -33,8 +33,6 @@ namespace GanglandUndercover.Online
         private const string RoleAssignMessage = "GanglandRoleAssign";
         private const string IdentityProgressMessage = "GanglandIdentityProgress";
         private const string MoleTargetMessage = "GanglandMoleTarget";
-        private const string ChatSendMessage = "GanglandChatSend";
-        private const string ChatBroadcastMessage = "GanglandChatBroadcast";
         private const string AbilityFeedbackMessage = "GanglandAbilityFeedback"; // P0-3
         private const string MapSelectMessage = "GanglandMapSelect"; // D5
         private const string WorldRootName = "Online Gangland Runtime Map v5";
@@ -165,8 +163,6 @@ namespace GanglandUndercover.Online
         private OnlineRole localRole = OnlineRole.Unassigned;
         private OnlineProfession localProfession = OnlineProfession.Inspector;
         internal OnlineMatchPhase phase = OnlineMatchPhase.Lobby;
-        private ChatSystem chatSystem;
-        private readonly Dictionary<ulong, float> serverChatLastSendTimes = new Dictionary<ulong, float>();
         // 移动校验：Action 阶段位置由服务端按输入积分；本表记录自该客户端上次上报状态以来的时长，
         // 超过阈值视为输入过期（掉线/停发），按零输入处理，防止角色按最后一次方向无限滑行。
         internal float ClientInputStaleSeconds = 1.0f;
