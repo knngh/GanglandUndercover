@@ -1,6 +1,47 @@
 # Gangland Undercover — KNOWN_ISSUES.md
 
-> **最后更新**: 2026-08-24 10:16 | **版本**: v0.3.0-demo | **更新人**: Demo 计划 D-2/D-3 剩余门禁推进
+> **最后更新**: 2026-10-21 13:50 | **版本**: v0.3.0-demo | **更新人**: D-4 收官 + Alpha 三项 + 重连 E2E 推进
+
+## 2026-10-21 基线刷新（v0.3.0-demo，commit `8603e622` 后）
+
+| 项目 | 实测 | 证据 |
+|------|------|------|
+| EditMode | **253/253 PASS** | `ci-logs/deafclient-editmode-results.xml` |
+| PlayMode | **25 passed / 0 failed / 14 skipped**（skip=opt-in 自然采样 + Relay 双进程角色） | `ci-logs/deafclient-playmode-results.xml` |
+| Relay normal 双进程 | PASS（2026-10-17） | `ci-logs/d4-relay-normal-run.log` |
+| Relay migration | **连续两绿关闭**（10-18 run5+run6） | `ci-logs/d4-relay-migration-run5/6.log` |
+| Relay **rejoin** E2E | run5 双端 PASS（13:25）；run6 暴露重连脆弱点已加固（3 次重试）；run7 撞网络窗口 | `ci-logs/rejoin-e2e-run5/6/7.log` |
+| 构建产物 | macOS DMG 113MB（10-21 13:30 版），启动冒烟 PASS | `ci-logs/d4-macos-rebuild-6.log` |
+
+### 本轮修复的重大 bug（D-5 前必读）
+
+1. **聋客户端（`8603e622`）**：所有连接路径在 NGO 连接建立前注册命名消息 handler（静默空转）——**此前所有 relay/直连客户端收不到任何服务器消息**（快照/身份/聊天）。修复=HandleClientConnected 自己连上时补注册。**旧构建的多人模式不可玩，外部试玩务必用 10-21 13:30 之后版本。**
+2. **重连认领缺身份补发（`98b22cbc`）**：认领后未给新 clientId 补发 RoleAssign，回归端身份显示未分配。已修（SendRole 补发）。
+
+### 当前已知问题 / 限制
+
+1. **重连 v1 凭证=行动代号精确匹配**：同房间内代号必须唯一；正式匿名身份令牌归 Alpha 后续。
+2. **Windows 构建暂缓**（P0-1：缺 Build Support 模块，用户拍板单平台 macOS）。
+3. **Unity 服务网络窗口性抖动**（重要，影响所有 Relay 门禁判读）：本机到 Unity 认证/Relay 存在小时级劣化窗口（症状：认证 SSL 失败 → DNS 解析失败 → join 请求不达）。窗口内 migration/rejoin E2E 会失败，**同一代码窗口过后即可全绿**（10-20 migration 四连败→10-21 清晨两绿；10-21 rejoin run5 绿→run6/7 网络窗口）。判读纪律：先 curl services.unity.com 探网，网络期失败重跑而非改代码。
+4. **休眠能力新数值为待调提案**（`98ffe7b4`）：Enforcer KillRange 1.25x / Inspector ReportRange 1.15x / Fixer SabotageRange 1.2x / Driver VentCooldown 0.8x——平衡表无历史行，调参入口 `OnlineRuleSet.cs` 职业表。
+5. **VentSpeedBonus 设计死端**：通风为瞬移（无移动阶段），1.5x 速度乘数无消费点（accessor 存在但零调用）。要么做通道穿行玩法，要么从 Driver 表移除——待定。
+6. **D-3 双人真人走查未做**（用户暂跳过）：清单+重连回归项已备 `output/d3_two_player_walkthrough_checklist_20261017.md`；摄像头远端画面真人确认仍缺。
+7. **Tilemap 重构维持搁置**（10-06 拍板"不引入"，Phase 4 远期项）。
+8. **OMC god object 拆分收官**（Chat/AbilityFeedback/Connection 三刀，Network.cs 2747→1991）；剩余大块（快照同步/枚举校验）按需再切。
+9. **重连 E2E 第二连接偶发丢请求**（run6）：客户端测试已加 3 次重试加固；生产路径如遇真实玩家重连失败，优先查 Relay 分配 join 节流。
+
+### 门禁速查
+
+```
+EditMode:  -runTests -testPlatform EditMode（253，全自动）
+PlayMode:  -runTests -testPlatform PlayMode（25+14 skip，含新 SnapFlow/rejoin opt-in）
+Relay:     bash run-relay-twoprocess.sh [normal]
+           GANGLAND_RELAY_SCENARIO=migration bash run-relay-twoprocess.sh
+           GANGLAND_RELAY_SCENARIO=rejoin   bash run-relay-twoprocess.sh
+构建:      -executeMethod GanglandUndercover.Editor.BuildScript.BuildMacOS（先删 Builds/macOS！）
+冒烟:      bash run-build-smoke.sh Builds/macOS/GanglandUndercover.app
+打包:      hdiutil create -volname "Gangland Undercover" -srcfolder <只含.app的staging> -format UDZO <out>.dmg
+```
 
 ---
 

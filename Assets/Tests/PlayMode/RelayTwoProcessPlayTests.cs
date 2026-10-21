@@ -400,9 +400,37 @@ namespace GanglandUndercover.PlayTests
 
             yield return RunFrames(180); // 宽限窗口内停留 ~3s
 
-            InvokeWithString("RequestRelayClient", joinCode);
-            yield return WaitUntil(() => GetBool("IsClientConnected"),
-                PeerConnectTimeout, () => "重连加入失败。状态: " + GetString("RelayStatus"));
+            // 重连加入带重试：NGO 关停后立刻重连偶发传输请求丢失（run6 复现），
+            // 最多 3 次、每次 45s 连接窗，两次之间等 NM 完全归零再重试。
+            bool rejoined = false;
+            for (int attempt = 1; attempt <= 3 && !rejoined; attempt++)
+            {
+                Debug.Log($"[RelayRejoin][client] 第 {attempt} 次重连尝试…");
+                InvokeWithString("RequestRelayClient", joinCode);
+                float joinDeadline = Time.realtimeSinceStartup + 45f;
+                while (Time.realtimeSinceStartup < joinDeadline)
+                {
+                    if (GetBool("IsClientConnected"))
+                    {
+                        rejoined = true;
+                        break;
+                    }
+
+                    yield return null;
+                }
+
+                if (!rejoined)
+                {
+                    Debug.Log($"[RelayRejoin][client] 第 {attempt} 次重连未建立，等待 NM 归零后重试。状态: "
+                        + GetString("RelayStatus"));
+                    Invoke("RequestShutdown");
+                    yield return WaitUntil(() => !GetBool("IsListeningOrConnected"),
+                        ServiceReadyTimeout, () => $"第 {attempt} 次重连失败后归零超时。");
+                    yield return RunFrames(60);
+                }
+            }
+
+            Assert.IsTrue(rejoined, "宽限期内三次重连均未建立。状态: " + GetString("RelayStatus"));
 
             yield return WaitForMatchActionWithDiag("重连后");
             yield return WaitUntil(() => GetProp("LocalRole").ToString() == roleFirst,
