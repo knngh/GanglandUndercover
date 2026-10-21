@@ -289,6 +289,195 @@ namespace GanglandUndercover.PlayTests
             WriteResult("client", "PASS", "joinCode=" + joinCode + " connected=true characterCustom=sent cameraWatchRequest=sent maliciousPayloads=sent");
         }
 
+        private static string RejoinClientDonePath => CodeFilePath + ".rejoin-client-done";
+
+        /// <summary>
+        /// 重连 E2E（Host 端）：对局中 Client 断连进入宽限期，同代号重连后必须
+        /// 认领回原身份槽位（privateRoles 重映射 + 补发 RoleAssign），对局不被破坏。
+        /// </summary>
+        [UnityTest]
+        [Timeout(TestTimeoutMilliseconds)]
+        public IEnumerator RelayRejoin_HostKeepsIdentityAcrossClientRejoin()
+        {
+            if (!string.Equals(Role, "rejoin-host", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Ignore($"未设置 {RoleEnv}=rejoin-host，跳过 Relay 重连 Host 端到端用例。");
+            }
+
+            yield return null;
+
+            string codeFile = CodeFilePath;
+            if (File.Exists(codeFile)) { File.Delete(codeFile); }
+            DeleteIfExists(RejoinClientDonePath);
+
+            Debug.Log("[RelayRejoin][host] 请求创建 Relay 房间…");
+            Invoke("RequestRelayHost");
+            yield return WaitUntil(() => !string.IsNullOrWhiteSpace(GetString("RelayJoinCode")),
+                ServiceReadyTimeout, () => "Host 未拿到 Relay 房间码。状态: " + GetString("RelayStatus"));
+
+            string tmp = codeFile + ".tmp";
+            File.WriteAllText(tmp, GetString("RelayJoinCode"));
+            if (File.Exists(codeFile)) { File.Delete(codeFile); }
+            File.Move(tmp, codeFile);
+
+            yield return WaitUntil(() => GetInt("ConnectedClientCount") >= 2,
+                PeerConnectTimeout, () => "Host 未等到首次客户端连入。状态: " + GetString("RelayStatus"));
+
+            Debug.Log("[RelayRejoin][host] 开局（Bot 补位）…");
+            Invoke("RequestFillBotsAndStart");
+            yield return WaitUntil(() => GetBool("MatchStarted") && GetProp("Phase").ToString() == "Action",
+                PeerConnectTimeout, () => "Host 未能进入 Action 对局。");
+
+            ulong client1 = FindRemoteHumanClientId();
+            Assert.AreNotEqual(0UL, client1, "未找到远端人类客户端。");
+            object roles = GetField("privateRoles");
+            object roleBefore = roles.GetType().GetProperty("Item").GetValue(roles, new object[] { client1 });
+            Debug.Log("[RelayRejoin][host] 首连客户端=" + client1 + " 身份=" + roleBefore);
+
+            // 等待客户端断连（宽限期应保留身份槽位与对局）。
+            yield return WaitUntil(() => GetInt("ConnectedClientCount") < 2,
+                PeerConnectTimeout, () => "Host 未观察到客户端断连。");
+            Assert.IsTrue(GetBool("MatchStarted"), "宽限期内对局必须保持运行。");
+            Debug.Log("[RelayRejoin][host] 客户端已断连，进入宽限窗口。");
+
+            // 等待同代号重连 + 认领（新 clientId 的私人身份应与断连前一致）。
+            yield return WaitUntil(() => GetInt("ConnectedClientCount") >= 2,
+                PeerConnectTimeout, () => "Host 未等到客户端重连。");
+            bool reclaimed = false;
+            string reclaimedRoleText = string.Empty;
+            yield return WaitUntil(() =>
+                {
+                    ulong client2 = FindRemoteHumanClientId();
+                    if (client2 == 0UL || client2 == client1) return false;
+                    object roleNow = roles.GetType().GetProperty("Item").GetValue(roles, new object[] { client2 });
+                    reclaimedRoleText = roleNow == null ? "null" : roleNow.ToString();
+                    reclaimed = Equals(roleNow, roleBefore);
+                    return reclaimed;
+                },
+                CodeAvailableTimeout, () => "重连客户端未被认领回原身份（当前身份=" + reclaimedRoleText + "）。");
+
+            Debug.Log("[RelayRejoin][host] 认领成功：新客户端身份=" + reclaimedRoleText);
+            Assert.IsTrue(GetBool("MatchStarted") && GetProp("Phase").ToString() == "Action",
+                "重连认领后对局应保持 Action 运行。");
+
+            // 等 Client 端也确认本地身份恢复后再收尾（避免 Host 先退回收掉 Relay）。
+            yield return WaitUntil(() => File.Exists(RejoinClientDonePath),
+                CodeAvailableTimeout, () => "Client 端未写出重连完成 marker。");
+            WriteResult("rejoin-host", "PASS",
+                "client1=" + client1 + " reclaimedRole=" + reclaimedRoleText);
+        }
+
+        /// <summary>
+        /// 重连 E2E（Client 端）：入局→主动断开→宽限期内同代号重连→本地身份必须恢复
+        /// （验证 Host 认领后补发 RoleAssign），随后写出完成 marker。
+        /// </summary>
+        [UnityTest]
+        [Timeout(TestTimeoutMilliseconds)]
+        public IEnumerator RelayRejoin_ClientReclaimsSlotByCodename()
+        {
+            if (!string.Equals(Role, "rejoin-client", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Ignore($"未设置 {RoleEnv}=rejoin-client，跳过 Relay 重连 Client 端到端用例。");
+            }
+
+            yield return null;
+
+            string joinCode = null;
+            yield return WaitUntil(() => TryReadAtomicFile(CodeFilePath, out joinCode),
+                CodeAvailableTimeout, () => "Client 未读到 Host 房间码。");
+
+            InvokeWithString("RequestRelayClient", joinCode);
+            yield return WaitUntil(() => GetBool("IsClientConnected"),
+                PeerConnectTimeout, () => "首次加入失败。状态: " + GetString("RelayStatus"));
+
+            yield return WaitForMatchActionWithDiag("首次入局");
+            string roleFirst = GetProp("LocalRole").ToString();
+            Debug.Log("[RelayRejoin][client] 首局身份=" + roleFirst + "，主动断开…");
+
+            Invoke("RequestShutdown");
+            yield return WaitUntil(() => !GetBool("IsListeningOrConnected"),
+                ServiceReadyTimeout, () => "Client 断开超时。");
+
+            yield return RunFrames(180); // 宽限窗口内停留 ~3s
+
+            InvokeWithString("RequestRelayClient", joinCode);
+            yield return WaitUntil(() => GetBool("IsClientConnected"),
+                PeerConnectTimeout, () => "重连加入失败。状态: " + GetString("RelayStatus"));
+
+            yield return WaitForMatchActionWithDiag("重连后");
+            yield return WaitUntil(() => GetProp("LocalRole").ToString() == roleFirst,
+                CodeAvailableTimeout, () => "重连后本地身份未恢复（期望 " + roleFirst + "，实际 "
+                    + GetProp("LocalRole") + "）——Host 认领后应补发 RoleAssign。");
+
+            WriteAtomicFile(RejoinClientDonePath, "role=" + roleFirst);
+            WriteResult("rejoin-client", "PASS",
+                "joinCode=" + joinCode + " role=" + roleFirst + " reclaimed=true");
+        }
+
+        /// <summary>Host 侧：找远端人类玩家（非 bot、非本机）的 clientId。</summary>
+        private ulong FindRemoteHumanClientId()
+        {
+            object playersObj = GetField("players");
+            foreach (object entry in (System.Collections.IEnumerable)playersObj)
+            {
+                Type entryType = entry.GetType();
+                ulong clientId = Convert.ToUInt64(entryType.GetProperty("Key").GetValue(entry));
+                object state = entryType.GetProperty("Value").GetValue(entry);
+                bool isBot = (bool)state.GetType().GetField("IsBot").GetValue(state);
+                if (!isBot && clientId != NetworkManager.ServerClientId)
+                {
+                    return clientId;
+                }
+            }
+
+            return 0UL;
+        }
+
+        /// <summary>带诊断的等局循环：每 ~5s 打印客户端侧 MatchStarted/Phase/玩家数。</summary>
+        private IEnumerator WaitForMatchActionWithDiag(string stage)
+        {
+            float deadline = Time.realtimeSinceStartup + PeerConnectTimeout;
+            int frames = 0;
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                bool started = GetBool("MatchStarted");
+                string phase = GetProp("Phase").ToString();
+                if (started && phase == "Action")
+                {
+                    Debug.Log($"[RelayRejoin][client] {stage}: 对局已进入 Action。");
+                    yield break;
+                }
+
+                if (++frames % 300 == 0)
+                {
+                    Debug.Log($"[RelayRejoin][client] {stage} 等待中: MatchStarted={started} Phase={phase} "
+                        + $"elapsed={GetPropertyOrField("matchElapsedSeconds")} players={CountPlayers()} "
+                        + $"状态={GetString("RelayStatus")}");
+                }
+
+                yield return null;
+            }
+
+            Assert.Fail($"{stage}: {PeerConnectTimeout}s 内未随 Host 进入对局。最后一次: "
+                + $"MatchStarted={GetBool("MatchStarted")} Phase={GetProp("Phase")} players={CountPlayers()}");
+        }
+
+        private string GetPropertyOrField(string name)
+        {
+            PropertyInfo pi = _controllerType.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+            if (pi != null) return Convert.ToString(pi.GetValue(_controller));
+            FieldInfo fi = _controllerType.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            return fi != null ? Convert.ToString(fi.GetValue(_controller)) : "<无>";
+        }
+
+        private int CountPlayers()
+        {
+            object playersObj = GetField("players");
+            int count = 0;
+            foreach (object _ in (System.Collections.IEnumerable)playersObj) count++;
+            return count;
+        }
+
         [UnityTest]
         [Timeout(TestTimeoutMilliseconds)]
         public IEnumerator RelayMigration_OldHostReconnectsToReplacementRelay()

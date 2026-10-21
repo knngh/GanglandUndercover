@@ -53,6 +53,11 @@ if [ "$SCENARIO" = "migration-threeclient" ]; then
   HOST_TEST="GanglandUndercover.PlayTests.RelayTwoProcessPlayTests.RelayMigration_ThreeClientOldHostReconnectsToReplacementRelay"
   CLIENT_TEST="GanglandUndercover.PlayTests.RelayTwoProcessPlayTests.RelayMigration_ThreeClientCandidatePromotesAndRunsPostRestoreFlow"
   OBSERVER_TEST="GanglandUndercover.PlayTests.RelayTwoProcessPlayTests.RelayMigration_ThreeClientObserverFollowsReplacementRelay"
+elif [ "$SCENARIO" = "rejoin" ]; then
+  HOST_ROLE="rejoin-host"
+  CLIENT_ROLE="rejoin-client"
+  HOST_TEST="GanglandUndercover.PlayTests.RelayTwoProcessPlayTests.RelayRejoin_HostKeepsIdentityAcrossClientRejoin"
+  CLIENT_TEST="GanglandUndercover.PlayTests.RelayTwoProcessPlayTests.RelayRejoin_ClientReclaimsSlotByCodename"
 elif [ "$SCENARIO" = "migration" ]; then
   HOST_ROLE="migration-host"
   CLIENT_ROLE="migration-client"
@@ -184,6 +189,7 @@ rm -f "$CODEFILE" "$CODEFILE.tmp" "$CODEFILE.malicious" "$CODEFILE.malicious.tmp
       "$CODEFILE.observer-vote-submitted" "$CODEFILE.observer-vote-submitted.tmp" \
       "$CODEFILE.camera-legal-ready" "$CODEFILE.camera-legal-ready.tmp" \
       "$CODEFILE.camera-data-received" "$CODEFILE.camera-data-received.tmp" \
+      "$CODEFILE.rejoin-client-done" "$CODEFILE.rejoin-client-done.tmp" \
       "$TIMEOUT_MARK"
 mkdir -p "$CLONE"
 if [ "$THREEPROCESS" = "true" ]; then

@@ -184,6 +184,13 @@ namespace GanglandUndercover.Online
             RemapCooldownKey(clientInputStaleTimers, oldClientId, newClientId);
             RemapTaskAssignments(oldClientId, newClientId);
 
+            // 关键：认领后必须给新 clientId 补发身份指派——否则回归端本地
+            // localRole 停留在 Unassigned，HUD/身份简报没有自己的身份。
+            if (privateRoles.TryGetValue(newClientId, out OnlineRole reclaimedRole))
+            {
+                SendRole(newClientId, reclaimedRole);
+            }
+
             AddCaseLog(state.DisplayName + " 已重连回归。");
             status = state.DisplayName + " 已重连回归。";
             return true;

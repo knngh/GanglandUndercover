@@ -1,5 +1,9 @@
 # D-4 Demo 发布记录（macOS 单平台，2026-10-17）
 
+> **2026-10-20 更新**：DMG 重建至最新（16:20，113MB，含全部三轮重构 partial：
+> Chat/AbilityFeedback/Connection——零行为变更，EditMode 253/253 + PlayMode 24/0/12 全绿），
+> 另含 10-19 休眠能力激活（`98ffe7b4`）与 2c 整图提亮（`6c00bdf4`）。
+
 > **2026-10-18 更新**：migration 隔夜重试（run 5，09:11）**双端 PASS**（DJB688→BPMKPD，
 > reconnected=true / replacementHost=true）——印证前夜定性为网络抖动，同代码清晨全绿。
 > 里程碑门禁（每里程碑重跑双进程 migration）已满足；连续两绿关闭判定见文末补记。
