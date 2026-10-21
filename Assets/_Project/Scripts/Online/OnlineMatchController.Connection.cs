@@ -21,6 +21,15 @@ namespace GanglandUndercover.Online
         {
             disconnectedNetworkSession = false;
 
+            // NGO 2.x 的 CustomMessagingManager 在连接建立后才可用——此前各连接路径
+            // 都在连接"前"调用 RegisterMessages（静默空转，handlers 全部丢失），导致
+            // 远端客户端收不到任何命名消息（快照/身份/聊天）。自己连上的这一刻补注册，
+            // 一个调用点覆盖 host/直连/relay；重复注册会先 Unregister 再挂，幂等无害。
+            if (clientId == LocalClientId())
+            {
+                RegisterMessages();
+            }
+
             if (networkManager.IsServer)
             {
                 EnsureMiniGameBridgeNetworkObject();
