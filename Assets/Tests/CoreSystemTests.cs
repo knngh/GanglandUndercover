@@ -562,6 +562,23 @@ namespace GanglandUndercover.Tests
         }
 
         [Test]
+        public void MatchStats_WinningFactionParsesVictorySubjectBeforeExplanation()
+        {
+            Type collectorType = RuntimeType("GanglandUndercover.Online.MatchStatsCollector");
+            Assert.IsNotNull(collectorType, "找不到 MatchStatsCollector。");
+            MethodInfo parse = StaticNonPublic(collectorType, "ParseWinningFaction");
+            Assert.IsNotNull(parse, "找不到 ParseWinningFaction。");
+
+            // 2026-10-21 自然采样踩到：「黑帮胜利：警方阵营全部出局」曾被误判为 Police 胜——
+            // 解释句提及被淘汰阵营时，必须先认「胜利」主语。
+            Assert.AreEqual("Gang", parse.Invoke(null, new object[] { "黑帮胜利：警方阵营全部出局。" }),
+                "胜利主语为黑帮时不得被解释句里的「警方」抢先匹配。");
+            Assert.AreEqual("Police", parse.Invoke(null, new object[] { "警方胜利：证据链闭合，铁案收网。" }));
+            Assert.AreEqual("Undercover", parse.Invoke(null, new object[] { "卧底胜利：潜伏到最后。" }));
+            Assert.AreEqual("Unknown", parse.Invoke(null, new object[] { "" }));
+        }
+
+        [Test]
         public void Reconnect_SameCodenameClaimsDisconnectedSlot()
         {
             using (ControllerFixture fixture = new ControllerFixture())

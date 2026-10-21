@@ -179,6 +179,12 @@
 | Forensics CorpseExamine bonus | `+2` clues | `OnlineRuleSet.cs:187` | +2 | +2 | +3 | More info in 8P games with more bodies |
 | Tech EvidenceChainBonus multiplier | `1.3x` | `OnlineRuleSet.cs:197` | 1.2 | 1.3 | 1.4 | Scale importance with player count |
 | Mole suspicion threshold for betrayal | `60` | `OnlineMatchController.cs:1685` | 65 | 60 | 55 | See 1.7 |
+| Enforcer KillRangeBonus multiplier | `1.25x`（1.1→1.375） | `OnlineRuleSet.cs:226`（2026-10-19 接线） | 1.20 | 1.25 | 1.30 | 击杀专家远程压制；数值为提案待采样验证 |
+| Inspector ReportRangeBonus multiplier | `1.15x`（1.25→1.4375） | `OnlineRuleSet.cs:197`（2026-10-19 接线） | 1.10 | 1.15 | 1.20 | 报案专家质量-of-life，降低"错过尸体"挫败 |
+| Fixer SabotageRangeBonus multiplier | `1.2x`（1.08→1.296） | `OnlineRuleSet.cs:236`（2026-10-19 接线） | 1.15 | 1.20 | 1.20 | 与破坏冷却缩减叠加注意 8P 火力 |
+| Driver VentCooldownReduce multiplier | `0.8x`（10s→8s） | `OnlineRuleSet.cs:251`（2026-10-19 接线） | 0.9 | 0.8 | 0.75 | 通风特化职业核心身份；8P 更灵活 |
+| Inspector ReportCooldownReduce（消费端补全） | 门槛折扣 `5×(1-0.8)=1.0s` | `OnlineMatchController.Connection.cs` 报案门禁 | 0.85 | 0.80 | 0.75 | 全局单计时器语义下按比例缩短对自己生效的窗口 |
+| Driver VentSpeedBonus 消费端 | **⚠ 设计死端**：通风瞬移无移动阶段，乘数无消费点 | — | 待定 | 待定 | 待定 | 二选一：做通道穿行玩法 / 从 Driver 表移除 |
 | Max Case Log Entries | `8` | `OnlineRuleSet.cs:162` | 6 | 8 | 10 | More log entries for more complex games |
 
 ---

@@ -262,6 +262,16 @@ namespace GanglandUndercover.Online
         private static string ParseWinningFaction(string resultText)
         {
             if (string.IsNullOrEmpty(resultText)) return "Unknown";
+
+            // 结果文案形如「<阵营>胜利：<解释>」，解释句可能提及被淘汰的其它阵营
+            // （如「黑帮胜利：警方阵营全部出局」）——必须先认"胜利"主语，关键词兜底在后。
+            if (resultText.Contains("胜利"))
+            {
+                if (resultText.Contains("警方胜利")) return "Police";
+                if (resultText.Contains("黑帮胜利")) return "Gang";
+                if (resultText.Contains("卧底胜利")) return "Undercover";
+            }
+
             if (resultText.Contains("警方")) return "Police";
             if (resultText.Contains("黑帮")) return "Gang";
             if (resultText.Contains("卧底")) return "Undercover";
