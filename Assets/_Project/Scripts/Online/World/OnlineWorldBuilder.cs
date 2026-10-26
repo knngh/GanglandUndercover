@@ -4328,6 +4328,69 @@ namespace GanglandUndercover.Online
             CreateEmergencyMeetingTableSet();
             CreatePhysicsCollisionMarkers();
             CreateActionViewShowcaseLayer();
+            CreateCorridorEdgeProps();
+        }
+
+        // --- CreateCorridorEdgeProps ---
+        // 批次 5c：走廊沿边道具铺量。2d 减法后走廊大面积留白，玩家视角"空旷没有生活
+        // 气息"。沿主走廊/上下连廊边缘的手工槽位摆 LimeZu 实物小件（全部非固体、零碰撞，
+        // 不改几何不变量）；槽位贴边远离门位与中心会议区，按槽位索引确定性轮换 5 组主题。
+        private void CreateCorridorEdgeProps()
+        {
+            Sprite2DAssetCache.Ensure();
+
+            (Vector3 pos, int theme)[] slots =
+            {
+                (new Vector3(-8.0f, 0.96f, 0.24f), 0), (new Vector3(-5.2f, 0.98f, 0.24f), 1),
+                (new Vector3(-1.6f, 0.97f, 0.24f), 2), (new Vector3(1.8f, 0.96f, 0.24f), 3),
+                (new Vector3(5.4f, 0.98f, 0.24f), 4), (new Vector3(8.2f, 0.96f, 0.24f), 1),
+                (new Vector3(-6.8f, -0.98f, 0.24f), 2), (new Vector3(-3.2f, -1.0f, 0.24f), 4),
+                (new Vector3(0.4f, -0.99f, 0.24f), 0), (new Vector3(4.6f, -0.98f, 0.24f), 2),
+                (new Vector3(7.6f, -1.0f, 0.24f), 3),
+                (new Vector3(-8.6f, 3.95f, 0.24f), 3), (new Vector3(-2.6f, 3.92f, 0.24f), 0),
+                (new Vector3(2.6f, 3.95f, 0.24f), 4), (new Vector3(7.8f, 3.93f, 0.24f), 2),
+                (new Vector3(-7.4f, -4.15f, 0.24f), 1), (new Vector3(-1.4f, -4.18f, 0.24f), 3),
+                (new Vector3(4.2f, -4.15f, 0.24f), 0), (new Vector3(8.4f, -4.18f, 0.24f), 4),
+            };
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                Vector3 at = slots[i].pos;
+                float rotation = (i % 3 - 1) * 7f;
+                switch (slots[i].theme)
+                {
+                    case 0: // 货箱堆
+                        CreateLimeZuRoomProp("走廊沿边道具 货箱堆 " + i, Sprite2DAssetCache.PropCrate, Sprite2DAssetCache.PropCrateResourcePath,
+                            at, new Vector3(0.34f, 0.3f, 0.08f), Color.white, rotation);
+                        CreateLimeZuRoomProp("走廊沿边道具 货箱 companion " + i, Sprite2DAssetCache.LandmarkPackage, Sprite2DAssetCache.LandmarkPackageResourcePath,
+                            at + new Vector3(0.26f, -0.14f, 0.06f), new Vector3(0.24f, 0.2f, 0.06f), Color.white, -rotation);
+                        break;
+                    case 1: // 油桶对
+                        CreateLimeZuRoomProp("走廊沿边道具 油桶 A " + i, Sprite2DAssetCache.PropBarrel, Sprite2DAssetCache.PropBarrelResourcePath,
+                            at, new Vector3(0.28f, 0.3f, 0.08f), Color.white, rotation);
+                        CreateLimeZuRoomProp("走廊沿边道具 油桶 B " + i, Sprite2DAssetCache.PropKowloonCrate, Sprite2DAssetCache.KowloonPropCrateResourcePath,
+                            at + new Vector3(-0.24f, 0.12f, 0.06f), new Vector3(0.26f, 0.24f, 0.06f), Color.white, -rotation);
+                        break;
+                    case 2: // 排档桌椅
+                        CreateLimeZuRoomProp("走廊沿边道具 排档小桌 " + i, Sprite2DAssetCache.LandmarkTinyTable, Sprite2DAssetCache.LandmarkTinyTableResourcePath,
+                            at, new Vector3(0.32f, 0.26f, 0.08f), Color.white, rotation);
+                        CreateLimeZuRoomProp("走廊沿边道具 排档椅 " + i, Sprite2DAssetCache.RoomPropChair, Sprite2DAssetCache.RoomPropChairResourcePath,
+                            at + new Vector3(0.28f, 0.1f, 0.06f), new Vector3(0.2f, 0.2f, 0.06f), Color.white, -rotation * 2f);
+                        break;
+                    case 3: // 杂物角
+                        CreateLimeZuRoomProp("走廊沿边道具 垃圾堆 " + i, Sprite2DAssetCache.RoomPropTrashPile, Sprite2DAssetCache.RoomPropTrashPileResourcePath,
+                            at, new Vector3(0.36f, 0.22f, 0.06f), Color.white, rotation);
+                        CreateLimeZuRoomProp("走廊沿边道具 工具箱 " + i, Sprite2DAssetCache.RoomPropToolBox, Sprite2DAssetCache.RoomPropToolBoxResourcePath,
+                            at + new Vector3(0.3f, 0.14f, 0.06f), new Vector3(0.24f, 0.18f, 0.06f), Color.white, -rotation);
+                        break;
+                    default: // 绿植+包裹
+                        CreateLimeZuRoomProp("走廊沿边道具 盆栽 " + i, Sprite2DAssetCache.LandmarkPottedPlant, Sprite2DAssetCache.LandmarkPottedPlantResourcePath,
+                            at, new Vector3(0.26f, 0.32f, 0.08f), Color.white, rotation);
+                        CreateLimeZuRoomProp("走廊沿边道具 托盘 " + i, Sprite2DAssetCache.PropEvidenceBox, Sprite2DAssetCache.PropEvidenceBoxResourcePath,
+                            at + new Vector3(-0.26f, -0.12f, 0.06f), new Vector3(0.26f, 0.18f, 0.06f), Color.white, -rotation);
+                        break;
+                }
+            }
         }
 
         private void CreateActionViewShowcaseLayer()
