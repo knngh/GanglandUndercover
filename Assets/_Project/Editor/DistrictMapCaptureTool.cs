@@ -45,6 +45,68 @@ namespace GanglandUndercover.Editor
             CaptureKowloonWalledCity();
         }
 
+        /// <summary>
+        /// -executeMethod 入口：玩家视角截图（批次 5e 角色醒目度审查）。
+        /// 建图后在主走廊放 4 个假玩家（各职业），相机按游戏内观感（≈8 单位宽）取景输出 PNG。
+        /// 命令行同整图截图：勿加 -nographics，必须带 -quit。
+        /// 输出: Screenshots/action-view-players.png
+        /// </summary>
+        public static void CaptureActionViewWithPlayers()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+            GameObject cameraObject = new GameObject("Action View Capture Camera");
+            Camera camera = cameraObject.AddComponent<Camera>();
+            camera.tag = "MainCamera";
+            camera.transform.position = new Vector3(0f, 0f, -10f);
+            camera.orthographic = true;
+            camera.orthographicSize = 4f; // 游戏内行动视角观感（8 单位宽）
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = new Color(0.102f, 0.11f, 0.173f, 1f);
+
+            GameObject mapHost = new GameObject("Action View Capture MapService");
+            OnlineMapService mapService = mapHost.AddComponent<OnlineMapService>();
+            mapService.ActiveMapType = OnlineMapService.OnlineMapType.HarbourDistrict;
+
+            GameObject worldRoot = new GameObject("Action View Capture World");
+            var builder = new OnlineWorldBuilder();
+            builder.Initialize(
+                worldRoot,
+                mapService,
+                new List<Rect>(),
+                new List<Rect>(),
+                new List<TextMesh>(),
+                8);
+            builder.EnsureRuntimeSprites();
+            builder.BuildDistrictMap();
+
+            OnlineProfession[] professions =
+            {
+                OnlineProfession.Inspector,
+                OnlineProfession.Enforcer,
+                OnlineProfession.UndercoverAgent,
+                OnlineProfession.Fixer,
+            };
+            Vector3[] spawns =
+            {
+                new Vector3(-0.9f, 0.35f, 0f),
+                new Vector3(-0.3f, -0.25f, 0f),
+                new Vector3(0.45f, 0.4f, 0f),
+                new Vector3(1.0f, -0.2f, 0f),
+            };
+            for (int i = 0; i < professions.Length; i++)
+            {
+                var state = new OnlinePlayerState((ulong)(i + 1), "测试" + i, spawns[i], false, true,
+                    OnlineRole.Unassigned, professions[i], 0, i == 3);
+                builder.CreatePlayerVisual(state, i == 0);
+            }
+
+            string absolutePath = Path.GetFullPath(Path.Combine("Screenshots", "action-view-players.png"));
+            Directory.CreateDirectory(Path.GetDirectoryName(absolutePath));
+            RenderToPng(camera, absolutePath, CaptureWidth, CaptureHeight);
+            Debug.Log($"[DistrictMapCaptureTool] action view -> {absolutePath}");
+        }
+
         private static void CaptureTo(OnlineMapService.OnlineMapType mapType, string fileName)
         {
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);

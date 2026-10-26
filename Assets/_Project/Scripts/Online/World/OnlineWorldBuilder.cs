@@ -2190,9 +2190,11 @@ namespace GanglandUndercover.Online
         public static void BillboardLabel(Transform labelTransform)
         {
             if (labelTransform == null || Camera.main == null) return;
-            Vector3 direction = Camera.main.transform.position - labelTransform.position;
-            if (direction.sqrMagnitude <= 0.0001f) return;
-            labelTransform.rotation = Quaternion.LookRotation(direction.normalized, Camera.main.transform.up);
+            // TextMesh 文字从其 local -z 方向正读；要面向相机必须让 local +z 背向相机
+            // （旧实现 forward=相机-标签 把文字背面朝向玩家，所有世界标签左右镜像）。
+            Vector3 away = labelTransform.position - Camera.main.transform.position;
+            if (away.sqrMagnitude <= 0.0001f) return;
+            labelTransform.rotation = Quaternion.LookRotation(away.normalized, Camera.main.transform.up);
         }
 
         public string BuildPlayerWorldLabel(OnlinePlayerState state, bool isLocal)
