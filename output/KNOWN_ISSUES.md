@@ -1,6 +1,21 @@
 # Gangland Undercover — KNOWN_ISSUES.md
 
-> **最后更新**: 2026-10-21 13:50 | **版本**: v0.3.0-demo | **更新人**: D-4 收官 + Alpha 三项 + 重连 E2E 推进
+> **最后更新**: 2026-10-26 12:55 | **版本**: v0.3.1-demo | **更新人**: 批次 5 收官 + 0.3.1 发布门禁
+
+## 2026-10-26 增量（v0.3.1-demo，批次 5 + `0274ca9d` 后）
+
+| 项目 | 实测 | 证据 |
+|------|------|------|
+| EditMode | **254/254 PASS** ×3 轮 | `ci-logs/batch5a-editmode-*.xml` 等 |
+| PlayMode | **24 passed / 0 failed / 15 skipped**（+1 skip=DemoBaseline 需图形设备，-nographics 下固有；14 个既有 opt-in） | `ci-logs/batch5-playmode-20261026_124719.xml` |
+| Relay 双进程 E2E | **未跑——网络窗口**（10-26 12:50 实测：直连 DNS NXDOMAIN + 代理 7897 超时，与 10-21 rejoin run7 同款窗口）。本批改动（视觉/文字镜像/截图工具）零网络代码，回归风险极低；窗口恢复后补跑 `bash run-relay-twoprocess.sh normal` | 本节 |
+| 构建产物 | **DMG 0.3.1-demo 158MB**（10-26），启动冒烟 PASS | `ci-logs/build-0.3.1-demo.log` |
+
+### 本轮修复的重大 bug
+
+3. **世界文字镜像（`0c8c5aec`）**：`BillboardLabel` 方向反了，TextMesh 背面朝玩家——**全部世界标签（任务/玩家/房间名）在每局真游戏里左右镜像**。藏匿原因：整图截图文字太小 + D-3 走查被跳过。0.3.1 已修。
+4. **美术审查假阳性教训**：对局视觉审查截图必须复刻运行时摆位（玩家 z 抬升 0.32，`UpdatePlayerVisuals` Visuals.cs:273），否则会诊断出"角色太小/会议中心遮挡"一类假问题（两项已撤销，`ae0600c8`）。
+
 
 ## 2026-10-21 基线刷新（v0.3.0-demo，commit `8603e622` 后）
 
