@@ -4013,6 +4013,8 @@ namespace GanglandUndercover.Tests
             try
             {
                 object builder = Activator.CreateInstance(builderType);
+                // 批次 2d 起展示层默认关闭（FirstScreen 资产全部在其中）；本回归门显式打开，验证 LimeZu 资产管线未断。
+                builderType.GetField("DistrictShowcaseDressing").SetValue(builder, true);
                 object mapService = mapHost.AddComponent(mapServiceType);
                 var solidObstacles = new List<Rect>();
                 var walkableAreas = new List<Rect>();
@@ -4076,6 +4078,8 @@ namespace GanglandUndercover.Tests
             try
             {
                 object builder = Activator.CreateInstance(builderType);
+                // 批次 2d 起展示层默认关闭（关键地标由大尺度港景层调用）；本回归门显式打开，验证资产管线未断。
+                builderType.GetField("DistrictShowcaseDressing").SetValue(builder, true);
                 object mapService = mapHost.AddComponent(mapServiceType);
                 var solidObstacles = new List<Rect>();
                 var walkableAreas = new List<Rect>();
@@ -4115,6 +4119,8 @@ namespace GanglandUndercover.Tests
             try
             {
                 object builder = Activator.CreateInstance(builderType);
+                // 批次 2d 起展示层默认关闭（Blackout VFX 在垂直切片层）；本回归门显式打开，验证资产管线未断。
+                builderType.GetField("DistrictShowcaseDressing").SetValue(builder, true);
                 object mapService = mapHost.AddComponent(mapServiceType);
                 var solidObstacles = new List<Rect>();
                 var walkableAreas = new List<Rect>();

@@ -2511,12 +2511,19 @@ namespace GanglandUndercover.Online
             CreateShipAmbientDressing();
             CreateDenseMapMicroDressing();
             CreatePlayableScaleSetDressing();
-            CreateQuaterniusModelDressing();
-            CreateLargeScalePortSetPieces();
             CreateLargeRoomReadabilityLayer();
-            CreateOfficialFreeAssetStoreLayer();
-            CreateCommercialArtAdapterLayer();
-            CreateVerticalSliceProductionLayer();
+
+            // 批次 2d：世界可读性减法。垂直切片/资产展示层以 Mesh 色块为主
+            // （MeshRenderer 不被降噪/提亮两个 SpriteRenderer pass 触达），玩家视角下
+            // 是满屏黑胶囊/彩条/大色块的主力噪音。默认关，需要回看旧效果时置 true。
+            if (DistrictShowcaseDressing)
+            {
+                CreateQuaterniusModelDressing();
+                CreateLargeScalePortSetPieces();
+                CreateOfficialFreeAssetStoreLayer();
+                CreateCommercialArtAdapterLayer();
+                CreateVerticalSliceProductionLayer();
+            }
 
             CreateOperationalLightingLayer();
             ApplyDecorationNoiseMutePass();
@@ -2687,6 +2694,13 @@ namespace GanglandUndercover.Online
 
         /// <summary>主走廊暖白洗颜色：低饱和（≈0.16）免疫降噪/提亮两 pass 误伤。</summary>
         private static readonly Color CorridorLiftWashColor = new Color(0.88f, 0.85f, 0.74f, 0.11f);
+
+        /// <summary>
+        /// 批次 2d 图层开关：垂直切片/资产展示类装饰层（Quaternius 模型、大尺度港景摆件、
+        /// 官方免费资产层、商业美术适配层、垂直切片生产层）。这些层以 Mesh 色块为主，
+        /// 是玩家视角噪点主力且不被颜色 pass 触达；默认关闭做世界减法。
+        /// </summary>
+        [SerializeField] public bool DistrictShowcaseDressing = false;
 
         /// <summary>玩法指代色豁免：门禁/入口/任务/暗线等颜色编码不动。</summary>
         private static readonly string[] DecorationMuteGameplayTokens =
@@ -3042,6 +3056,48 @@ namespace GanglandUndercover.Online
             CreateTopDownFacilityBackdrop();
         }
 
+        // --- CreateBuildingWallTiles ---
+        // 批次 5a：建筑四边墙条贴图化——16px LimeZu/CC 墙砖瓦片沿边铺带（替代纯色 darkTrim
+        // 的视觉单调；原 darkTrim 条保留作连续衬垫）。同 z 同几何，碰撞零改动。
+        private void CreateBuildingWallTiles(string name, Vector3 center, Vector3 size)
+        {
+            Sprite[] wallTiles =
+            {
+                Sprite2DAssetCache.WallBrick,
+                Sprite2DAssetCache.WallConcrete,
+                Sprite2DAssetCache.WallStripe,
+            };
+            if (wallTiles[0] == null) return;
+
+            Sprite tile = wallTiles[Mathf.Abs(name.GetHashCode()) % wallTiles.Length];
+            float halfWidth = size.x * 0.5f;
+            float halfHeight = size.y * 0.5f;
+            float wallThickness = 0.15f;
+            const float segmentLength = 0.5f;
+
+            void PlaceStrip(bool horizontal, float fixedCoord, float length)
+            {
+                int segments = Mathf.Clamp(Mathf.RoundToInt(length / segmentLength), 3, 14);
+                float step = length / segments;
+                for (int i = 0; i < segments; i++)
+                {
+                    float offset = -length * 0.5f + step * (i + 0.5f);
+                    Vector3 pos = horizontal
+                        ? new Vector3(center.x + offset, fixedCoord, 0.19f)
+                        : new Vector3(fixedCoord, center.y + offset, 0.19f);
+                    Vector3 scale = horizontal
+                        ? new Vector3(step * 1.04f, wallThickness, 0.08f)
+                        : new Vector3(wallThickness, step * 1.04f, 0.08f);
+                    CreateShapeProp("2.5D 建筑体 " + name + " 墙砖带 " + (horizontal ? "H" : "V") + i, tile, pos, scale, Color.white);
+                }
+            }
+
+            PlaceStrip(true, center.y + halfHeight - 0.04f, size.x);
+            PlaceStrip(true, center.y - halfHeight + 0.04f, size.x);
+            PlaceStrip(false, center.x - halfWidth + 0.04f, size.y);
+            PlaceStrip(false, center.x + halfWidth - 0.04f, size.y);
+        }
+
         private void CreateBuildingVolume(string name, Vector3 center, Vector3 size, float height, Color facadeColor, Color roofColor, string sign)
         {
             float halfWidth = size.x * 0.5f;
@@ -3056,6 +3112,7 @@ namespace GanglandUndercover.Online
             CreateProp("2.5D 建筑体 " + name + " 南墙厚边", center + new Vector3(0f, -halfHeight + 0.04f, 0.18f), new Vector3(size.x, 0.13f, 0.14f), darkTrim);
             CreateProp("2.5D 建筑体 " + name + " 西墙厚边", center + new Vector3(-halfWidth + 0.04f, 0f, 0.18f), new Vector3(0.13f, size.y, 0.14f), darkTrim);
             CreateProp("2.5D 建筑体 " + name + " 东墙厚边", center + new Vector3(halfWidth - 0.04f, 0f, 0.18f), new Vector3(0.13f, size.y, 0.14f), darkTrim);
+            CreateBuildingWallTiles(name, center, size);
             CreateRoomFloorTiles(name, center, size, facadeColor);
             CreateRoomEquipmentBays(name, center, size, height);
             CreateProp("屋顶 " + name + " 门楣灯", center + new Vector3(0f, -halfHeight + 0.18f, 0.22f), new Vector3(Mathf.Min(1.05f, size.x * 0.35f), 0.08f, 0.08f), new Color(0.94f, 0.72f, 0.12f, 1f));
