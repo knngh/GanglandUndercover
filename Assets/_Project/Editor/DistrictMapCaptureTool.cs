@@ -98,7 +98,14 @@ namespace GanglandUndercover.Editor
             {
                 var state = new OnlinePlayerState((ulong)(i + 1), "测试" + i, spawns[i], false, true,
                     OnlineRole.Unassigned, professions[i], 0, i == 3);
-                builder.CreatePlayerVisual(state, i == 0);
+                GameObject visual = builder.CreatePlayerVisual(state, i == 0);
+                // 对齐 UpdatePlayerVisuals 的运行时摆放：玩家活着渲染 z=0.32（高于低矮道具、
+                // 低于立面遮挡），否则截图会失真成"玩家被会议桌/道具盖住"。
+                if (visual != null)
+                {
+                    visual.transform.position = state.Position + new Vector3(0f, 0f, 0.32f);
+                    OnlineWorldBuilder.SetSortingFromZ(visual);
+                }
             }
 
             string absolutePath = Path.GetFullPath(Path.Combine("Screenshots", "action-view-players.png"));
