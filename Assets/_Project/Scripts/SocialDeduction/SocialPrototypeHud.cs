@@ -63,16 +63,16 @@ namespace GanglandUndercover.SocialDeduction
             Stretch(overlay.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
             GameObject topPanel = CreatePanel("Top Panel", transform, new Color(0.05f, 0.05f, 0.045f, 0.82f));
-            Stretch(topPanel.GetComponent<RectTransform>(), new Vector2(0f, 0.84f), Vector2.one, Vector2.zero, Vector2.zero);
+            Stretch(topPanel.GetComponent<RectTransform>(), new Vector2(0f, 0.87f), Vector2.one, Vector2.zero, Vector2.zero);
 
-            titleText = CreateText("Title", topPanel.transform, 26, TextAnchor.MiddleLeft);
+            titleText = CreateText("Title", topPanel.transform, 30, TextAnchor.MiddleLeft);
             Stretch(titleText.GetComponent<RectTransform>(), new Vector2(0f, 0f), new Vector2(0.42f, 1f), new Vector2(20f, 0f), new Vector2(-8f, 0f));
 
-            infoText = CreateText("Info", topPanel.transform, 17, TextAnchor.MiddleLeft);
+            infoText = CreateText("Info", topPanel.transform, 20, TextAnchor.MiddleLeft);
             Stretch(infoText.GetComponent<RectTransform>(), new Vector2(0.42f, 0f), Vector2.one, new Vector2(8f, 0f), new Vector2(-20f, 0f));
 
             GameObject buttonPanel = CreatePanel("Button Panel", transform, new Color(0.08f, 0.075f, 0.065f, 0.9f));
-            Stretch(buttonPanel.GetComponent<RectTransform>(), new Vector2(0.02f, 0.04f), new Vector2(0.24f, 0.8f), Vector2.zero, Vector2.zero);
+            Stretch(buttonPanel.GetComponent<RectTransform>(), new Vector2(0.02f, 0.04f), new Vector2(0.21f, 0.83f), Vector2.zero, Vector2.zero);
 
             VerticalLayoutGroup layout = buttonPanel.AddComponent<VerticalLayoutGroup>();
             layout.padding = new RectOffset(16, 16, 16, 16);
@@ -80,17 +80,17 @@ namespace GanglandUndercover.SocialDeduction
             buttonRoot = buttonPanel.transform;
 
             GameObject sidePanel = CreatePanel("Intel Panel", transform, new Color(0.055f, 0.06f, 0.058f, 0.88f));
-            Stretch(sidePanel.GetComponent<RectTransform>(), new Vector2(0.76f, 0.04f), new Vector2(0.98f, 0.8f), Vector2.zero, Vector2.zero);
-            sideText = CreateText("Intel", sidePanel.transform, 15, TextAnchor.UpperLeft);
+            Stretch(sidePanel.GetComponent<RectTransform>(), new Vector2(0.79f, 0.04f), new Vector2(0.98f, 0.83f), Vector2.zero, Vector2.zero);
+            sideText = CreateText("Intel", sidePanel.transform, 18, TextAnchor.UpperLeft);
             Stretch(sideText.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(14f, 14f), new Vector2(-14f, -14f));
 
             modalPanel = CreatePanel("Modal Panel", transform, new Color(0.045f, 0.047f, 0.043f, 0.94f));
             Stretch(modalPanel.GetComponent<RectTransform>(), new Vector2(0.28f, 0.16f), new Vector2(0.72f, 0.78f), Vector2.zero, Vector2.zero);
 
-            modalTitleText = CreateText("Modal Title", modalPanel.transform, 28, TextAnchor.UpperCenter);
+            modalTitleText = CreateText("Modal Title", modalPanel.transform, 32, TextAnchor.UpperCenter);
             Stretch(modalTitleText.GetComponent<RectTransform>(), new Vector2(0f, 0.76f), Vector2.one, new Vector2(18f, 8f), new Vector2(-18f, -8f));
 
-            modalBodyText = CreateText("Modal Body", modalPanel.transform, 17, TextAnchor.UpperLeft);
+            modalBodyText = CreateText("Modal Body", modalPanel.transform, 20, TextAnchor.UpperLeft);
             Stretch(modalBodyText.GetComponent<RectTransform>(), new Vector2(0f, 0.26f), new Vector2(1f, 0.76f), new Vector2(22f, 8f), new Vector2(-22f, -8f));
 
             GameObject modalButtons = CreatePanel("Modal Buttons", modalPanel.transform, new Color(0f, 0f, 0f, 0f));
@@ -479,7 +479,7 @@ namespace GanglandUndercover.SocialDeduction
             colors.pressedColor = new Color(0.16f, 0.13f, 0.09f, 1f);
             button.colors = colors;
 
-            Text text = CreateText("Label", buttonObject.transform, 16, TextAnchor.MiddleCenter);
+            Text text = CreateText("Label", buttonObject.transform, 18, TextAnchor.MiddleCenter);
             text.text = label;
             Stretch(text.GetComponent<RectTransform>(), Vector2.zero, Vector2.one, new Vector2(8f, 4f), new Vector2(-8f, -4f));
 
@@ -501,6 +501,9 @@ namespace GanglandUndercover.SocialDeduction
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.raycastTarget = false;
+            Outline outline = textObject.AddComponent<Outline>();
+            outline.effectColor = new Color(0f, 0f, 0f, 0.75f);
+            outline.effectDistance = new Vector2(1f, -1f);
             return text;
         }
 
