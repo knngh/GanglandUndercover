@@ -3267,6 +3267,15 @@ namespace GanglandUndercover.Online
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.raycastTarget = false;
+            // 批次 6（对齐 fix/hud-readability）：全部 HUD 文字加黑色描边，
+            // 像素场景上的小字可读性（StylizeText 只换字体，不会移除 Outline）。
+            Outline outline = text.GetComponent<Outline>();
+            if (outline == null)
+            {
+                outline = text.gameObject.AddComponent<Outline>();
+            }
+            outline.effectColor = new Color(0f, 0f, 0f, 0.75f);
+            outline.effectDistance = new Vector2(1f, -1f);
         }
 
         private static Font LoadBuiltinFont()

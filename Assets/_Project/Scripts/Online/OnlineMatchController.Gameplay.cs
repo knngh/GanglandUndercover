@@ -900,6 +900,11 @@ namespace GanglandUndercover.Online
             sabotageVFX = go.AddComponent<GanglandUndercover.Art.SabotageVFX>();
             sabotageVFX.Bind(this);
         }
+        private void EnsureScreenGrade()
+        {
+            // 批次 6c：全屏调色（暗角/对比/饱和/微暖调），CommandBuffer 挂主相机。
+            ScreenGradeController.Ensure(gameObject);
+        }
         private void EnsureRuntimeDependencies()
         {
             if (syncManager == null)

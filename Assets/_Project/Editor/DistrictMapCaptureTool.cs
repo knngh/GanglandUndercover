@@ -60,7 +60,8 @@ namespace GanglandUndercover.Editor
             camera.tag = "MainCamera";
             camera.transform.position = new Vector3(0f, 0f, -10f);
             camera.orthographic = true;
-            camera.orthographicSize = 4f; // 游戏内行动视角观感（8 单位宽）
+            // 批次 6a：吸附到整数 texel/像素档（1080p 下 4f → 3.75），证据截图与游戏内一致
+            camera.orthographicSize = OnlineCameraRig.SnapOrthoSizeToTexelGrid(4f, CaptureHeight, OnlineCameraRig.WorldTexelsPerUnit);
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = new Color(0.102f, 0.11f, 0.173f, 1f);
 
@@ -110,6 +111,9 @@ namespace GanglandUndercover.Editor
 
             string absolutePath = Path.GetFullPath(Path.Combine("Screenshots", "action-view-players.png"));
             Directory.CreateDirectory(Path.GetDirectoryName(absolutePath));
+            // 批次 6c：证据截图带全屏调色（EditMode 无玩家循环，LateUpdate 不会跑，需显式绑定）
+            ScreenGradeController grade = ScreenGradeController.Ensure(null);
+            grade.BindNow(camera);
             RenderToPng(camera, absolutePath, CaptureWidth, CaptureHeight);
             Debug.Log($"[DistrictMapCaptureTool] action view -> {absolutePath}");
         }
@@ -146,6 +150,9 @@ namespace GanglandUndercover.Editor
 
             string absolutePath = Path.GetFullPath(Path.Combine("Screenshots", fileName));
             Directory.CreateDirectory(Path.GetDirectoryName(absolutePath));
+            // 批次 6c：整图证据同样带全屏调色（与游戏内观感一致）
+            ScreenGradeController grade = ScreenGradeController.Ensure(null);
+            grade.BindNow(camera);
             RenderToPng(camera, absolutePath, CaptureWidth, CaptureHeight);
             Debug.Log($"[DistrictMapCaptureTool] {mapType} -> {absolutePath}");
         }

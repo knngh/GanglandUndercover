@@ -21,6 +21,11 @@ namespace GanglandUndercover.Online
         public const float ActionZ = -10f;           // M3: fixed Z for orthographic camera above XY plane
         public const float PreviewZ = -16.2f;
 
+        // 批次 6a：世界 texel 密度（tile PPU=48，1 世界单位 = 48 texel）。
+        // 近景（≤CloseupSnapMaxSize）正交尺寸吸附到整数 texel/像素，消除非整数缩放的像素行不均（发糊/闪烁）。
+        public const float WorldTexelsPerUnit = 48f;
+        public const float CloseupSnapMaxSize = 6f;
+
         // ====================================================================
         //  State
         // ====================================================================
@@ -49,6 +54,41 @@ namespace GanglandUndercover.Online
         public void SetSubject(ulong clientId)
         {
             _currentSubjectId = clientId;
+        }
+
+        // ====================================================================
+        //  Pixel-Crisp Snapping (批次 6a)
+        // ====================================================================
+
+        /// <summary>
+        /// 把目标正交尺寸吸附到最近的"整数 texel/屏幕像素"档位（k = texelsPerUnit 的整数倍缩放）。
+        /// 非整数缩放会让像素行宽窄不均（观感发糊、移动时闪烁）；吸附后每个 texel 占整数个屏幕像素。
+        /// 典型值（PPU 48）：1440p 目标 3.0 → 3.0；1080p → 2.8125；900p → 3.125。
+        /// </summary>
+        public static float SnapOrthoSizeToTexelGrid(float targetSize, float screenPixelHeight, float texelsPerUnit)
+        {
+            if (targetSize <= 0f || screenPixelHeight <= 0f || texelsPerUnit <= 0f)
+            {
+                return targetSize;
+            }
+
+            float bestSize = targetSize;
+            float bestDiff = float.MaxValue;
+            for (int k = 1; k <= 12; k++)
+            {
+                float size = screenPixelHeight / (2f * texelsPerUnit * k);
+                if (size <= 0.05f)
+                {
+                    break;
+                }
+                float diff = Mathf.Abs(size - targetSize);
+                if (diff < bestDiff)
+                {
+                    bestDiff = diff;
+                    bestSize = size;
+                }
+            }
+            return bestSize;
         }
 
         // ====================================================================
@@ -171,9 +211,13 @@ namespace GanglandUndercover.Online
             Vector3 desiredPosition = new Vector3(target.x, target.y, zOffset);
 
             // --- Snap or smooth orthographicSize ---
-            camera.orthographicSize = _wasConfigured
-                ? Mathf.Lerp(camera.orthographicSize, targetSize, Time.deltaTime * 4f)
+            // 批次 6a：近景档位吸附到整数 texel/像素（预览/战术图不吸附，保取景不变）。
+            float effectiveTargetSize = targetSize <= CloseupSnapMaxSize && camera.pixelHeight > 0
+                ? SnapOrthoSizeToTexelGrid(targetSize, camera.pixelHeight, WorldTexelsPerUnit)
                 : targetSize;
+            camera.orthographicSize = _wasConfigured
+                ? Mathf.Lerp(camera.orthographicSize, effectiveTargetSize, Time.deltaTime * 4f)
+                : effectiveTargetSize;
 
             // M3: Camera always looks straight down (identity rotation) for 2D rendering
             Quaternion desiredRotation = Quaternion.identity;
@@ -187,6 +231,19 @@ namespace GanglandUndercover.Online
                 camera.transform.position,
                 desiredPosition,
                 _wasConfigured ? Time.deltaTime * 4.8f : 1f);
+
+            // 批次 6a：相机位置吸附到整像素网格（消除跟随移动时的亚像素抖动/闪烁）。
+            if (!preview && camera.pixelHeight > 0)
+            {
+                float worldPerPixel = (camera.orthographicSize * 2f) / camera.pixelHeight;
+                if (worldPerPixel > 0f)
+                {
+                    Vector3 snapped = camera.transform.position;
+                    snapped.x = Mathf.Round(snapped.x / worldPerPixel) * worldPerPixel;
+                    snapped.y = Mathf.Round(snapped.y / worldPerPixel) * worldPerPixel;
+                    camera.transform.position = snapped;
+                }
+            }
 
             _wasConfigured = true;
         }

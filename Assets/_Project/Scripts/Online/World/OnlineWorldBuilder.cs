@@ -1834,8 +1834,9 @@ namespace GanglandUndercover.Online
             root.transform.localScale = Vector3.one * (state.Alive ? 1.12f : 1.04f);
 
             // B1: 角色脚下阴影 — anchors character to ground
-            CreateSpriteChild(root.transform, "阴影", _softCircleSprite, new Vector3(0f, -0.12f, -0.06f),
-                new Vector3(0.32f, 0.14f, 0.02f), new Color(0f, 0f, 0f, 0.35f));
+            // 批次 6b：放大加强（旧 0.32×0.14 被 0.28 宽基座完全盖住，截图不可见 → 角色悬浮感）
+            CreateSpriteChild(root.transform, "阴影", _softCircleSprite, new Vector3(0f, -0.13f, -0.06f),
+                new Vector3(0.46f, 0.19f, 0.02f), new Color(0f, 0f, 0f, 0.40f));
 
             // Base body
             CreateSpriteChild(root.transform, "角色基座", _roundedRectSprite, Vector3.zero,

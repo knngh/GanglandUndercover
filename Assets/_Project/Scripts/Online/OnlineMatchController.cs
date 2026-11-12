@@ -475,6 +475,7 @@ namespace GanglandUndercover.Online
             EnsureCanvasHud();
             EnsureCameraRig();
             EnsureVFX(); // E4
+            EnsureScreenGrade(); // 批次 6c
             syncManager = GetComponent<OnlineSyncManager>();
             EnsureMigrationManager();
             EnsureChatSystem();
