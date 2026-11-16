@@ -1,6 +1,22 @@
 # Gangland Undercover — KNOWN_ISSUES.md
 
-> **最后更新**: 2026-11-12 13:30 | **版本**: v0.3.1-demo + 批次 6 | **更新人**: 批次 6 画质攻坚（项目恢复日）
+> **最后更新**: 2026-11-16 09:45 | **版本**: v0.3.2-demo | **更新人**: relay 补跑闭环 + 批次 6f 定稿 + DMG 0.3.2
+
+## 2026-11-16 增量（relay E2E 闭环 + DMG 0.3.2）
+
+| 项目 | 实测 | 证据 |
+|------|------|------|
+| Relay 双进程 normal | **连续两绿达成（run3+run4，11-16 09:39/09:40）**——挂起 16 天的唯一未闭环项正式关闭。run1 也 PASS，run2 为 UDP 抖动窗口（"server didn't answer BIND"，历史同款签名，非代码回归） | `Logs/relay-{host,client}-results.xml` ×4 轮 |
+| 批次 6f 霓虹光晕 | **定稿**（`afdffb0c`）：北侧招牌光晕/走廊路灯池/夜景分层，视觉终审通过；EditMode 266/266 | `output/art_batch6_evidence/final3-*.png` |
+| 构建产物 | **DMG 0.3.2-demo 159MB**（11-16），含批次 6+6f+HUD 全部；构建 Success + 冒烟 PASS | `Builds/GanglandUndercover-0.3.2-demo-macOS.dmg` |
+
+### ⚠ 网络判读纪律重大修正（本日发现）
+**这台机器访问 Unity 服务/GitHub 必须走本地代理 127.0.0.1:7897，且 git/Unity 进程不读系统代理设置**：
+- 直接 DNS 探测 NXDOMAIN ≠ 网络窗口关闭——`curl -x http://127.0.0.1:7897 https://services.unity.com` 返回 200
+- 跑 relay 两进程：`export https_proxy=http://127.0.0.1:7897 http_proxy=... HTTPS_PROXY=... HTTP_PROXY=...` 后再 `bash run-relay-twoprocess.sh normal`
+- 推 GitHub：`git -c http.proxy=http://127.0.0.1:7897 push origin main`
+- 注意：HTTP 代理只承载 TCP；Relay 数据通道是 UDP，仍可能偶发抖动（run2）——重跑即可，别改代码
+- **历史"网络窗口关闭"的判读（10-17/10-21/10-26/10-31/11-12）很可能都是没配代理的误判**
 
 ## 2026-11-12 增量（项目恢复：批次 6 画质攻坚 + GitHub 分支合入）
 
@@ -8,7 +24,7 @@
 |------|------|------|
 | EditMode | **264/264 PASS**（254 基线 + 批次 6 新增 10 例） | `ci-logs/batch6_*_editmode.xml` |
 | PlayMode | **24 passed / 0 failed / 15 skipped**（与 10-26 基线一致） | `ci-logs/batch6_20261112_1304_playmode.xml` |
-| Relay 双进程 E2E | **仍未跑——网络窗口持续关闭**（11-12 13:00 实测：multiplayer.unity.com DNS NXDOMAIN + 直连 curl 000，与 10-26/10-31 同款）。恢复入口不变：`bash run-relay-twoprocess.sh normal` 连续两绿 | 本节 |
+| Relay 双进程 E2E | ~~未跑~~ **已于 11-16 补跑闭环（连续两绿），见顶部 11-16 段** | — |
 
 本轮变更（`98b1deff`）：
 - 合入 GitHub `fix/hud-readability`（用户 11-10 网页改的原型 HUD 描边/字号，`58ce603e`）
