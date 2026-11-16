@@ -119,6 +119,59 @@ namespace GanglandUndercover.Tests
             }
         }
 
+        // ─── 6f: 霓虹光晕 pass ────────────────────────────────
+
+        [Test]
+        public void NeonGlowPass_HarbourMap_AddsAdditiveGlows()
+        {
+            GameObject mapHost = new GameObject("glowTest_mapSvc");
+            GameObject worldRoot = new GameObject("glowTest_world");
+            try
+            {
+                OnlineMapService mapService = mapHost.AddComponent<OnlineMapService>();
+                mapService.ActiveMapType = OnlineMapService.OnlineMapType.HarbourDistrict;
+
+                var builder = new OnlineWorldBuilder();
+                builder.Initialize(
+                    worldRoot,
+                    mapService,
+                    new List<Rect>(),
+                    new List<Rect>(),
+                    new List<TextMesh>(),
+                    8);
+                builder.EnsureRuntimeSprites();
+                builder.BuildDistrictMap();
+
+                Assert.GreaterOrEqual(builder.NeonGlowElementCount, 3,
+                    "港区图应有多处霓虹/招牌光晕（情报霓虹牌/霓虹招牌/招牌灯字等）");
+
+                int glowSpriteCount = 0;
+                foreach (SpriteRenderer spriteRenderer in worldRoot.GetComponentsInChildren<SpriteRenderer>(true))
+                {
+                    if (spriteRenderer == null || !spriteRenderer.name.Contains("Glow")) continue;
+                    glowSpriteCount++;
+                    Assert.IsNotNull(spriteRenderer.sharedMaterial,
+                        "光晕应有 additive 材质");
+                    Assert.AreEqual("Gangland/AdditiveSoftGlow", spriteRenderer.sharedMaterial.shader.name,
+                        "光晕应使用 Gangland/AdditiveSoftGlow");
+                }
+                Assert.AreEqual(builder.NeonGlowElementCount, glowSpriteCount,
+                    "计数器应与实际光晕 sprite 数一致");
+            }
+            finally
+            {
+                Object.DestroyImmediate(worldRoot);
+                Object.DestroyImmediate(mapHost);
+            }
+        }
+
+        [Test]
+        public void NeonGlowShader_IsFindable()
+        {
+            Shader shader = Resources.Load<Shader>("Shaders/AdditiveSoftGlow");
+            Assert.IsNotNull(shader, "AdditiveSoftGlow shader 应在 Resources 里（发布构建包含）");
+        }
+
         // ─── 6c: 全屏调色资源 ─────────────────────────────────
 
         [Test]

@@ -75,6 +75,7 @@ namespace GanglandUndercover.Online
         public int ModelPrefabCacheCount => _modelPrefabCache.Count;
         public int RuntimeMeshMaterialCount => _runtimeMeshMaterials.Count;
         public int OperationalLightingElementCount => _operationalLightingElementCount;
+        public int NeonGlowElementCount => _neonGlowElementCount;
         public int LimeZuFirstScreenSpriteElementCount => _limeZuFirstScreenSpriteElementCount;
         public int LimeZuTaskMiniGameSetPieceSpriteElementCount => _limeZuTaskMiniGameSetPieceSpriteElementCount;
         public int LimeZuTaskStationSpriteElementCount => _limeZuTaskStationSpriteElementCount;
@@ -86,6 +87,9 @@ namespace GanglandUndercover.Online
         public string WallTileResourcePath => WallTileResourcePathInternal;
 
         private int _operationalLightingElementCount;
+        private int _neonGlowElementCount;
+        private static Shader _additiveGlowShaderCache;
+        private static Material _additiveGlowMaterialCache;
         private int _limeZuFirstScreenSpriteElementCount;
         private int _limeZuTaskMiniGameSetPieceSpriteElementCount;
         private int _limeZuTaskStationSpriteElementCount;
@@ -2529,6 +2533,9 @@ namespace GanglandUndercover.Online
             }
 
             CreateOperationalLightingLayer();
+            // 批次 6f：光晕须在降噪前挂——降噪会把霓虹原色压成死色（s×0.3/v×0.62），
+            // 之后读到的全是低饱和残留（实测诊断确认）；光晕件已加豁免 token 防被压。
+            ApplyNeonGlowPass();
             ApplyDecorationNoiseMutePass();
             ApplyFloorLiftPass();
         }
@@ -2705,11 +2712,217 @@ namespace GanglandUndercover.Online
         /// </summary>
         [SerializeField] public bool DistrictShowcaseDressing = false;
 
-        /// <summary>玩法指代色豁免：门禁/入口/任务/暗线等颜色编码不动。</summary>
+        /// <summary>玩法指代色豁免：门禁/入口/任务/暗线等颜色编码不动。
+        /// 批次 6f：光晕/光池/路灯也豁免（additive 辉光被压色=灯光熄灭）。</summary>
         private static readonly string[] DecorationMuteGameplayTokens =
         {
-            "任务", "交互", "门禁", "门灯", "门牌", "警戒门", "卷闸门", "铁门", "入口", "暗线", "紧急铃"
+            "任务", "交互", "门禁", "门灯", "门牌", "警戒门", "卷闸门", "铁门", "入口", "暗线", "紧急铃",
+            "Glow (6f)", "Light Pool", "路灯池"
         };
+
+        // ====================================================================
+        //  批次 6f：霓虹光晕 pass（假 bloom）
+        // ====================================================================
+
+        /// <summary>霓虹/招牌件名关键词——命中者挂 additive 辉光子物体。</summary>
+        private static readonly string[] NeonGlowNameKeywords = { "霓虹", "灯牌", "招牌", "灯字" };
+
+        /// <summary>光晕数量上限：防止高密度招牌图满屏光斑。</summary>
+        private const int MaxNeonGlowCount = 48;
+
+        /// <summary>小于该世界尺寸的霓虹微件（如霓虹小箭头）不加光晕。</summary>
+        private const float NeonGlowMinSize = 0.25f;
+
+        private static Material AdditiveGlowMaterial
+        {
+            get
+            {
+                if (_additiveGlowMaterialCache != null)
+                {
+                    return _additiveGlowMaterialCache;
+                }
+                if (_additiveGlowShaderCache == null)
+                {
+                    _additiveGlowShaderCache = Resources.Load<Shader>("Shaders/AdditiveSoftGlow")
+                        ?? Shader.Find("Gangland/AdditiveSoftGlow");
+                }
+                if (_additiveGlowShaderCache == null)
+                {
+                    return null;
+                }
+                _additiveGlowMaterialCache = new Material(_additiveGlowShaderCache);
+                return _additiveGlowMaterialCache;
+            }
+        }
+
+        /// <summary>
+        /// 批次 6f：给霓虹/招牌件挂 additive 辉光（SoftCircle 径向渐变假 bloom）。
+        /// Sprites/Default 是 unlit，既有 CreateNeonLight 点光源对 sprite 零效果（且调用全在
+        /// 死代码路径）；本 pass 只加光晕子物体——几何/计数/名字/碰撞零改动，确定性生成两端一致。
+        /// 在降噪/提亮两 pass 之后调用：光晕不被它们触达（顺序上后加的 sprite 天然免疫）。
+        /// </summary>
+        private void ApplyNeonGlowPass()
+        {
+            _neonGlowElementCount = 0;
+            if (_worldRoot == null || _softCircleSprite == null) return;
+            Material glowMaterial = AdditiveGlowMaterial;
+            if (glowMaterial == null) return;
+
+            Renderer[] allRenderers = _worldRoot.GetComponentsInChildren<Renderer>(true);
+            foreach (Renderer renderer in allRenderers)
+            {
+                if (_neonGlowElementCount >= MaxNeonGlowCount) break;
+                if (renderer == null) continue;
+
+                string objectName = renderer.gameObject.name;
+                if (objectName.Contains("Glow") || objectName.Contains("Pool")) continue; // 幂等：跳过已挂光晕/光池
+
+                bool isNeon = false;
+                for (int i = 0; i < NeonGlowNameKeywords.Length; i++)
+                {
+                    if (objectName.Contains(NeonGlowNameKeywords[i]))
+                    {
+                        isNeon = true;
+                        break;
+                    }
+                }
+                if (!isNeon) continue;
+
+                Bounds bounds = renderer.bounds;
+                float size = Mathf.Max(bounds.size.x, bounds.size.y);
+                if (size < NeonGlowMinSize) continue;
+
+                // 取主体颜色：sprite 直读 color，Mesh 走材质色
+                Color baseColor = Color.white;
+                SpriteRenderer sprite = renderer as SpriteRenderer;
+                if (sprite != null)
+                {
+                    baseColor = sprite.color;
+                }
+                else
+                {
+                    MeshRenderer mesh = renderer as MeshRenderer;
+                    if (mesh != null)
+                    {
+                        baseColor = ReadMaterialColor(mesh.sharedMaterial, Color.white);
+                    }
+                }
+
+                // 灰白招牌不发光（整图复检：低饱和光晕叠出"洗白"光斑，无灯光语义）
+                float maxC = Mathf.Max(baseColor.r, Mathf.Max(baseColor.g, baseColor.b));
+                float minC = Mathf.Min(baseColor.r, Mathf.Min(baseColor.g, baseColor.b));
+                if (maxC - minC < 0.22f) continue;
+
+                // 光晕世界直挂（不挂子物体）：父级变换（横条 y=0.12 缩放/屋顶 z=0.86/旋转）
+                // 会让反补偿与排序全面失控（实测出 28 倍竖拉长条）。z 跟本体−0.02（下限 −0.05
+                // 防钻地板）——不设上限：additive 是加色混合，玩家走进光里=被灯照亮（特性），
+                // 钳到 0.25 会被建筑立面(z 0.5-1.2)盖住（整图复检"只剩色点"的根因）。
+                float glowWX = Mathf.Clamp(bounds.size.x * 3.2f + 0.6f, 0.8f, 4.5f);
+                float glowWY = Mathf.Clamp(bounds.size.y * 3.2f + 0.6f, 0.8f, 3.4f);
+                float poolWX = Mathf.Clamp(bounds.size.x * 4.2f + 0.8f, 1.0f, 5.6f);
+                float poolWY = Mathf.Clamp(bounds.size.y * 4.2f + 0.8f, 0.9f, 4.2f);
+                Vector3 center = bounds.center;
+                float glowZ = Mathf.Max(center.z - 0.02f, -0.05f);
+                float poolZ = glowZ - 0.01f;
+
+                CreateWorldAnchoredGlow(
+                    objectName + " Glow (6f)",
+                    new Vector3(center.x, center.y, glowZ),
+                    new Vector2(glowWX, glowWY),
+                    new Color(baseColor.r, baseColor.g, baseColor.b, 0.45f),
+                    glowMaterial);
+
+                // 地面光池：更大更淡的同色椭圆，模拟灯光照地
+                CreateWorldAnchoredGlow(
+                    objectName + " Light Pool (6f)",
+                    new Vector3(center.x, center.y, poolZ),
+                    new Vector2(poolWX, poolWY),
+                    new Color(baseColor.r, baseColor.g, baseColor.b, 0.10f),
+                    glowMaterial);
+
+                _neonGlowElementCount++;
+            }
+
+            CreateCorridorLampGlows(glowMaterial);
+        }
+
+        /// <summary>走廊路灯光池颜色：统一暖白（与房间彩色霓虹区分，不打架）。整图复检偏弱 → v4 提亮加大。</summary>
+        private static readonly Color CorridorLampGlowColor = new Color(1f, 0.82f, 0.55f, 0.22f);
+
+        /// <summary>
+        /// 世界坐标直挂光晕精灵（不走 ScaleMapPosition——bounds.center 已是缩放后的世界坐标，
+        /// 二次缩放会错位；同 CreateAbilityFeedbackVisual 的直挂语义）。sorting 按 z（调用方已钳制）。
+        /// </summary>
+        private GameObject CreateWorldAnchoredGlow(string glowName, Vector3 worldCenter, Vector2 worldSize, Color color, Material glowMaterial)
+        {
+            GameObject glow = new GameObject(glowName);
+            glow.transform.SetParent(_worldRoot.transform, false);
+            glow.transform.position = worldCenter;
+            glow.transform.localScale = new Vector3(worldSize.x, worldSize.y, 1f);
+            SpriteRenderer glowRenderer = glow.AddComponent<SpriteRenderer>();
+            glowRenderer.sprite = _softCircleSprite;
+            glowRenderer.color = color;
+            glowRenderer.sharedMaterial = glowMaterial;
+            glowRenderer.sortingOrder = SortingOrderForZ(worldCenter.z);
+            return glow;
+        }
+
+        /// <summary>路灯间距：走廊洗长度按此均分。</summary>
+        private const float CorridorLampSpacing = 2.6f;
+
+        /// <summary>
+        /// 批次 6f v3：主走廊路灯光池——整图复检"房间亮、走廊成黑洞"，
+        /// 沿 2c 的 8 处走廊暖白洗坐标按固定间距补规律暖光点。
+        /// 纯算术确定性；z=-0.12 排走廊洗(-0.15)前、导向线(-0.07)后。
+        /// </summary>
+        private void CreateCorridorLampGlows(Material glowMaterial)
+        {
+            (Vector3 center, Vector2 size)[] corridors =
+            {
+                (new Vector3(0f, -0.08f, -0.12f), new Vector2(2.35f, 1.6f)),      // 会议中心圆舱
+                (new Vector3(-3.85f, 0.08f, -0.12f), new Vector2(6.9f, 1.15f)),   // 西中段弯廊
+                (new Vector3(4.15f, -0.15f, -0.12f), new Vector2(7.3f, 1.15f)),   // 东中段弯廊
+                (new Vector3(0.18f, -3.16f, -0.12f), new Vector2(1.25f, 4.8f)),   // 中心南向短舱
+                (new Vector3(-3.82f, 2.38f, -0.12f), new Vector2(4.55f, 0.72f)),  // 西上斜向连接舱
+                (new Vector3(2.7f, 2.4f, -0.12f), new Vector2(4.45f, 0.72f)),     // 东上斜向连接舱
+                (new Vector3(-3.6f, -2.1f, -0.12f), new Vector2(4.7f, 0.72f)),    // 西下斜向连接舱
+                (new Vector3(3.1f, -2.02f, -0.12f), new Vector2(4.5f, 0.72f)),    // 东下斜向连接舱
+            };
+
+            int lampIndex = 0;
+            foreach ((Vector3 center, Vector2 size) corridor in corridors)
+            {
+                bool horizontal = corridor.size.x >= corridor.size.y;
+                float length = horizontal ? corridor.size.x : corridor.size.y;
+                int lampCount = Mathf.Max(2, Mathf.RoundToInt(length / CorridorLampSpacing));
+                for (int i = 0; i < lampCount; i++)
+                {
+                    float t = lampCount == 1 ? 0.5f : (float)i / (lampCount - 1);
+                    Vector3 position = horizontal
+                        ? new Vector3(
+                            corridor.center.x - corridor.size.x * 0.5f + corridor.size.x * t,
+                            corridor.center.y,
+                            -0.12f)
+                        : new Vector3(
+                            corridor.center.x,
+                            corridor.center.y - corridor.size.y * 0.5f + corridor.size.y * t,
+                            -0.12f);
+
+                    GameObject lamp = CreateShapeProp(
+                        "走廊路灯池 " + lampIndex,
+                        _softCircleSprite,
+                        position,
+                        new Vector3(2.1f, 1.6f, 0.05f),
+                        CorridorLampGlowColor);
+                    SpriteRenderer lampRenderer = lamp.GetComponent<SpriteRenderer>();
+                    if (lampRenderer != null)
+                    {
+                        lampRenderer.sharedMaterial = glowMaterial;
+                    }
+                    lampIndex++;
+                }
+            }
+        }
 
         private void ApplyDecorationNoiseMutePass()
         {

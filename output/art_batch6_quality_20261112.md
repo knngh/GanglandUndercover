@@ -45,12 +45,25 @@
 - 同款处理移植：黑色 75% Outline / (1,-1)，一处覆盖全部在线 HUD 文字；
   UIStyle.StylizeText 只换字体不动 Outline 组件，安全
 
+### 6f 霓虹光晕（假 bloom，第二个 shader）——三层真 bug 的挖掘战
+- 普查发现：`CreateNeonLight` 建的 Unity 点光源对 sprite **零效果**（Sprites/Default 是 unlit），
+  且其调用全部在死代码路径——"灯牌无光感"的根源
+- 最终形态：`Gangland/AdditiveSoftGlow.shader`（Resources 加载防发布丢失，顶点色透传）+
+  `ApplyNeonGlowPass`（**降噪前跑**，豁免 token 防光晕被压色）：按名关键词（霓虹/灯牌/招牌/灯字）
+  世界直挂 additive 光晕 + 同色地面光池 + 8 处主走廊规律路灯池（暖白 α0.22）
+- **三层 bug 依次挖出**（每层都被 AI 视觉复检+像素探针钉死）：
+  1. **死色**：光晕在降噪 pass 后跑，读到的是被 2b mute 压扁的色（s×0.3/v×0.62）→ 修=pass 前移+豁免 token
+  2. **变换继承**：挂子物体继承父级杂乱 scale（横条 y=0.12 → 反补偿 28 倍竖拉长条=视觉灾难）→ 修=世界坐标直挂（CreateAbilityFeedbackVisual 模式，绕 ScaleMapPosition）
+  3. **排序遮挡**：z 钳 0.25 → 屋顶招牌光晕被建筑立面(z 0.5-1.2)盖住，整图"只剩色点"→ 修=去上限（additive 加色，玩家进光=被照亮是特性）
+- 诊断方法论沉淀：**状态 dump 工具**（position/scale/order/color/mat 全打印）+ **像素探针**（单 sprite 渲染读回中心像素，additive 0.051→0.553 精确符合理论值）——视觉模型说"没画"时先跑探针再改代码
+- 视觉终审：北侧招牌光晕成立（粉红/青蓝/金色）/路灯池明暗节奏自然/夜景分层到位/零故障 → **定稿 ✅**
+
 ## 门禁与证据（2026-11-12 实测）
 
 **门禁**：
-- EditMode **264/264**（254 基线 + 新增 ScreenGradeAndPixelCrispTests 10 例）× 多轮
-- PlayMode **24 / 0 failed / 15 skipped**（与 10-26 基线一致）
-- XML: `ci-logs/batch6_*_editmode.xml` / `batch6_*_playmode.xml`
+- EditMode **266/266**（254 基线 + 批次 6 新增 12 例：吸附 6 + 阴影 1 + 调色 3 + 光晕 2）
+- PlayMode **24 / 0 failed / 15 skipped**（与 10-26 基线一致；6f 未触网/未触玩法层，EditMode 覆盖）
+- XML: `ci-logs/batch6*_*_editmode.xml` / `batch6_20261112_1304_playmode.xml`
 
 **signalstats 量化（before → after，1920×1080）**：
 | 图 | YLOW(5%) | YAVG | YHIGH(95%) | YMAX |
