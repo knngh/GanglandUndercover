@@ -866,6 +866,19 @@ namespace GanglandUndercover.Online
             CreateTiledFloor(name, position, size, tint, FloorTileSprite, 1.0f);
         }
 
+        /// <summary>
+        /// 批次 6e：把 tile 步长吸附到"每 texel 整数个屏幕像素"档（1080p 基准 192 像素/单位）。
+        /// step = texels × k / 192（k=每 texel 屏幕像素数，四舍五入取整）。
+        /// 例：16px tile 目标 0.64 → k=8 → 0.667（每 texel 整 8 像素）。
+        /// </summary>
+        private static float SnapStepToIntegerTexelGrid(float stepWorld, float texelsWide)
+        {
+            const float screenPixelsPerUnit = 192f; // 与 OnlineCameraRig.SnapOrthoSizeToTexelGrid 的 1080p 档一致
+            if (stepWorld <= 0f || texelsWide <= 0f) return stepWorld;
+            int k = Mathf.Max(1, Mathf.RoundToInt(stepWorld * screenPixelsPerUnit / texelsWide));
+            return texelsWide * k / screenPixelsPerUnit;
+        }
+
         /// <summary>指定 tile sprite 的平铺变体（房间地砖换皮用），布局与默认版完全一致。</summary>
         public void CreateTiledFloor(string name, Vector3 position, Vector2 size, Color tint, Sprite tile, float tileWorldSize)
         {
@@ -873,8 +886,13 @@ namespace GanglandUndercover.Online
             if (tileWorldSize <= 0f) tileWorldSize = 1.0f;
             int cols = Mathf.Max(1, Mathf.CeilToInt(size.x / tileWorldSize));
             int rows = Mathf.Max(1, Mathf.CeilToInt(size.y / tileWorldSize));
-            float stepX = size.x / cols;
-            float stepY = size.y / rows;
+            // 批次 6e 第一刀：step 吸附到整数 texel/像素档（普查 2026-11-16：地板层占视觉
+            // 面积 82.8%，均分 step=0.6/0.64 一类任意值 → 每 texel 非整数屏幕像素 → 糊/闪）。
+            // 吸附后每 texel 占整数个屏幕像素；铺量区域边缘可能 ±半 tile 内偏移（纯视觉层，
+            // z 最低，无碰撞无玩法语义——与 2a 换砖同一性质）。
+            float texelsWide = tile != null && tile.rect.width > 0f ? tile.rect.width : 16f;
+            float stepX = SnapStepToIntegerTexelGrid(size.x / cols, texelsWide);
+            float stepY = SnapStepToIntegerTexelGrid(size.y / rows, texelsWide);
             Vector3 start = position - new Vector3(size.x * 0.5f, size.y * 0.5f, 0f) + new Vector3(stepX * 0.5f, stepY * 0.5f, 0f);
 
             for (int row = 0; row < rows; row++)
